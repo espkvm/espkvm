@@ -113,9 +113,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" out/* \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          # Idempotent, so re-running a tag's workflow does not fail on a
+          # release that already exists: create it if it is new, otherwise
+          # replace its files in place.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" out/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" out/* \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
 
   pages:
     needs: build

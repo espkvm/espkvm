@@ -31,6 +31,8 @@ export function useInput(opts: InputOptions) {
   const connection = ref<ConnectionState>("connecting");
   const held = new Set<number>();
   const lastPos = { x: 0, y: 0 };
+  /* Mouse buttons currently pressed on the target, so a lost up can be undone. */
+  let buttonsHeld = 0;
 
   const control = new Control({
     onTarget: (t) => (target.value = t),
@@ -43,6 +45,7 @@ export function useInput(opts: InputOptions) {
   watchEffect(() => {
     if (opts.engaged.value) return;
     held.clear();
+    buttonsHeld = 0;
     control.releaseAll();
   });
 
@@ -97,11 +100,30 @@ export function useInput(opts: InputOptions) {
       }
     };
 
+    /*
+     * A button-down only goes out while engaged, but a button-up must go out
+     * whenever one is outstanding - even after control has been handed back,
+     * even if the up lands outside the pane. Losing an up leaves the button
+     * pressed on the target, which is the machine the operator is sitting at.
+     */
     const onButton = (e: PointerEvent) => {
-      if (!opts.engaged.value) return;
+      const b = buttonsOf(e);
+      if (!opts.engaged.value && !(buttonsHeld && b === 0)) return;
+      buttonsHeld = b;
       const p = mapToTarget(e) ?? lastPos;
       e.preventDefault();
-      control.mouseAbsolute(buttonsOf(e), p.x, p.y);
+      control.mouseAbsolute(b, p.x, p.y);
+    };
+
+    /*
+     * pointercancel fires instead of pointerup when the OS takes the pointer -
+     * a gesture, a window drag, the compositor grabbing it. There is no up to
+     * follow, so a button left down here stays down on the target.
+     */
+    const onCancel = () => {
+      if (!buttonsHeld) return;
+      buttonsHeld = 0;
+      control.mouseAbsolute(0, lastPos.x, lastPos.y);
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -115,12 +137,20 @@ export function useInput(opts: InputOptions) {
 
     const onContext = (e: Event) => e.preventDefault();
 
+    /* A tab that is hidden mid-drag - switched away, minimised - may never see
+       the up. Treat losing visibility as losing the pointer. */
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") onCancel();
+    };
+
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerdown", onButton);
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("contextmenu", onContext);
     /* Release can land outside the pane after a drag. */
     document.addEventListener("pointerup", onButton);
+    document.addEventListener("pointercancel", onCancel);
+    document.addEventListener("visibilitychange", onHidden);
 
     onCleanup(() => {
       el.removeEventListener("pointermove", onMove);
@@ -128,6 +158,8 @@ export function useInput(opts: InputOptions) {
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("contextmenu", onContext);
       document.removeEventListener("pointerup", onButton);
+      document.removeEventListener("pointercancel", onCancel);
+      document.removeEventListener("visibilitychange", onHidden);
     });
   });
 

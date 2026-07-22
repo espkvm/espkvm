@@ -12,6 +12,8 @@ The point is to reach a machine that has no working operating system - a BIOS
 screen, a boot menu, a kernel that will not come up - from a device that costs a
 fraction of a commercial KVM-over-IP.
 
+![The ESP-KVM console driving a real machine: its desktop, a right-click menu open on it, the live status bar, and the video settings panel.](docs/console.webp)
+
 > **Built on [jrowny/p4kvm](https://github.com/jrowny/p4kvm).** The hard part -
 > bringing up the TC358743 and getting frames out of the ESP32-P4's CSI
 > receiver - was solved there first, and this project would not exist without

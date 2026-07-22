@@ -470,11 +470,26 @@ static void ws_take_session(httpd_req_t *req)
     if (xSemaphoreTake(s_ws_mu, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return;
     }
+    bool evicted_other = false;
     if (s_ws_fd >= 0 && s_ws_fd != fd) {
         httpd_sess_trigger_close(req->handle, s_ws_fd);
+        evicted_other = true;
     }
     s_ws_fd = fd;
     xSemaphoreGive(s_ws_mu);
+
+    /*
+     * Whoever we just evicted can no longer lift what it was holding, and its
+     * own close callback will not do it either: s_ws_fd already points at us,
+     * so that callback no longer recognises the old socket as the control
+     * session. A control channel that drops mid-drag - a reconnect, a network
+     * blip - would otherwise leave a button pressed on the target, which is
+     * the machine the operator is sitting at. Lift everything on takeover; the
+     * new client re-asserts its real state on the next move.
+     */
+    if (evicted_other) {
+        usb_hid_release_all();
+    }
 }
 
 static esp_err_t ws_input_handler(httpd_req_t *req)
