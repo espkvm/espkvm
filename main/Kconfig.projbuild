@@ -1,0 +1,159 @@
+menu "ESP-KVM"
+
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    menu "Features"
+        comment "Disabled features cost no flash and no RAM."
+
+        config KVM_ENABLE_H264
+            bool "H.264 video encoding (hardware)"
+            default y
+            help
+                Pull in the esp_h264 component and offer H.264 as a stream codec.
+                Availability is probed at boot (chip revision, encoder open) and
+                falls back to MJPEG when the hardware encoder cannot be used.
+
+        config KVM_ENABLE_MSC
+            bool "Virtual media (USB mass storage from microSD)"
+            default y
+            help
+                Expose a disk image stored on the microSD card to the target
+                machine as a USB CD-ROM or removable drive. Adds TinyUSB MSC and
+                SDMMC/FATFS to the image.
+
+        config KVM_ENABLE_ATX
+            bool "ATX power control (GPIO)"
+            default y
+            help
+                Drive the target's power and reset headers through optocouplers
+                and read its power/HDD LEDs.
+
+        config KVM_ENABLE_AUDIO
+            bool "HDMI audio capture (I2S)"
+            default n
+            help
+                Capture the I2S audio the TC358743 extracts from HDMI and stream
+                it to the browser. Requires BCLK/LRCK/DATA wired from the capture
+                board to the ESP32-P4.
+
+        config KVM_ENABLE_HTTPS
+            bool "HTTPS and authentication"
+            default y
+            help
+                Serve the web interface over TLS with a self-signed certificate
+                generated on first boot, and require a login. Disable only for a
+                trusted network or when the device sits behind a VPN.
+    endmenu
+
+    menu "Video capture"
+        config KVM_TC358743_RST_GPIO
+            int "TC358743 RESETN GPIO (active low; -1 if unused)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default 23
+
+        config KVM_JPEG_QUALITY
+            int "Default JPEG quality 1-100"
+            range 1 100
+            default 70
+
+        config KVM_TC358743_ADV_DEBUG
+            bool "Advanced TC358743 debugging (verbose stall / bridge logs + extra I2C reads)"
+            default n
+            help
+                When enabled, CSI frame timeouts log extra TC358743 register state, AVI
+                infoframe dumps, and periodic bridge status. Adds I2C traffic on error paths.
+                Boot-time SYS_STATUS lines from init are unchanged.
+    endmenu
+
+    menu "Network"
+        config KVM_ETH_ENABLE
+            bool "Enable Ethernet (DHCP)"
+            default y
+            depends on SOC_EMAC_SUPPORTED
+
+        config KVM_MDNS_HOSTNAME
+            string "mDNS hostname (device is <name>.local)"
+            default "espkvm"
+            depends on KVM_ETH_ENABLE
+            help
+                DNS label only: letters, digits, hyphen. Advertised over mDNS and
+                sent as the DHCP client hostname when supported.
+
+        config KVM_ETH_RMII_CLK_GPIO
+            int "RMII REFCLK GPIO (external input)"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 50 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_RMII_TX_EN_GPIO
+            int "RMII TX_EN"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
+            default 49 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_RMII_TXD0_GPIO
+            int "RMII TXD0"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
+            default 34 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_RMII_TXD1_GPIO
+            int "RMII TXD1"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
+            default 35 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_RMII_CRS_DV_GPIO
+            int "RMII CRS_DV"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 28 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_RMII_RXD0_GPIO
+            int "RMII RXD0"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 29 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_RMII_RXD1_GPIO
+            int "RMII RXD1"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+            default 30 if IDF_TARGET_ESP32P4
+            default 0
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_MDC_GPIO
+            int "SMI MDC"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
+            default 31 if IDF_TARGET_ESP32P4
+            default 23
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_MDIO_GPIO
+            int "SMI MDIO"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
+            default 52 if IDF_TARGET_ESP32P4
+            default 18
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_PHY_ADDR
+            int "PHY address (-1 auto)"
+            range -1 31
+            default 1
+            depends on KVM_ETH_ENABLE
+
+        config KVM_ETH_PHY_RST_GPIO
+            int "PHY reset GPIO (-1 none)"
+            range -1 ENV_GPIO_OUT_RANGE_MAX
+            default 51 if IDF_TARGET_ESP32P4
+            default 5
+            depends on KVM_ETH_ENABLE
+    endmenu
+
+endmenu

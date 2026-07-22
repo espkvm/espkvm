@@ -1,0 +1,22 @@
+{
+  "name": "espkvm-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && gzip -9nc dist/index.html > ../components/kvm_web/assets/index.html.gz && cp public/favicon.ico ../components/kvm_web/assets/favicon.ico",
+    "preview": "vite preview",
+    "dev:mock": "vite --mode mock",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.11",
+    "vite-plugin-singlefile": "^2.3.0",
+    "vue": "^3.5.40",
+    "vue-tsc": "^3.3.7",
+    "ws": "^8.21.1"
+  }
+}

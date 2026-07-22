@@ -1,0 +1,515 @@
+/*
+ * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include "usb_hid.h"
+
+#include <string.h>
+
+#include "class/hid/hid.h"
+#include "class/hid/hid_device.h"
+#include "driver/gpio.h"
+#include "esp_check.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "sdkconfig.h"
+#include "tinyusb.h"
+#include "tinyusb_default_config.h"
+
+#include "kvm_caps.h"
+
+static const char *TAG = "usb_hid";
+
+/* ---- HID interfaces ----------------------------------------------------- */
+
+enum {
+    ITF_KEYBOARD = 0,
+    ITF_POINTER = 1,
+    ITF_COUNT,
+};
+
+/** Report IDs on the pointer interface. The keyboard interface uses none. */
+enum {
+    RID_ABS_MOUSE = 1,
+    RID_REL_MOUSE = 2,
+    RID_CONSUMER = 3,
+};
+
+#if CFG_TUD_HID < 2
+#error "Set CONFIG_TINYUSB_HID_COUNT to 2: keyboard and pointer are separate interfaces."
+#endif
+
+/*
+ * Boot-protocol keyboard: no report ID, 8-byte input, 1-byte LED output.
+ * A legacy BIOS will not talk to anything else.
+ */
+static const uint8_t s_kbd_report_desc[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD(),
+};
+
+/*
+ * Absolute pointer. Logical range 0..32767 on both axes with a matching
+ * physical range, which is what makes the host place the cursor at exactly the
+ * reported position instead of applying its own acceleration curve.
+ */
+#define REPORT_DESC_ABS_MOUSE(...)                                                                  \
+    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP), HID_USAGE(HID_USAGE_DESKTOP_MOUSE),                     \
+        HID_COLLECTION(HID_COLLECTION_APPLICATION), __VA_ARGS__ HID_USAGE(HID_USAGE_DESKTOP_POINTER),\
+        HID_COLLECTION(HID_COLLECTION_PHYSICAL),                                                    \
+        HID_USAGE_PAGE(HID_USAGE_PAGE_BUTTON), HID_USAGE_MIN(1), HID_USAGE_MAX(5),                  \
+        HID_LOGICAL_MIN(0), HID_LOGICAL_MAX(1), HID_REPORT_COUNT(5), HID_REPORT_SIZE(1),            \
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), HID_REPORT_COUNT(1), HID_REPORT_SIZE(3), \
+        HID_INPUT(HID_CONSTANT), HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),                            \
+        HID_USAGE(HID_USAGE_DESKTOP_X), HID_USAGE(HID_USAGE_DESKTOP_Y), HID_LOGICAL_MIN_N(0, 2),    \
+        HID_LOGICAL_MAX_N(0x7fff, 2), HID_PHYSICAL_MIN_N(0, 2), HID_PHYSICAL_MAX_N(0x7fff, 2),      \
+        HID_REPORT_SIZE(16), HID_REPORT_COUNT(2),                                                   \
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), HID_USAGE(HID_USAGE_DESKTOP_WHEEL),      \
+        HID_LOGICAL_MIN(0x81), HID_LOGICAL_MAX(0x7f), HID_REPORT_SIZE(8), HID_REPORT_COUNT(1),      \
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_RELATIVE), HID_USAGE_PAGE(HID_USAGE_PAGE_CONSUMER), \
+        HID_USAGE_N(HID_USAGE_CONSUMER_AC_PAN, 2), HID_LOGICAL_MIN(0x81), HID_LOGICAL_MAX(0x7f),    \
+        HID_REPORT_SIZE(8), HID_REPORT_COUNT(1), HID_INPUT(HID_DATA | HID_VARIABLE | HID_RELATIVE), \
+        HID_COLLECTION_END, HID_COLLECTION_END
+
+/*
+ * Relative pointer with 16-bit deltas. The usual 8-bit form caps one report at
+ * 127 mickeys, so a fast drag has to be split across many USB frames.
+ */
+#define REPORT_DESC_REL_MOUSE(...)                                                                  \
+    HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP), HID_USAGE(HID_USAGE_DESKTOP_MOUSE),                     \
+        HID_COLLECTION(HID_COLLECTION_APPLICATION), __VA_ARGS__ HID_USAGE(HID_USAGE_DESKTOP_POINTER),\
+        HID_COLLECTION(HID_COLLECTION_PHYSICAL),                                                    \
+        HID_USAGE_PAGE(HID_USAGE_PAGE_BUTTON), HID_USAGE_MIN(1), HID_USAGE_MAX(5),                  \
+        HID_LOGICAL_MIN(0), HID_LOGICAL_MAX(1), HID_REPORT_COUNT(5), HID_REPORT_SIZE(1),            \
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), HID_REPORT_COUNT(1), HID_REPORT_SIZE(3), \
+        HID_INPUT(HID_CONSTANT), HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),                            \
+        HID_USAGE(HID_USAGE_DESKTOP_X), HID_USAGE(HID_USAGE_DESKTOP_Y),                             \
+        HID_LOGICAL_MIN_N(-32768, 2), HID_LOGICAL_MAX_N(32767, 2), HID_REPORT_SIZE(16),             \
+        HID_REPORT_COUNT(2), HID_INPUT(HID_DATA | HID_VARIABLE | HID_RELATIVE),                     \
+        HID_USAGE(HID_USAGE_DESKTOP_WHEEL), HID_LOGICAL_MIN(0x81), HID_LOGICAL_MAX(0x7f),           \
+        HID_REPORT_SIZE(8), HID_REPORT_COUNT(1), HID_INPUT(HID_DATA | HID_VARIABLE | HID_RELATIVE), \
+        HID_USAGE_PAGE(HID_USAGE_PAGE_CONSUMER), HID_USAGE_N(HID_USAGE_CONSUMER_AC_PAN, 2),         \
+        HID_LOGICAL_MIN(0x81), HID_LOGICAL_MAX(0x7f), HID_REPORT_SIZE(8), HID_REPORT_COUNT(1),      \
+        HID_INPUT(HID_DATA | HID_VARIABLE | HID_RELATIVE), HID_COLLECTION_END, HID_COLLECTION_END
+
+static const uint8_t s_pointer_report_desc[] = {
+    REPORT_DESC_ABS_MOUSE(HID_REPORT_ID(RID_ABS_MOUSE)),
+    REPORT_DESC_REL_MOUSE(HID_REPORT_ID(RID_REL_MOUSE)),
+    TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(RID_CONSUMER)),
+};
+
+typedef struct __attribute__((packed)) {
+    uint8_t buttons;
+    uint16_t x;
+    uint16_t y;
+    int8_t wheel;
+    int8_t pan;
+} abs_mouse_report_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t buttons;
+    int16_t dx;
+    int16_t dy;
+    int8_t wheel;
+    int8_t pan;
+} rel_mouse_report_t;
+
+static const char *s_string_descriptor[] = {
+    (char[]){0x09, 0x04},
+    "ESP-KVM",
+    "ESP-KVM Keyboard/Mouse",
+    "0",
+    "Keyboard",
+    "Pointer",
+};
+
+#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + ITF_COUNT * TUD_HID_DESC_LEN)
+
+static const uint8_t s_configuration_descriptor[] = {
+    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP,
+                          100),
+    /* interface, string index, protocol, report descriptor length, endpoint, size, interval */
+    TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81,
+                       CFG_TUD_HID_EP_BUFSIZE, 10),
+    TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,
+                       CFG_TUD_HID_EP_BUFSIZE, 10),
+};
+
+/* ---- report queue ------------------------------------------------------- */
+
+typedef enum {
+    Q_MOUSE_ABS,
+    Q_MOUSE_REL,
+    Q_KEY,
+    Q_CONSUMER,
+    Q_RELEASE_ALL,
+} q_type_t;
+
+typedef struct {
+    q_type_t type;
+    union {
+        abs_mouse_report_t abs;
+        struct {
+            uint8_t buttons;
+            int32_t dx;
+            int32_t dy;
+            int8_t wheel;
+            int8_t pan;
+        } rel;
+        struct {
+            uint8_t modifier;
+            uint8_t keycode[6];
+        } key;
+        uint16_t consumer;
+    } u;
+} q_msg_t;
+
+static QueueHandle_t s_hid_q;
+static TaskHandle_t s_hid_task;
+static volatile bool s_usb_mounted;
+/* Last absolute position sent, so buttons can be released without moving the
+ * target's cursor somewhere it never was. */
+static uint16_t s_last_abs_x;
+static uint16_t s_last_abs_y;
+static volatile uint8_t s_leds;
+static usb_hid_led_cb_t s_led_cb;
+static void *s_led_cb_user;
+
+/* ---- TinyUSB callbacks -------------------------------------------------- */
+
+uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
+{
+    return (instance == ITF_KEYBOARD) ? s_kbd_report_desc : s_pointer_report_desc;
+}
+
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
+                               uint8_t *buffer, uint16_t reqlen)
+{
+    (void)instance;
+    (void)report_id;
+    (void)report_type;
+    (void)buffer;
+    (void)reqlen;
+    return 0;
+}
+
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
+                           uint8_t const *buffer, uint16_t bufsize)
+{
+    (void)report_id;
+    /* The only output report we expect is the keyboard LED bitmap. Reflecting it
+     * to the browser is the only way an operator can tell whether Caps Lock is
+     * on: the target's own indicator is not visible remotely. */
+    if (instance != ITF_KEYBOARD || report_type != HID_REPORT_TYPE_OUTPUT || bufsize < 1) {
+        return;
+    }
+    const uint8_t leds = buffer[0];
+    if (leds == s_leds) {
+        return;
+    }
+    s_leds = leds;
+    if (s_led_cb) {
+        s_led_cb(leds, s_led_cb_user);
+    }
+}
+
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_t len)
+{
+    (void)instance;
+    (void)report;
+    (void)len;
+    if (s_hid_task) {
+        xTaskNotifyGive(s_hid_task);
+    }
+}
+
+static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
+{
+    (void)arg;
+    if (!event) {
+        return;
+    }
+    switch (event->id) {
+    case TINYUSB_EVENT_ATTACHED:
+        s_usb_mounted = true;
+        ESP_LOGI(TAG, "target attached");
+        break;
+    case TINYUSB_EVENT_DETACHED:
+        s_usb_mounted = false;
+        s_leds = 0;
+        ESP_LOGI(TAG, "target detached");
+        break;
+    default:
+        break;
+    }
+}
+
+/* ---- report emission ---------------------------------------------------- */
+
+/** Wait for the previous report to leave the endpoint. */
+static bool wait_report_sent(void)
+{
+    return ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(80)) > 0;
+}
+
+static void send_abs(const abs_mouse_report_t *r)
+{
+    s_last_abs_x = r->x;
+    s_last_abs_y = r->y;
+    if (tud_hid_n_report(ITF_POINTER, RID_ABS_MOUSE, r, sizeof(*r))) {
+        (void)wait_report_sent();
+    }
+}
+
+static void send_rel(uint8_t buttons, int32_t dx, int32_t dy, int8_t wheel, int8_t pan)
+{
+    if (dx > INT16_MAX) {
+        dx = INT16_MAX;
+    } else if (dx < INT16_MIN) {
+        dx = INT16_MIN;
+    }
+    if (dy > INT16_MAX) {
+        dy = INT16_MAX;
+    } else if (dy < INT16_MIN) {
+        dy = INT16_MIN;
+    }
+    rel_mouse_report_t r = {
+        .buttons = buttons,
+        .dx = (int16_t)dx,
+        .dy = (int16_t)dy,
+        .wheel = wheel,
+        .pan = pan,
+    };
+    if (tud_hid_n_report(ITF_POINTER, RID_REL_MOUSE, &r, sizeof(r))) {
+        (void)wait_report_sent();
+    }
+}
+
+static void send_keyboard(uint8_t modifier, const uint8_t keycode[6])
+{
+    if (tud_hid_n_keyboard_report(ITF_KEYBOARD, 0, modifier, (uint8_t *)keycode)) {
+        (void)wait_report_sent();
+    }
+}
+
+static void send_consumer(uint16_t usage)
+{
+    if (tud_hid_n_report(ITF_POINTER, RID_CONSUMER, &usage, sizeof(usage))) {
+        (void)wait_report_sent();
+    }
+}
+
+static void send_release_all(void)
+{
+    const uint8_t none[6] = {0};
+    send_keyboard(0, none);
+    send_consumer(0);
+    send_rel(0, 0, 0, 0, 0);
+    /*
+     * The absolute pointer needs its own release. Clearing only the relative
+     * one leaves a button the host believes is still down on the other report,
+     * and the symptom is a target whose pointer moves but never clicks -
+     * everything reads as one endless drag. Re-send the last position so the
+     * release does not also teleport the cursor.
+     */
+    const abs_mouse_report_t idle = {
+        .buttons = 0,
+        .x = s_last_abs_x,
+        .y = s_last_abs_y,
+        .wheel = 0,
+        .pan = 0,
+    };
+    send_abs(&idle);
+}
+
+/**
+ * Fold a newer message into a pending one of the same kind.
+ * @return false when the kinds differ and the pending message must go out first.
+ */
+static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
+{
+    if (acc->type != add->type) {
+        return false;
+    }
+    if (acc->type == Q_MOUSE_ABS) {
+        /* Only the newest position matters - intermediate ones are not motion
+         * the target needs to see. Scroll clicks still accumulate. */
+        const int wheel = (int)acc->u.abs.wheel + (int)add->u.abs.wheel;
+        const int pan = (int)acc->u.abs.pan + (int)add->u.abs.pan;
+        acc->u.abs = add->u.abs;
+        acc->u.abs.wheel = (int8_t)(wheel > 127 ? 127 : (wheel < -127 ? -127 : wheel));
+        acc->u.abs.pan = (int8_t)(pan > 127 ? 127 : (pan < -127 ? -127 : pan));
+        return true;
+    }
+    acc->u.rel.buttons = add->u.rel.buttons;
+    acc->u.rel.dx += add->u.rel.dx;
+    acc->u.rel.dy += add->u.rel.dy;
+    const int wheel = (int)acc->u.rel.wheel + (int)add->u.rel.wheel;
+    const int pan = (int)acc->u.rel.pan + (int)add->u.rel.pan;
+    acc->u.rel.wheel = (int8_t)(wheel > 127 ? 127 : (wheel < -127 ? -127 : wheel));
+    acc->u.rel.pan = (int8_t)(pan > 127 ? 127 : (pan < -127 ? -127 : pan));
+    return true;
+}
+
+static void dispatch(const q_msg_t *m)
+{
+    switch (m->type) {
+    case Q_MOUSE_ABS:
+        send_abs(&m->u.abs);
+        break;
+    case Q_MOUSE_REL:
+        send_rel(m->u.rel.buttons, m->u.rel.dx, m->u.rel.dy, m->u.rel.wheel, m->u.rel.pan);
+        break;
+    case Q_KEY:
+        send_keyboard(m->u.key.modifier, m->u.key.keycode);
+        break;
+    case Q_CONSUMER:
+        send_consumer(m->u.consumer);
+        break;
+    case Q_RELEASE_ALL:
+        send_release_all();
+        break;
+    }
+}
+
+static void hid_worker(void *arg)
+{
+    (void)arg;
+    q_msg_t msg;
+    for (;;) {
+        if (xQueueReceive(s_hid_q, &msg, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        if (!tud_mounted()) {
+            continue;
+        }
+        if (msg.type != Q_MOUSE_ABS && msg.type != Q_MOUSE_REL) {
+            dispatch(&msg);
+            continue;
+        }
+
+        /* Coalesce the motion that piled up while the previous report was in
+         * flight: replaying every queued position would lag behind the operator. */
+        q_msg_t acc = msg;
+        for (;;) {
+            q_msg_t next;
+            if (xQueuePeek(s_hid_q, &next, 0) != pdTRUE) {
+                break;
+            }
+            if (!merge_mouse(&acc, &next)) {
+                break;
+            }
+            (void)xQueueReceive(s_hid_q, &next, 0);
+        }
+        dispatch(&acc);
+    }
+}
+
+/* ---- public API --------------------------------------------------------- */
+
+bool usb_hid_ready(void)
+{
+    return s_usb_mounted && tud_mounted();
+}
+
+uint8_t usb_hid_leds(void)
+{
+    return s_leds;
+}
+
+void usb_hid_set_led_callback(usb_hid_led_cb_t cb, void *user)
+{
+    s_led_cb_user = user;
+    s_led_cb = cb;
+}
+
+static void enqueue(const q_msg_t *m)
+{
+    if (!s_hid_q) {
+        return;
+    }
+    (void)xQueueSend(s_hid_q, m, 0);
+}
+
+void usb_hid_mouse_abs(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel, int8_t pan)
+{
+    if (x > USB_HID_ABS_MAX) {
+        x = USB_HID_ABS_MAX;
+    }
+    if (y > USB_HID_ABS_MAX) {
+        y = USB_HID_ABS_MAX;
+    }
+    const q_msg_t m = {
+        .type = Q_MOUSE_ABS,
+        .u.abs = {.buttons = buttons, .x = x, .y = y, .wheel = wheel, .pan = pan},
+    };
+    enqueue(&m);
+}
+
+void usb_hid_mouse_rel(uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, int8_t pan)
+{
+    const q_msg_t m = {
+        .type = Q_MOUSE_REL,
+        .u.rel = {.buttons = buttons, .dx = dx, .dy = dy, .wheel = wheel, .pan = pan},
+    };
+    enqueue(&m);
+}
+
+void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[6])
+{
+    if (!keycode) {
+        return;
+    }
+    q_msg_t m = {.type = Q_KEY};
+    m.u.key.modifier = modifier;
+    memcpy(m.u.key.keycode, keycode, 6);
+    enqueue(&m);
+}
+
+void usb_hid_consumer(uint16_t usage)
+{
+    const q_msg_t m = {.type = Q_CONSUMER, .u.consumer = usage};
+    enqueue(&m);
+}
+
+void usb_hid_release_all(void)
+{
+    const q_msg_t m = {.type = Q_RELEASE_ALL};
+    enqueue(&m);
+}
+
+esp_err_t usb_hid_init(void)
+{
+    if (s_hid_q) {
+        return ESP_OK;
+    }
+
+    esp_err_t err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_RETURN_ON_ERROR(err, TAG, "gpio_install_isr_service");
+    }
+
+    s_hid_q = xQueueCreate(192, sizeof(q_msg_t));
+    ESP_RETURN_ON_FALSE(s_hid_q, ESP_ERR_NO_MEM, TAG, "queue");
+
+    tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(tinyusb_on_event);
+    tusb_cfg.descriptor.device = NULL;
+    tusb_cfg.descriptor.full_speed_config = s_configuration_descriptor;
+    tusb_cfg.descriptor.string = s_string_descriptor;
+    tusb_cfg.descriptor.string_count = sizeof(s_string_descriptor) / sizeof(s_string_descriptor[0]);
+#if (TUD_OPT_HIGH_SPEED)
+    tusb_cfg.descriptor.high_speed_config = s_configuration_descriptor;
+#endif
+
+    esp_err_t usb_err = tinyusb_driver_install(&tusb_cfg);
+    kvm_cap_report(KVM_CAP_HID, usb_err == ESP_OK, "USB device stack failed to start (%s)",
+                   esp_err_to_name(usb_err));
+    ESP_RETURN_ON_ERROR(usb_err, TAG, "tinyusb_driver_install");
+
+    /* Above stream/httpd work so HID reports are not delayed by MJPEG or WS parsing. */
+    BaseType_t ok = xTaskCreate(hid_worker, "usb_hid", 4096, NULL, tskIDLE_PRIORITY + 8, &s_hid_task);
+    ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "task");
+
+    return ESP_OK;
+}

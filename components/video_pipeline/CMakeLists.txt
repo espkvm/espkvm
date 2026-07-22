@@ -1,0 +1,29 @@
+idf_component_register(
+    SRCS
+        "capture.c"
+        "capture_hw.c"
+        "capture_loop.c"
+        "capture_mjpeg.c"
+        "capture_h264.c"
+        "h264_probe.c"
+        "video_frame.c"
+    INCLUDE_DIRS "include"
+    PRIV_INCLUDE_DIRS "."
+    REQUIRES
+        tc358743
+        kvm_config
+    PRIV_REQUIRES
+        kvm_board
+        espressif__esp_h264
+        esp_driver_ppa
+        esp_driver_gpio
+        esp_driver_i2c
+        esp_driver_cam
+        esp_driver_isp
+        esp_driver_jpeg
+        esp_hw_support
+        esp_psram
+        esp_mm
+        esp_timer
+        nvs_flash
+)

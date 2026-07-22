@@ -1,0 +1,26 @@
+idf_component_register(
+    SRCS
+        "http_server.c"
+        "tls_cert.c"
+        "auth.c"
+    INCLUDE_DIRS "include"
+    REQUIRES
+        esp_http_server
+        esp_https_server
+    PRIV_REQUIRES
+        video_pipeline
+        kvm_hid
+        kvm_config
+        app_update
+        esp_app_format
+        esp_timer
+        esp_driver_tsens
+        mbedtls
+        nvs_flash
+        esp_hw_support
+        kvm_board
+        esp_driver_gpio
+    EMBED_FILES
+        "assets/index.html.gz"
+        "assets/favicon.ico"
+)

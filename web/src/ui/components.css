@@ -1,0 +1,334 @@
+/* Settings, facts, toasts. */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.tab {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.tab-active {
+  background: var(--bg-active);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.section-blocked {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font-size: var(--text-sm);
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.setting-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.setting-title {
+  font-weight: 500;
+}
+
+/* Unavailable settings stay visible: hiding them leaves the operator unsure
+   whether the feature exists at all. */
+.setting-blocked .setting-title {
+  color: var(--text-faint);
+}
+
+.setting-note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+.setting-note-blocked {
+  color: var(--warn);
+}
+
+.badge {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.range-value {
+  min-width: 3.5em;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.settings-footer {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* ---- facts -------------------------------------------------------------- */
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fact dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.fact dd {
+  margin: 0;
+}
+
+/* ---- toasts ------------------------------------------------------------- */
+
+.toasts {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(var(--bar-height) + var(--space-4));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(420px, calc(100vw - var(--space-5)));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-pop);
+}
+
+.toast-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.toast-icon {
+  display: inline-flex;
+  padding-top: 2px;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.toast-error .toast-icon {
+  color: var(--danger);
+}
+
+.toast-text {
+  flex: 1;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.toast-close {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 2px;
+  flex: none;
+}
+
+.toast-close:hover {
+  color: var(--text);
+}
+
+/* Lock-key indicators: the target's own LEDs, which the operator cannot see. */
+.leds {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.led {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.led-on {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  color: var(--ok);
+}
+
+.input-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Key combinations the operator's own browser intercepts. */
+.macro-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.firmware {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+/* A file input styled as a button still has to look disabled while busy. */
+.btn-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* A figure that has reached the point where it constrains what the device can do. */
+.warn {
+  color: var(--warn);
+}
+
+/*
+ * The sign-in view. It is the whole page rather than a dialog: until the
+ * device knows who is asking, there is nothing behind it to show.
+ */
+.login {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--space-4);
+  background: var(--bg-base);
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(360px, 100%);
+  padding: var(--space-5);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.login-mark {
+  color: var(--text);
+  margin-bottom: var(--space-2);
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.firmware .field,
+.login-card .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.firmware .field input,
+.login-card input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+}
+
+.firmware .field input:focus-visible,
+.login-card input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.login-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.login-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.login-foot {
+  margin: 0;
+  font-size: var(--text-sm);
+}

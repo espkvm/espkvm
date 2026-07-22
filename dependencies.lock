@@ -1,0 +1,82 @@
+dependencies:
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.19~2
+  espressif/esp_h264:
+    component_hash: 5ccc09adefccabade1530b9dd106d07c3c96e991dc35b5516063165ef60c5646
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s3
+    - esp32s31
+    - esp32p4
+    version: 1.3.6
+  espressif/esp_tinyusb:
+    component_hash: fa0c96d7bdc3fe37383d735e2839a9007200a0b6bc039458d45d004b50146e81
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    - name: espressif/tinyusb
+      registry_url: https://components.espressif.com
+      require: public
+      version: '>=0.17.0~2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    version: 2.1.1
+  espressif/mdns:
+    component_hash: 1ebe3bd675bb9d1c58f52bc0b609b32f74e572b01c328f9e61282040c775495c
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.11.0
+  espressif/tinyusb:
+    component_hash: a72b7d67472914ab76309340fd50d578b31e310963d45ad0f81144bde3314752
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - esp32s31
+    version: 0.21.0~1
+  idf:
+    source:
+      type: idf
+    version: 6.0.1
+direct_dependencies:
+- espressif/cjson
+- espressif/esp_h264
+- espressif/esp_tinyusb
+- espressif/mdns
+manifest_hash: 1addf28d38fca9afafc218e06780daedd9763838a497fa47578862a1d65734a3
+target: esp32p4
+version: 3.0.0

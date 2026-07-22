@@ -1,0 +1,290 @@
+/* Console layout: status strip, rail, stage, action bar. */
+
+.console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---- status strip ------------------------------------------------------- */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--bar-height);
+  padding: 0 var(--space-3);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.statusbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* The mark is drawn rather than set: it is the same grid as the favicon, so
+   the tab and the console carry one identity. currentColor keeps it correct in
+   both themes. */
+.brand {
+  flex: none;
+  color: var(--text);
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.statusbar-spacer {
+  flex: 1;
+}
+
+/* ---- rail --------------------------------------------------------------- */
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: var(--rail-width);
+  padding: var(--space-2) 0;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  flex: none;
+}
+
+.rail-spacer {
+  flex: 1;
+}
+
+.rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.rail-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.rail-btn-active {
+  background: var(--bg-active);
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.rail-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ---- stage and panel ---------------------------------------------------- */
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-sunken);
+}
+
+/* The panel floats over the picture instead of shrinking it: a KVM screen that
+   resizes whenever a panel opens forces the operator to re-find everything. */
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(var(--panel-width), 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-overlay);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-panel);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+/* ---- action bar --------------------------------------------------------- */
+
+.actionbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: var(--bar-height);
+  padding: 0 var(--space-3);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  flex: none;
+}
+
+.actionbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.actionbar-right {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ---- screen ------------------------------------------------------------- */
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.screen-img {
+  display: block;
+  background: #000;
+}
+
+/* Fill the stage and letterbox inside it. Sizing with max-width/max-height
+   instead leaves the picture smaller than the space available. */
+.screen-fit {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.screen-actual {
+  max-width: none;
+  max-height: none;
+}
+
+.screen-engaged {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.screen-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-sunken);
+}
+
+.screen-message {
+  max-width: 380px;
+  padding: var(--space-5);
+  text-align: center;
+}
+
+.screen-message-icon {
+  display: inline-flex;
+  margin-bottom: var(--space-3);
+  color: var(--text-faint);
+}
+
+.screen-message h2 {
+  margin-bottom: var(--space-2);
+}
+
+/* Invitation to take control; deliberately unobtrusive once the picture is up. */
+.screen-engage {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-overlay) 88%, transparent);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(6px);
+}
+
+.screen-engage:hover {
+  border-color: var(--accent);
+}
+
+.screen-engage-hint {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* ---- fatal -------------------------------------------------------------- */
+
+.fatal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-5);
+  text-align: center;
+}
+
+/* ---- narrow screens ------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .panel {
+    width: 100%;
+  }
+
+  .rail {
+    flex-direction: row;
+    width: auto;
+    height: 44px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .body {
+    flex-direction: column;
+  }
+}

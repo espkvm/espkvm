@@ -1,0 +1,190 @@
+/* Element defaults and the handful of primitives the whole console reuses. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text);
+  font: var(--text-md) / 1.45 var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h2 {
+  font-size: var(--text-lg);
+}
+
+h3 {
+  font-size: var(--text-md);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+p {
+  margin: 0 0 var(--space-3);
+}
+
+/* ---- buttons ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Actions that can end a session or lose work on the target. */
+.btn-danger {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.btn-sm {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.btn-icon {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+/* ---- form controls ------------------------------------------------------ */
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select {
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: inherit;
+  width: 100%;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+/* ---- small shared pieces ------------------------------------------------ */
+
+.muted {
+  color: var(--text-muted);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+
+.dot-ok {
+  background: var(--ok);
+}
+
+.dot-warn {
+  background: var(--warn);
+}
+
+.dot-bad {
+  background: var(--danger);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

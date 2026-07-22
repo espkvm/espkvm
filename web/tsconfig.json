@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [
+      "vite/client"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "allowJs": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.js",
+    "src/**/*.vue",
+    "vite.config.js",
+    "mock"
+  ],
+  "exclude": [
+    "src/legacy"
+  ]
+}

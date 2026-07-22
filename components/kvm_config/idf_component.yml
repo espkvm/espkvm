@@ -1,0 +1,4 @@
+dependencies:
+  # cJSON left the IDF core in v6.0 and is now a managed component.
+  espressif/cjson:
+    version: "^1.7.0"

@@ -1,0 +1,63 @@
+# This board carries an ESP32-P4 rev v1.3. IDF 6.x defaults to v3.1+, and rev <3.0
+# and >=3.0 are mutually exclusive targets, so the <3.0 family must be selected
+# explicitly or the bootloader refuses to run.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# Waveshare ESP32-P4-ETH carries 32 MB; the default 2 MB leaves no room for OTA.
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+
+# Two app slots so a bad update can be rolled back - see partitions.csv.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Roll back automatically if a freshly flashed image never reports itself
+# healthy: on a KVM, an update that cannot reach the network has also removed
+# the way to fix it.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Full-frame capture @ 1080p needs PSRAM (ping-pong buffers + JPEG + HTTP copy).
+# esp_http_server: max_open_sockets + 3 internal fds must be <= CONFIG_LWIP_MAX_SOCKETS.
+# Headroom for concurrent /stream + /video + /ws (and a dev proxy opening several TCPs).
+CONFIG_LWIP_MAX_SOCKETS=24
+
+CONFIG_KVM_JPEG_QUALITY=70
+
+# WebSocket /ws for browser -> USB HID control plane
+CONFIG_HTTPD_WS_SUPPORT=y
+# Default 1024 is too small for Chromium + Vite proxy (sec-ch-ua-*, cookies) -> 431 on device.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=8192
+
+# Composite HID keyboard + mouse (TinyUSB)
+# Two HID interfaces: a boot-protocol keyboard for firmware screens, and a
+# pointer interface carrying absolute, relative and consumer reports.
+CONFIG_TINYUSB_HID_COUNT=2
+
+# ESP32-P4 AP-HEX PSRAM size (e.g. 32 MB) is detected at boot - no separate "32MB" Kconfig.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# The device generates its own certificate on first boot: a KVM ships without
+# anyone to issue it one, and asking the operator for a PEM before the web
+# interface works at all is not a usable first run.
+CONFIG_MBEDTLS_X509_CREATE_C=y
+CONFIG_MBEDTLS_X509_CRT_WRITE_C=y
+
+# TLS buffers are allocated when a connection has data to move and released
+# afterwards. Without this each open socket holds ~20 KB of internal RAM for as
+# long as the browser keeps it, and a console holds several at once.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
+# MJPEG pushes large JPEG segments; lwIP defaults (~5.8 KiB) cause backpressure/resets on Ethernet.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=6144
+
+# Resumption: a full handshake costs this chip ~330 ms and the console opens
+# several connections at once.
+CONFIG_ESP_TLS_SERVER_SESSION_TICKETS=y
+
+# The websocket handler is not called for the upgrade (esp_http_server returns
+# right after the handshake), so the session cookie can only be checked here.
+CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y

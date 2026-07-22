@@ -1,0 +1,100 @@
+/*
+ * Design tokens.
+ *
+ * Every colour, size and duration used anywhere in the interface is named here.
+ * The device ships a single embedded file with no CDN and no web fonts - it has
+ * to work on an isolated network - so the type stack is whatever the operator's
+ * system provides.
+ *
+ * Dark is the default: a KVM console sits next to real screens, often in a
+ * server room or at night, and a white page beside a dark terminal is hostile.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, from furthest back to nearest the reader. */
+  --bg-base: #0e1116;
+  --bg-sunken: #0a0d12;
+  --bg-raised: #161b22;
+  --bg-overlay: #1c232c;
+  --bg-hover: #222a35;
+  --bg-active: #2b3542;
+
+  --border: #2a313c;
+  --border-strong: #3a4450;
+
+  --text: #e6edf3;
+  --text-muted: #9aa7b4;
+  --text-faint: #6b7885;
+
+  --accent: #4c9aff;
+  --accent-hover: #6bb0ff;
+  --accent-text: #08121f;
+
+  --ok: #46c17c;
+  --warn: #e3a33c;
+  --danger: #f0616d;
+  --danger-hover: #ff7a85;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+
+  --shadow-panel: 0 8px 28px rgb(0 0 0 / 45%);
+  --shadow-pop: 0 4px 14px rgb(0 0 0 / 35%);
+
+  --rail-width: 52px;
+  --panel-width: 340px;
+  --bar-height: 38px;
+
+  --transition: 140ms ease;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-base: #f2f4f7;
+  --bg-sunken: #e6e9ee;
+  --bg-raised: #ffffff;
+  --bg-overlay: #ffffff;
+  --bg-hover: #eceff3;
+  --bg-active: #dfe4ea;
+
+  --border: #d3d9e0;
+  --border-strong: #b6bec8;
+
+  --text: #16202b;
+  --text-muted: #55616e;
+  --text-faint: #7d8894;
+
+  --accent: #1f6feb;
+  --accent-hover: #1a5fd0;
+  --accent-text: #ffffff;
+
+  --shadow-panel: 0 8px 28px rgb(16 24 40 / 14%);
+  --shadow-pop: 0 4px 14px rgb(16 24 40 / 12%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition: 0ms;
+  }
+}

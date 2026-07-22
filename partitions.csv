@@ -1,0 +1,19 @@
+# ESP-KVM partition table.
+#
+# Two app slots, because a KVM is often the only way to reach the machine it is
+# attached to: an update that bricks it may also remove the means of fixing it.
+# With two slots the bootloader falls back to the previous image.
+#
+# The board carries 32 MB of flash. 4 MB per slot leaves room for a firmware
+# that grows an H.264 encoder, TLS and a USB mass storage stack without another
+# partition change, and the remainder becomes a storage area - disk images for
+# virtual media live on the microSD card, but certificates, logs and a custom
+# EDID need somewhere on-device.
+#
+# Name       Type  SubType   Offset     Size
+nvs,         data, nvs,      0x9000,    0x6000
+otadata,     data, ota,      0xf000,    0x2000
+phy_init,    data, phy,      0x11000,   0x1000
+ota_0,       app,  ota_0,    0x20000,   0x400000
+ota_1,       app,  ota_1,    0x420000,  0x400000
+storage,     data, spiffs,   0x820000,  0x400000

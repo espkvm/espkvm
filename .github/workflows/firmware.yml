@@ -1,0 +1,193 @@
+# Build the firmware, and on a version tag publish it twice: as a release for
+# people, and on GitHub Pages for the console's update check.
+#
+# The two destinations exist for one reason: a browser cannot fetch a release
+# asset. GitHub serves those without an Access-Control-Allow-Origin header, so
+# a page on the device's own origin is refused by CORS, while Pages serves
+# everything with `*`. The console therefore reads a small manifest from Pages
+# and hands the image to the device itself - the device never talks to the
+# internet, which is the point.
+name: firmware
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version string comes from `git describe`, which needs history.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The console is embedded in the firmware as a gzip blob. Building it here
+      # rather than trusting the committed copy means the image always carries
+      # the interface that matches its sources.
+      - name: Build the console
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Report whether the committed console was stale
+        run: git diff --stat -- components/kvm_web/assets || true
+
+      # A tag is the version. Without this the firmware would report the commit
+      # it was built from, which tells an operator nothing about what to expect.
+      - name: Take the version from the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "${GITHUB_REF_NAME}" > version.txt
+
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32p4
+          # Both steps belong in the container: git inside it refuses a
+          # repository owned by another user (and ESP-IDF then has no version to
+          # stamp into the image), and merge-bin needs the esptool that ships
+          # with this IDF, which does not exist on the runner.
+          command: >-
+            git config --global --add safe.directory "$PWD" &&
+            idf.py build &&
+            idf.py merge-bin -o espkvm-merged.bin
+
+      - name: Collect what a person or a device might want
+        run: |
+          version="${GITHUB_REF_NAME}"
+          case "$GITHUB_REF" in
+            refs/tags/*) name="espkvm-${version}" ;;
+            *)           name="espkvm-$(git describe --always --dirty)" ;;
+          esac
+          mkdir -p out
+          cp build/espkvm.bin "out/${name}.bin"
+          # Everything needed to flash a board that has never run this firmware.
+          mkdir -p full
+          cp build/espkvm.bin build/bootloader/bootloader.bin \
+             build/partition_table/partition-table.bin build/ota_data_initial.bin \
+             build/flasher_args.json full/
+          (cd full && zip -q "../out/${name}-full-flash.zip" ./*)
+          # One image for the browser flasher: it writes a single blob at 0x0
+          # rather than juggling offsets, and this also covers a board that has
+          # never had a bootloader. Built in the container, above.
+          cp build/espkvm-merged.bin "out/${name}-merged.bin"
+          (cd out && sha256sum ./*.bin ./*.zip > sha256sums.txt)
+          echo "asset_name=${name}" >> "$GITHUB_ENV"
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: out
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+
+  pages:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    # Publishing the update manifest is the convenience; the release above is
+    # the release. If Pages is not enabled on the repository this job fails on
+    # its own rather than marking the tag as broken.
+    continue-on-error: true
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: out
+
+      # What the console reads. Only the newest build lives here; older ones
+      # stay on the releases page, where a human can pick one deliberately.
+      - name: Assemble the update manifest
+        run: |
+          version="${GITHUB_REF_NAME}"
+          # Not the merged image: that one is for the browser flasher and would
+          # match this glob too, leaving the console with an update manifest
+          # pointing at a whole-flash blob.
+          bin="$(cd out && ls espkvm-*.bin | grep -v -- '-merged')"
+          mkdir -p site/firmware
+          cp "out/${bin}" site/firmware/
+          cat > site/firmware/manifest.json <<EOF
+          {
+            "version": "${version}",
+            "file": "${bin}",
+            "size": $(stat -c%s "out/${bin}"),
+            "sha256": "$(sha256sum "out/${bin}" | cut -d' ' -f1)",
+            "released": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "notes": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${version}"
+          }
+          EOF
+          # What the browser flasher on the project site reads. Different
+          # schema, different consumer, hence a separate file: this one is
+          # esp-web-tools', the one above is the console's update check.
+          merged="$(cd out && ls espkvm-*-merged.bin)"
+          mkdir -p site/flash
+          cp "out/${merged}" site/flash/
+          cat > site/flash/manifest.json <<EOF
+          {
+            "name": "ESP-KVM",
+            "version": "${version}",
+            "new_install_prompt_erase": true,
+            "builds": [
+              {
+                "chipFamily": "ESP32-P4",
+                "parts": [{ "path": "${merged}", "offset": 0 }]
+              }
+            ]
+          }
+          EOF
+          cat > site/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><title>ESP-KVM firmware</title>
+          <p>Artefacts for the ESP-KVM console and the browser flasher:
+          <code>firmware/manifest.json</code> is the update check,
+          <code>flash/manifest.json</code> is esp-web-tools.</p>
+          EOF
+          cat site/firmware/manifest.json site/flash/manifest.json
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
