@@ -26,14 +26,21 @@ static const char *TAG = "usb_hid";
 
 enum {
     ITF_KEYBOARD = 0,
+    /*
+     * Absolute mouse and consumer control share one interface; the relative
+     * mouse gets its own. macOS binds a mouse's buttons per interface, and two
+     * pointer collections in a single interface left it unable to tell which
+     * one a click belonged to - the cursor moved and scrolled but never
+     * clicked. One pointer per interface and it behaves.
+     */
     ITF_POINTER = 1,
+    ITF_REL_MOUSE = 2,
     ITF_COUNT,
 };
 
-/** Report IDs on the pointer interface. The keyboard interface uses none. */
+/** Report IDs on the ITF_POINTER interface. Other interfaces use none. */
 enum {
     RID_ABS_MOUSE = 1,
-    RID_REL_MOUSE = 2,
     RID_CONSUMER = 3,
 };
 
@@ -50,9 +57,16 @@ static const uint8_t s_kbd_report_desc[] = {
 };
 
 /*
- * Absolute pointer. Logical range 0..32767 on both axes with a matching
- * physical range, which is what makes the host place the cursor at exactly the
- * reported position instead of applying its own acceleration curve.
+ * Absolute pointer. Logical range 0..32767 on both axes.
+ *
+ * No physical dimensions are declared, and that is deliberate. With a physical
+ * range present, macOS reads it as the shape of the input surface and fits that
+ * shape into the display while preserving its aspect ratio - a square range
+ * (0..0x7fff on both axes) letterboxed into a 16:9 screen, so the cursor tracks
+ * only near the centre and drifts further off toward the edges. Linux and
+ * Windows ignore the physical range and map each axis to the screen directly;
+ * dropping it makes macOS do the same, and the cursor lands where it is aimed
+ * on all three.
  */
 #define REPORT_DESC_ABS_MOUSE(...)                                                                  \
     HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP), HID_USAGE(HID_USAGE_DESKTOP_MOUSE),                     \
@@ -63,7 +77,7 @@ static const uint8_t s_kbd_report_desc[] = {
         HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), HID_REPORT_COUNT(1), HID_REPORT_SIZE(3), \
         HID_INPUT(HID_CONSTANT), HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),                            \
         HID_USAGE(HID_USAGE_DESKTOP_X), HID_USAGE(HID_USAGE_DESKTOP_Y), HID_LOGICAL_MIN_N(0, 2),    \
-        HID_LOGICAL_MAX_N(0x7fff, 2), HID_PHYSICAL_MIN_N(0, 2), HID_PHYSICAL_MAX_N(0x7fff, 2),      \
+        HID_LOGICAL_MAX_N(0x7fff, 2),                                                               \
         HID_REPORT_SIZE(16), HID_REPORT_COUNT(2),                                                   \
         HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE), HID_USAGE(HID_USAGE_DESKTOP_WHEEL),      \
         HID_LOGICAL_MIN(0x81), HID_LOGICAL_MAX(0x7f), HID_REPORT_SIZE(8), HID_REPORT_COUNT(1),      \
@@ -95,8 +109,12 @@ static const uint8_t s_kbd_report_desc[] = {
 
 static const uint8_t s_pointer_report_desc[] = {
     REPORT_DESC_ABS_MOUSE(HID_REPORT_ID(RID_ABS_MOUSE)),
-    REPORT_DESC_REL_MOUSE(HID_REPORT_ID(RID_REL_MOUSE)),
     TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(RID_CONSUMER)),
+};
+
+/* The relative mouse, alone on its own interface and so needing no report ID. */
+static const uint8_t s_rel_report_desc[] = {
+    REPORT_DESC_REL_MOUSE(),
 };
 
 typedef struct __attribute__((packed)) {
@@ -133,6 +151,8 @@ static const uint8_t s_configuration_descriptor[] = {
     TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81,
                        CFG_TUD_HID_EP_BUFSIZE, 10),
     TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,
+                       CFG_TUD_HID_EP_BUFSIZE, 10),
+    TUD_HID_DESCRIPTOR(ITF_REL_MOUSE, 6, HID_ITF_PROTOCOL_NONE, sizeof(s_rel_report_desc), 0x83,
                        CFG_TUD_HID_EP_BUFSIZE, 10),
 };
 
@@ -180,7 +200,14 @@ static void *s_led_cb_user;
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
 {
-    return (instance == ITF_KEYBOARD) ? s_kbd_report_desc : s_pointer_report_desc;
+    switch (instance) {
+    case ITF_KEYBOARD:
+        return s_kbd_report_desc;
+    case ITF_REL_MOUSE:
+        return s_rel_report_desc;
+    default:
+        return s_pointer_report_desc;
+    }
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
@@ -281,7 +308,7 @@ static void send_rel(uint8_t buttons, int32_t dx, int32_t dy, int8_t wheel, int8
         .wheel = wheel,
         .pan = pan,
     };
-    if (tud_hid_n_report(ITF_POINTER, RID_REL_MOUSE, &r, sizeof(r))) {
+    if (tud_hid_n_report(ITF_REL_MOUSE, 0, &r, sizeof(r))) {
         (void)wait_report_sent();
     }
 }
@@ -330,6 +357,21 @@ static void send_release_all(void)
 static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
 {
     if (acc->type != add->type) {
+        return false;
+    }
+    /*
+     * Coalesce motion, never a button edge. A click is a press report followed
+     * by a release report; if both are waiting in the queue and get folded into
+     * one, only the newest survives - the release - and the press is gone, so
+     * the target sees the cursor move but never registers the click. Motion is
+     * safe to drop because only the latest position matters; a change in the
+     * buttons is not, so it forces the pending report out first.
+     */
+    const uint8_t acc_buttons =
+        acc->type == Q_MOUSE_ABS ? acc->u.abs.buttons : acc->u.rel.buttons;
+    const uint8_t add_buttons =
+        add->type == Q_MOUSE_ABS ? add->u.abs.buttons : add->u.rel.buttons;
+    if (acc_buttons != add_buttons) {
         return false;
     }
     if (acc->type == Q_MOUSE_ABS) {

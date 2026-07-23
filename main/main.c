@@ -15,6 +15,7 @@
 #include "http_server.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
+#include "kvm_storage.h"
 #include "kvm_thermal.h"
 #include "kvm_settings.h"
 #include "usb_hid.h"
@@ -48,7 +49,19 @@ static void on_setting_changed(const char *key, void *user)
 
 static void report_pending_capabilities(void)
 {
-    kvm_cap_report(KVM_CAP_MSC, false, "virtual media not implemented yet");
+    kvm_storage_status_t sd;
+    kvm_storage_status(&sd);
+    /* The USB mass-storage path that shows the card to the target is not built
+     * yet, so the capability is unavailable either way - but the reason tells
+     * the operator whether the card half is working, which is the half that
+     * exists so far. */
+    if (sd.mounted) {
+        kvm_cap_report(KVM_CAP_MSC, false,
+                       "card mounted (%llu MB); USB mass storage not wired yet",
+                       (unsigned long long)(sd.total_bytes / (1024 * 1024)));
+    } else {
+        kvm_cap_report(KVM_CAP_MSC, false, "no microSD card, and USB mass storage not wired yet");
+    }
     kvm_cap_report(KVM_CAP_ATX, false, "power control not implemented yet");
     kvm_cap_report(KVM_CAP_AUDIO, false, "audio capture not implemented yet");
     kvm_cap_report(KVM_CAP_NET_STATIC, false, "static addressing not implemented yet; the "
@@ -77,6 +90,10 @@ void app_main(void)
     /* Before the capture path: the guard should be watching from the first
      * frame, not from whenever the web server happens to start. */
     kvm_thermal_init();
+
+    /* The microSD card, if any. A KVM without one is still a KVM, so a missing
+     * or unreadable card never holds up start-up. */
+    ESP_ERROR_CHECK(kvm_storage_init());
 
     /*
      * Before the network: the button shares its pin with the Ethernet

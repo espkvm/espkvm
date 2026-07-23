@@ -123,6 +123,24 @@ Each of these cost real time. They are recorded so they are not rediscovered.
   early in start-up, and only a power-on or EN reset makes that reading
   possible. Holding the button through a reset changes the strapping byte
   (0x30f becomes 0x20f); the board still boots from flash.
+- **macOS will not click through two pointer collections in one HID interface.**
+  The composite pointer carried an absolute mouse and a relative mouse in a
+  single USB interface, each with its own buttons. macOS moved the cursor and
+  scrolled but never registered a click - it could not tell which collection a
+  button belonged to. Windows and Linux did not care. The fix is one pointer
+  per interface: absolute mouse (with the consumer control) on its own
+  interface, relative mouse on another. Found by instrumenting the device to
+  count button-down edges received - they arrived fine, so the host, not the
+  transport, was dropping them.
+- **The HID report queue must never coalesce across a button change.** Motion
+  reports are folded to the newest position, which is right; folding a
+  button-down report together with the button-up that follows it, though,
+  turns a click into nothing. Coalesce only while the buttons match.
+- **macOS reads the HID physical dimensions as the input surface aspect.** A
+  square logical/physical range (0..0x7fff on both axes) gets letterboxed into
+  a 16:9 screen, so the cursor tracks only near the centre. Declaring no
+  physical range makes macOS map each axis to the screen directly, as Linux
+  and Windows already did.
 - **A WebSocket handler is never called for the upgrade.** esp_http_server
   answers the handshake and returns - `/* If the request is websocket
   handshake, then do not call the uri->handler */` - so any `req->method ==

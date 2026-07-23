@@ -45,6 +45,12 @@ function sendMacro(m: Macro) {
   setTimeout(() => props.control.keyboard(0, []), 40);
 }
 
+/* The manual escape hatch: one message that clears keyboard, both mouse
+   reports and the consumer control on the device at once. */
+function releaseAll() {
+  props.control.releaseAll();
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function paste() {
@@ -113,5 +119,13 @@ async function paste() {
     <button type="button" class="btn btn-sm" :disabled="pasting" @click="paste">
       {{ pasting ? "Typing..." : "Paste from clipboard" }}
     </button>
+
+    <h3>Stuck input</h3>
+    <p class="setting-note">
+      Lift every key and mouse button the target thinks is held. Use it if a
+      click or a key ever gets stuck down - it is the software version of
+      unplugging the cable.
+    </p>
+    <button type="button" class="btn btn-sm" @click="releaseAll">Release all inputs</button>
   </div>
 </template>

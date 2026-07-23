@@ -40,13 +40,26 @@ export function useInput(opts: InputOptions) {
   });
   onScopeDispose(() => control.dispose());
 
-  /* Never leave a key down on the target when control ends: nobody is left to
-     lift it. */
-  watchEffect(() => {
-    if (opts.engaged.value) return;
+  /*
+   * Lift everything held on the target, now, on the caller's stack - not on a
+   * later tick. The device is the machine the operator is sitting at, and a
+   * button left pressed there is the difference between a working mouse and a
+   * dead one. The device's release clears the mouse buttons at its own last
+   * position, so this does not send a coordinate - doing so would teleport the
+   * target cursor to wherever this page last thought it was, which at start-up
+   * is the top-left corner.
+   */
+  function releaseEverything() {
     held.clear();
     buttonsHeld = 0;
     control.releaseAll();
+  }
+
+  /* A backstop: whenever control is not held, nothing should be. This runs
+     asynchronously, so the deliberate release paths below do not wait for it. */
+  watchEffect(() => {
+    if (opts.engaged.value) return;
+    releaseEverything();
   });
 
   function mapToTarget(e: { clientX: number; clientY: number }) {
@@ -54,10 +67,29 @@ export function useInput(opts: InputOptions) {
     if (!el) return null;
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return null;
+
+    /*
+     * In "fit" the element fills the stage but the picture is letterboxed
+     * inside it by object-fit: contain, so the element box is wider or taller
+     * than the video. Mapping against the whole box would put the pointer into
+     * the black bars - the cursor drifts on whichever axis is padded. Find the
+     * rectangle the video actually occupies from its intrinsic size (a canvas
+     * carries the frame resolution in width/height, an <img> in natural*), and
+     * map into that. In "actual" the two aspects match, so this is a no-op.
+     */
+    const iw = (el as HTMLCanvasElement).width || (el as HTMLImageElement).naturalWidth || r.width;
+    const ih =
+      (el as HTMLCanvasElement).height || (el as HTMLImageElement).naturalHeight || r.height;
+    const scale = Math.min(r.width / iw, r.height / ih);
+    const shownW = iw * scale;
+    const shownH = ih * scale;
+    const padX = (r.width - shownW) / 2;
+    const padY = (r.height - shownH) / 2;
+
     /* Coordinates are 0..32767, not pixels, so a resolution change on the
        target cannot shift the pointer mid-drag. */
-    const x = ((e.clientX - r.left) / r.width) * ABS_MAX;
-    const y = ((e.clientY - r.top) / r.height) * ABS_MAX;
+    const x = ((e.clientX - r.left - padX) / shownW) * ABS_MAX;
+    const y = ((e.clientY - r.top - padY) / shownH) * ABS_MAX;
     if (x < 0 || y < 0 || x > ABS_MAX || y > ABS_MAX) return null;
     return { x, y };
   }
@@ -176,6 +208,9 @@ export function useInput(opts: InputOptions) {
          exists so it can still be sent deliberately. */
       if (e.key === "Escape") {
         e.preventDefault();
+        /* Release synchronously, before disengaging - not through the async
+           watchEffect, which could fire after the channel has moved on. */
+        releaseEverything();
         opts.onDisengage();
         return;
       }
@@ -196,8 +231,7 @@ export function useInput(opts: InputOptions) {
 
     /* Losing focus while a key is down would strand it on the target. */
     const onBlur = () => {
-      held.clear();
-      control.releaseAll();
+      releaseEverything();
       opts.onDisengage();
     };
 

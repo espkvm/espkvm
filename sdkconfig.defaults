@@ -31,7 +31,7 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=8192
 # Composite HID keyboard + mouse (TinyUSB)
 # Two HID interfaces: a boot-protocol keyboard for firmware screens, and a
 # pointer interface carrying absolute, relative and consumer reports.
-CONFIG_TINYUSB_HID_COUNT=2
+CONFIG_TINYUSB_HID_COUNT=3
 
 # ESP32-P4 AP-HEX PSRAM size (e.g. 32 MB) is detected at boot - no separate "32MB" Kconfig.
 CONFIG_SPIRAM=y
