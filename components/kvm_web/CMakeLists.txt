@@ -11,6 +11,8 @@ idf_component_register(
         video_pipeline
         kvm_hid
         kvm_config
+        kvm_storage
+        espressif__cjson
         app_update
         esp_app_format
         esp_timer

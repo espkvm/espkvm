@@ -1,3 +1,4 @@
-dependencies:
-  espressif/esp_tinyusb:
-    version: "^2.0.0"
+# esp_tinyusb is vendored in components/esp_tinyusb (forked for ESP-KVM's own MSC
+# callbacks), so it is required by name in CMakeLists rather than pulled from the
+# registry. No managed dependencies remain here.
+dependencies: {}

@@ -8,6 +8,7 @@
 
 #include "class/hid/hid.h"
 #include "class/hid/hid_device.h"
+#include "class/msc/msc_device.h"
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -19,6 +20,7 @@
 #include "tinyusb_default_config.h"
 
 #include "kvm_caps.h"
+#include "kvm_storage.h"
 
 static const char *TAG = "usb_hid";
 
@@ -35,8 +37,19 @@ enum {
      */
     ITF_POINTER = 1,
     ITF_REL_MOUSE = 2,
+    /* Virtual media. Always present in the descriptor so the target need not
+     * re-enumerate when an image is inserted; the drive simply reports no
+     * medium until one is selected. */
+    ITF_MSC = 3,
     ITF_COUNT,
 };
+
+#define NUM_HID_ITF 3 /* keyboard, pointer, relative mouse */
+
+/* MSC bulk endpoints, sharing endpoint number 4 (IN 0x84, OUT 0x04) beside the
+ * three HID interrupt IN endpoints 0x81/0x82/0x83. */
+#define EPNUM_MSC_OUT 0x04
+#define EPNUM_MSC_IN 0x84
 
 /** Report IDs on the ITF_POINTER interface. Other interfaces use none. */
 enum {
@@ -133,6 +146,9 @@ typedef struct __attribute__((packed)) {
     int8_t pan;
 } rel_mouse_report_t;
 
+/* Order matters: the string index each interface names below is this array's
+ * subscript. 0 is the language ID, 1..3 are the device strings, 4+ name the
+ * interfaces (keyboard 4, pointer 5, relative mouse 6, virtual media 7). */
 static const char *s_string_descriptor[] = {
     (char[]){0x09, 0x04},
     "ESP-KVM",
@@ -140,21 +156,34 @@ static const char *s_string_descriptor[] = {
     "0",
     "Keyboard",
     "Pointer",
+    "Relative Mouse",
+    "Virtual Media",
 };
 
-#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + ITF_COUNT * TUD_HID_DESC_LEN)
+#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + NUM_HID_ITF * TUD_HID_DESC_LEN + TUD_MSC_DESC_LEN)
 
-static const uint8_t s_configuration_descriptor[] = {
-    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP,
-                          100),
-    /* interface, string index, protocol, report descriptor length, endpoint, size, interval */
-    TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81,
-                       CFG_TUD_HID_EP_BUFSIZE, 10),
-    TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,
-                       CFG_TUD_HID_EP_BUFSIZE, 10),
-    TUD_HID_DESCRIPTOR(ITF_REL_MOUSE, 6, HID_ITF_PROTOCOL_NONE, sizeof(s_rel_report_desc), 0x83,
-                       CFG_TUD_HID_EP_BUFSIZE, 10),
-};
+/*
+ * One layout, two instances: the MSC bulk endpoint is 512 bytes at high speed
+ * and must be 64 at full speed, so the descriptor is parameterised on that size
+ * and built once for each speed. The HID interrupt endpoints keep one buffer
+ * size at both speeds, which is legal. On the P4's high-speed PHY the host uses
+ * the high-speed config; the full-speed one covers a full-speed host or hub.
+ */
+#define CONFIGURATION_DESCRIPTOR(msc_epsize)                                                        \
+    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, \
+                          100),                                                                     \
+    /* interface, string index, protocol, report descriptor length, endpoint, size, interval */    \
+    TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81, \
+                       CFG_TUD_HID_EP_BUFSIZE, 10),                                                 \
+    TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,  \
+                       CFG_TUD_HID_EP_BUFSIZE, 10),                                                 \
+    TUD_HID_DESCRIPTOR(ITF_REL_MOUSE, 6, HID_ITF_PROTOCOL_NONE, sizeof(s_rel_report_desc), 0x83,    \
+                       CFG_TUD_HID_EP_BUFSIZE, 10),                                                 \
+    /* interface, string index, EP out, EP in, EP size */                                          \
+    TUD_MSC_DESCRIPTOR(ITF_MSC, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN, (msc_epsize))
+
+static const uint8_t s_fs_config_descriptor[] = {CONFIGURATION_DESCRIPTOR(64)};
+static const uint8_t s_hs_config_descriptor[] = {CONFIGURATION_DESCRIPTOR(512)};
 
 /* ---- report queue ------------------------------------------------------- */
 
@@ -269,6 +298,100 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
         break;
     default:
         break;
+    }
+}
+
+/* ---- MSC (virtual media) callbacks -------------------------------------- */
+/*
+ * The target sees one removable, read-only LUN. Its medium is whatever image
+ * kvm_storage currently has open; with none open the drive answers "no medium"
+ * like an empty card reader, which is a state every host understands. All the
+ * disk lives on the microSD and is read on the target's behalf, so the firmware
+ * never yields the card - uploads and target reads run at the same time.
+ */
+
+void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16],
+                        uint8_t product_rev[4])
+{
+    (void)lun;
+    memcpy(vendor_id, "ESP-KVM ", 8);
+    memcpy(product_id, "Virtual Media   ", 16);
+    memcpy(product_rev, "1.0 ", 4);
+}
+
+bool tud_msc_test_unit_ready_cb(uint8_t lun)
+{
+    (void)lun;
+    kvm_media_t m;
+    kvm_storage_media_info(&m);
+    if (!m.present) {
+        /* Not ready, no medium - the standard "empty drive" answer (sense
+         * 3A). Without setting sense a host may keep polling or error out. */
+        tud_msc_set_sense(lun, SCSI_SENSE_NOT_READY, 0x3A, 0x00);
+        return false;
+    }
+    return true;
+}
+
+void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_size)
+{
+    (void)lun;
+    kvm_media_t m;
+    kvm_storage_media_info(&m);
+    *block_count = (uint32_t)m.block_count;
+    *block_size = (uint16_t)m.block_size;
+}
+
+bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject)
+{
+    (void)lun;
+    (void)power_condition;
+    (void)start;
+    /* The host's software-eject (e.g. dragging the disk to the trash) removes
+     * the medium; the operator re-inserts it from the console. */
+    if (load_eject && !start) {
+        kvm_storage_media_eject();
+    }
+    return true;
+}
+
+bool tud_msc_is_writable_cb(uint8_t lun)
+{
+    (void)lun;
+    return false; /* images are served read-only in this version */
+}
+
+int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
+{
+    (void)lun;
+    const uint64_t addr = (uint64_t)lba * 512u + offset;
+    return kvm_storage_media_read(addr, buffer, bufsize);
+}
+
+int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer,
+                           uint32_t bufsize)
+{
+    (void)lba;
+    (void)offset;
+    (void)buffer;
+    (void)bufsize;
+    /* Read-only: reject writes with a write-protect sense. is_writable_cb above
+     * already tells the host as much, so this is the belt-and-suspenders path. */
+    tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00);
+    return -1;
+}
+
+int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
+{
+    (void)buffer;
+    (void)bufsize;
+    switch (scsi_cmd[0]) {
+    case SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
+        /* We never lock the medium; acknowledge and move on. */
+        return 0;
+    default:
+        tud_msc_set_sense(lun, SCSI_SENSE_ILLEGAL_REQUEST, 0x20, 0x00);
+        return -1;
     }
 }
 
@@ -537,11 +660,11 @@ esp_err_t usb_hid_init(void)
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(tinyusb_on_event);
     tusb_cfg.descriptor.device = NULL;
-    tusb_cfg.descriptor.full_speed_config = s_configuration_descriptor;
+    tusb_cfg.descriptor.full_speed_config = s_fs_config_descriptor;
     tusb_cfg.descriptor.string = s_string_descriptor;
     tusb_cfg.descriptor.string_count = sizeof(s_string_descriptor) / sizeof(s_string_descriptor[0]);
 #if (TUD_OPT_HIGH_SPEED)
-    tusb_cfg.descriptor.high_speed_config = s_configuration_descriptor;
+    tusb_cfg.descriptor.high_speed_config = s_hs_config_descriptor;
 #endif
 
     esp_err_t usb_err = tinyusb_driver_install(&tusb_cfg);

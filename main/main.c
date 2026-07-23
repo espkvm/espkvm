@@ -39,29 +39,48 @@ static void apply_log_level(void)
     esp_log_level_set("*", levels[(choice >= 0 && (size_t)choice < n) ? (size_t)choice : 2]);
 }
 
+static void apply_media_selection(void);
+
 static void on_setting_changed(const char *key, void *user)
 {
     (void)user;
     if (strcmp(key, "log_level") == 0 || strcmp(key, "*") == 0) {
         apply_log_level();
     }
+    if (strcmp(key, "msc_enable") == 0 || strcmp(key, "msc_image") == 0 ||
+        strcmp(key, "*") == 0) {
+        apply_media_selection();
+    }
+}
+
+/*
+ * Reconcile the virtual drive with the settings: offer the chosen image to the
+ * target when the card is mounted, the feature is on, and an image is named;
+ * otherwise show an empty drive. Called at boot and whenever a storage setting
+ * changes, so inserting or ejecting from the console takes effect at once
+ * without a USB re-enumeration.
+ */
+static void apply_media_selection(void)
+{
+    kvm_storage_status_t sd;
+    kvm_storage_status(&sd);
+    kvm_cap_report(KVM_CAP_MSC, sd.mounted, "no microSD card in the slot");
+
+    const char *image = kvm_setting_str("msc_image");
+    if (sd.mounted && kvm_setting_bool("msc_enable") && image && image[0]) {
+        esp_err_t err = kvm_storage_media_select(image);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "cannot offer image '%s': %s", image, esp_err_to_name(err));
+            kvm_storage_media_eject();
+        }
+    } else {
+        kvm_storage_media_eject();
+    }
 }
 
 static void report_pending_capabilities(void)
 {
-    kvm_storage_status_t sd;
-    kvm_storage_status(&sd);
-    /* The USB mass-storage path that shows the card to the target is not built
-     * yet, so the capability is unavailable either way - but the reason tells
-     * the operator whether the card half is working, which is the half that
-     * exists so far. */
-    if (sd.mounted) {
-        kvm_cap_report(KVM_CAP_MSC, false,
-                       "card mounted (%llu MB); USB mass storage not wired yet",
-                       (unsigned long long)(sd.total_bytes / (1024 * 1024)));
-    } else {
-        kvm_cap_report(KVM_CAP_MSC, false, "no microSD card, and USB mass storage not wired yet");
-    }
+    apply_media_selection();
     kvm_cap_report(KVM_CAP_ATX, false, "power control not implemented yet");
     kvm_cap_report(KVM_CAP_AUDIO, false, "audio capture not implemented yet");
     kvm_cap_report(KVM_CAP_NET_STATIC, false, "static addressing not implemented yet; the "

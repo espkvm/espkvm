@@ -4,6 +4,7 @@ idf_component_register(
     PRIV_REQUIRES
         kvm_board
         kvm_config
+        kvm_storage
         esp_driver_gpio
-        espressif__esp_tinyusb
+        esp_tinyusb
 )

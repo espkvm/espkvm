@@ -230,6 +230,86 @@ export async function downloadFirmware(release: FirmwareRelease): Promise<Blob> 
   return await res.blob();
 }
 
+/* ---- virtual media -------------------------------------------------------
+ *
+ * Images live on the microSD card; the device serves the selected one to the
+ * target over USB. The card is the store, so the browser only lists, uploads
+ * and deletes - it never holds an image itself.
+ */
+
+export interface StorageImage {
+  name: string;
+  size: number;
+}
+
+export interface StorageInfo {
+  mounted: boolean;
+  totalBytes: number;
+  freeBytes: number;
+  /** File name currently offered to the target, or "" when ejected. */
+  active: string;
+  images: StorageImage[];
+  /** Whether the device can upload/delete; false when the card is read-only. */
+  writable: boolean;
+  /** Why writing is unavailable, when it is. */
+  writeReason?: string;
+}
+
+export async function loadImages(): Promise<StorageInfo> {
+  return getJson<StorageInfo>("/api/v1/storage/images");
+}
+
+/**
+ * Stream a file to the card. Uses XMLHttpRequest, not fetch, for one reason:
+ * an image is measured in gigabytes and the operator needs to see it move.
+ * fetch gives no upload progress; XHR does.
+ */
+export function uploadImage(file: File, onProgress?: (fraction: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/v1/storage/upload?name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status === 401) return reject(new Unauthorized());
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = `upload failed (${xhr.status})`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        /* keep the status-code message */
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("upload failed: the connection dropped"));
+    xhr.send(file);
+  });
+}
+
+export async function deleteImage(name: string): Promise<StorageInfo> {
+  const res = await fetch(`/api/v1/storage/delete?name=${encodeURIComponent(name)}`, {
+    method: "POST",
+  });
+  if (res.status === 401) throw new Unauthorized();
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((body as { error?: string }).error ?? `delete failed (${res.status})`);
+  }
+  return body as StorageInfo;
+}
+
+/** A byte count as a short human string, e.g. 3.2 GB. */
+export function formatBytes(n: number): string {
+  if (n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const value = n / Math.pow(1024, i);
+  return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`;
+}
+
 /** Resolve an enum setting to its name, e.g. mouse_mode -> "absolute". */
 export function enumName(schema: Setting[], values: Values, key: string): string | null {
   const entry = schema.find((s) => s.key === key);

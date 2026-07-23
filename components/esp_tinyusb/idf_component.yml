@@ -1,0 +1,10 @@
+# ESP-KVM vendored fork of espressif/esp_tinyusb 2.1.1 (commit 6e157d9).
+# Forked so the MSC class can be compiled in (CFG_TUD_MSC forced on in
+# tusb_config.h) while this component's own storage-backed tud_msc_*_cb are
+# removed - ESP-KVM serves a selected image file through its own callbacks.
+# The underlying tinyusb stack is still pulled from the registry.
+dependencies:
+  idf: '>=5.0'
+  tinyusb:
+    public: true
+    version: '>=0.17.0~2'

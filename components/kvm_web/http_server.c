@@ -4,11 +4,14 @@
  */
 #include "http_server.h"
 
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "esp_err.h"
@@ -26,10 +29,13 @@
 
 #include "esp_https_server.h"
 
+#include "cJSON.h"
+
 #include "capture.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
+#include "kvm_storage.h"
 #include "kvm_thermal.h"
 #include "kvm_tls.h"
 #include "usb_hid.h"
@@ -335,6 +341,320 @@ static esp_err_t api_settings_reset_post(httpd_req_t *req)
     }
     (void)kvm_settings_reset();
     return send_json_owned(req, kvm_settings_values_json());
+}
+
+/* ---- virtual media: image files on the microSD -------------------------- */
+
+#define IMAGE_NAME_MAX 63
+
+/*
+ * A file name is a plain entry in the card's root: not empty, short enough for
+ * FATFS, no path separators and no "..". This is the only gate between a web
+ * request and the filesystem, so it must refuse anything that could reach
+ * outside the mount point. The device serves one card to possibly untrusted
+ * viewers; a traversal here would hand them the whole VFS.
+ */
+static bool image_name_ok(const char *name)
+{
+    if (!name || !name[0] || strlen(name) > IMAGE_NAME_MAX) {
+        return false;
+    }
+    return !strpbrk(name, "/\\") && !strstr(name, "..");
+}
+
+/* Decode %XX escapes in place; a browser sends a space in a filename as %20.
+ * '+' is left literal - in a path it is a real character, not a space. */
+static void url_decode(char *s)
+{
+    char *o = s;
+    for (char *p = s; *p; p++) {
+        if (p[0] == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
+            char hex[3] = {p[1], p[2], 0};
+            *o++ = (char)strtol(hex, NULL, 16);
+            p += 2;
+        } else {
+            *o++ = *p;
+        }
+    }
+    *o = '\0';
+}
+
+/* Pull ?name= from the query and decode it. False when absent or unsafe. */
+static bool image_name_from_query(httpd_req_t *req, char *out, size_t outlen)
+{
+    char query[160];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        return false;
+    }
+    if (httpd_query_key_value(query, "name", out, outlen) != ESP_OK) {
+        return false;
+    }
+    url_decode(out);
+    return image_name_ok(out);
+}
+
+/* Full "/sd/<name>" path into buf. Caller has already validated the name. */
+static void image_path(char *buf, size_t buflen, const char *name)
+{
+    snprintf(buf, buflen, "%s/%s", kvm_storage_mount_point(), name);
+}
+
+static esp_err_t api_storage_images_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    kvm_storage_status_t sd;
+    kvm_storage_status(&sd);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    cJSON_AddBoolToObject(root, "mounted", sd.mounted);
+    cJSON_AddNumberToObject(root, "totalBytes", (double)sd.total_bytes);
+    cJSON_AddNumberToObject(root, "freeBytes", (double)sd.free_bytes);
+    cJSON_AddStringToObject(root, "active", kvm_setting_str("msc_image"));
+    /* Whether the console may upload or delete: this board serves the card
+     * read-only, so those controls are disabled with the reason below. */
+    cJSON_AddBoolToObject(root, "writable", kvm_storage_writable());
+    if (!kvm_storage_writable()) {
+        cJSON_AddStringToObject(root, "writeReason", kvm_storage_write_unavailable_reason());
+    }
+    cJSON *images = cJSON_AddArrayToObject(root, "images");
+
+    if (sd.mounted && images) {
+        DIR *dir = opendir(kvm_storage_mount_point());
+        if (dir) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL) {
+                if (ent->d_name[0] == '.') {
+                    continue; /* dotfiles and volume metadata are not media */
+                }
+                /* Skip corrupt directory entries: a name carrying control bytes
+                 * is a damaged FAT record, not a file anyone can select. */
+                bool printable = true;
+                for (const char *c = ent->d_name; *c; c++) {
+                    if ((unsigned char)*c < 0x20) {
+                        printable = false;
+                        break;
+                    }
+                }
+                if (!printable) {
+                    continue;
+                }
+                char path[128];
+                image_path(path, sizeof(path), ent->d_name);
+                struct stat st;
+                if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+                    continue;
+                }
+                cJSON *item = cJSON_CreateObject();
+                if (!item) {
+                    break;
+                }
+                cJSON_AddStringToObject(item, "name", ent->d_name);
+                /* off_t is 32-bit signed here, so a file over 2 GB reads back
+                 * negative; the low 32 bits are still the true size (FAT32 caps
+                 * a file at 4 GB - 1), so read them as unsigned. */
+                cJSON_AddNumberToObject(item, "size", (double)(uint32_t)st.st_size);
+                cJSON_AddItemToArray(images, item);
+            }
+            closedir(dir);
+        }
+    }
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    return send_json_owned(req, json); /* takes ownership, frees it */
+}
+
+/*
+ * Uploads run on their own task, not on the server's single control task.
+ *
+ * An image is measured in gigabytes, and reading it in on the control task
+ * would hold that task for the whole transfer - during which the video channel
+ * gets no frames sent and no new TLS handshake is accepted. The browser, seeing
+ * its stream die, reconnects; with the control task busy those handshakes pile
+ * up against a seven-socket TLS pool and the whole interface stalls until a
+ * reboot. The same async hand-off the MJPEG stream uses keeps the control task
+ * free while the bytes land on the card.
+ */
+#define UPLOAD_WORKER_STACK (8 * 1024)
+/* Just below the control task (idle+6), like the stream worker, so it never
+ * starves the task accepting connections. */
+#define UPLOAD_WORKER_PRIO (tskIDLE_PRIORITY + 5)
+/* Give up if the sender goes quiet this many receive-timeouts in a row, so a
+ * dropped connection leaves neither a zombie task nor a half-written file. */
+#define UPLOAD_MAX_IDLE 3
+
+typedef struct {
+    httpd_req_t *req;
+    char name[IMAGE_NAME_MAX + 1];
+    int content_len;
+} upload_ctx_t;
+
+static void upload_finish(httpd_req_t *req)
+{
+    const int fd = httpd_req_to_sockfd(req);
+    httpd_handle_t server = req->handle;
+    httpd_req_async_handler_complete(req);
+    /* A finished upload is not worth keeping alive, and leaving it in the pool
+     * risks the same ENOTCONN accumulation the stream guards against. */
+    if (server && fd >= 0) {
+        (void)httpd_sess_trigger_close(server, fd);
+    }
+}
+
+static void upload_worker_task(void *arg)
+{
+    upload_ctx_t *ctx = (upload_ctx_t *)arg;
+    httpd_req_t *req = ctx->req;
+
+    char path[128];
+    image_path(path, sizeof(path), ctx->name);
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        ESP_LOGE(TAG, "cannot create '%s': %s", path, strerror(errno));
+        send_json_error(req, "500 Internal Server Error", "cannot create file on card");
+        upload_finish(req);
+        free(ctx);
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGW(TAG, "image upload: %d bytes -> %s", ctx->content_len, path);
+
+    char *chunk = malloc(4096);
+    bool ok = chunk != NULL;
+    int received = 0;
+    int idle = 0;
+    while (ok && received < ctx->content_len) {
+        const int want =
+            4096 < (ctx->content_len - received) ? 4096 : (ctx->content_len - received);
+        const int n = httpd_req_recv(req, chunk, (size_t)want);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++idle >= UPLOAD_MAX_IDLE) {
+                ESP_LOGE(TAG, "upload stalled after %d of %d bytes", received, ctx->content_len);
+                ok = false;
+            }
+            continue;
+        }
+        idle = 0;
+        if (n <= 0) {
+            ESP_LOGE(TAG, "upload cut short after %d of %d bytes", received, ctx->content_len);
+            ok = false;
+            break;
+        }
+        if (fwrite(chunk, 1, (size_t)n, f) != (size_t)n) {
+            /* Almost always the card filled up. */
+            ESP_LOGE(TAG, "write failed after %d bytes: %s", received, strerror(errno));
+            ok = false;
+            break;
+        }
+        received += n;
+    }
+    free(chunk);
+    fclose(f);
+
+    if (!ok) {
+        remove(path); /* a half-written image is worse than none */
+        send_json_error(req, "500 Internal Server Error", "upload failed; the card may be full");
+    } else {
+        ESP_LOGW(TAG, "image '%s' written, %d bytes", ctx->name, received);
+        char body[128];
+        int bn = snprintf(body, sizeof(body),
+                          "{\"status\":\"written\",\"name\":\"%s\",\"size\":%d}", ctx->name,
+                          received);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, body, bn);
+    }
+    upload_finish(req);
+    free(ctx);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t api_storage_upload_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (!kvm_storage_writable()) {
+        return send_json_error(req, "501 Not Implemented",
+                               kvm_storage_write_unavailable_reason());
+    }
+    kvm_storage_status_t sd;
+    kvm_storage_status(&sd);
+    if (!sd.mounted) {
+        return send_json_error(req, "409 Conflict", "no microSD card mounted");
+    }
+
+    char name[IMAGE_NAME_MAX + 1];
+    if (!image_name_from_query(req, name, sizeof(name))) {
+        return send_json_error(req, "400 Bad Request", "missing or invalid ?name=");
+    }
+    /* Never write the file the target is currently reading: it is held open
+     * read-only and there is no file-level lock, so overwriting it underneath
+     * the target would hand it corruption. Eject first, then upload. */
+    const char *active = kvm_setting_str("msc_image");
+    if (kvm_setting_bool("msc_enable") && active && strcmp(active, name) == 0) {
+        return send_json_error(req, "409 Conflict",
+                               "image is mounted; eject it before replacing");
+    }
+    if (req->content_len <= 0) {
+        return send_json_error(req, "400 Bad Request", "empty body");
+    }
+
+    upload_ctx_t *ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    snprintf(ctx->name, sizeof(ctx->name), "%s", name);
+    ctx->content_len = req->content_len;
+
+    /* Hand the socket to the worker; the control task returns at once. */
+    esp_err_t res = httpd_req_async_handler_begin(req, &ctx->req);
+    if (res != ESP_OK) {
+        ESP_LOGW(TAG, "upload async begin: %s", esp_err_to_name(res));
+        free(ctx);
+        return send_json_error(req, "500 Internal Server Error", "upload busy");
+    }
+    if (xTaskCreate(upload_worker_task, "kvm_upload", UPLOAD_WORKER_STACK, ctx, UPLOAD_WORKER_PRIO,
+                    NULL) != pdPASS) {
+        httpd_req_async_handler_complete(ctx->req);
+        free(ctx);
+        return send_json_error(req, "503 Service Unavailable", "upload task");
+    }
+    return ESP_OK;
+}
+
+static esp_err_t api_storage_delete_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (!kvm_storage_writable()) {
+        return send_json_error(req, "501 Not Implemented",
+                               kvm_storage_write_unavailable_reason());
+    }
+    char name[IMAGE_NAME_MAX + 1];
+    if (!image_name_from_query(req, name, sizeof(name))) {
+        return send_json_error(req, "400 Bad Request", "missing or invalid ?name=");
+    }
+    const char *active = kvm_setting_str("msc_image");
+    if (kvm_setting_bool("msc_enable") && active && strcmp(active, name) == 0) {
+        return send_json_error(req, "409 Conflict", "image is mounted; eject it before deleting");
+    }
+    char path[128];
+    image_path(path, sizeof(path), name);
+    if (remove(path) != 0) {
+        return send_json_error(req, errno == ENOENT ? "404 Not Found" : "500 Internal Server Error",
+                               errno == ENOENT ? "no such image" : "could not delete");
+    }
+    ESP_LOGI(TAG, "image '%s' deleted", name);
+    return api_storage_images_get(req);
 }
 
 /* Long MJPEG response must not run on the httpd select() thread; see httpd_req_async_handler_begin(). */
@@ -1215,6 +1535,9 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
         {.uri = "/api/v1/settings", .method = HTTP_GET, .handler = api_settings_get},
         {.uri = "/api/v1/settings", .method = HTTP_PUT, .handler = api_settings_put},
+        {.uri = "/api/v1/storage/images", .method = HTTP_GET, .handler = api_storage_images_get},
+        {.uri = "/api/v1/storage/upload", .method = HTTP_POST, .handler = api_storage_upload_post},
+        {.uri = "/api/v1/storage/delete", .method = HTTP_POST, .handler = api_storage_delete_post},
     };
     for (size_t i = 0; i < sizeof(api_uris) / sizeof(api_uris[0]); i++) {
         httpd_register_uri_handler(h, &api_uris[i]);

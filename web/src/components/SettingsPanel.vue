@@ -19,11 +19,16 @@ import {
   type FirmwareRelease,
   compareVersions,
   downloadFirmware,
+  deleteImage,
   fetchRelease,
+  formatBytes,
+  loadImages,
   resetSettings,
   saveSettings,
   settingBlockedReason,
   uploadFirmware,
+  uploadImage,
+  type StorageInfo,
   type SystemInfo,
 } from "../state/device";
 import { changePassword } from "../state/auth";
@@ -201,6 +206,75 @@ async function submitPassword() {
   }
 }
 
+/*
+ * Virtual media.
+ *
+ * The card is the store; this panel lists what is on it, uploads more and
+ * chooses which image the target sees. Choosing writes the msc_image setting,
+ * the same value the text field above holds, so the two always agree.
+ */
+const storage = ref<StorageInfo | null>(null);
+const loadingImages = ref(false);
+const uploadingImage = ref(false);
+const uploadPct = ref(0);
+
+async function refreshImages() {
+  loadingImages.value = true;
+  try {
+    storage.value = await loadImages();
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    loadingImages.value = false;
+  }
+}
+
+/* Load the card's contents when the operator opens the media tab, not before:
+   an idle console has no reason to be reading the directory. */
+watch(
+  currentSection,
+  (s) => {
+    if (s === "storage") void refreshImages();
+  },
+  { immediate: true },
+);
+
+async function onImageChosen(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  uploadingImage.value = true;
+  uploadPct.value = 0;
+  try {
+    await uploadImage(file, (f) => (uploadPct.value = Math.round(f * 100)));
+    toast.info(`${file.name} uploaded`);
+    await refreshImages();
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    uploadingImage.value = false;
+    input.value = "";
+  }
+}
+
+async function selectImage(name: string) {
+  try {
+    emit("values", await saveSettings({ msc_image: name }));
+    if (storage.value) storage.value.active = name;
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function removeImage(name: string) {
+  if (!confirm(`Delete ${name} from the card?`)) return;
+  try {
+    storage.value = await deleteImage(name);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
 async function doReset() {
   if (!confirm("Restore every setting to its default?")) return;
   busy.value = true;
@@ -293,6 +367,75 @@ async function doReset() {
         <p v-if="blockedFor(s)" class="setting-note setting-note-blocked">{{ blockedFor(s) }}</p>
         <p v-else-if="s.help" class="setting-note">{{ s.help }}</p>
       </div>
+    </div>
+
+    <div v-if="currentSection === 'storage'" class="firmware">
+      <h3>Images on the card</h3>
+      <p v-if="loadingImages && !storage" class="setting-note">Reading the card...</p>
+      <p v-else-if="storage && !storage.mounted" class="section-blocked">
+        No microSD card is mounted. Insert one formatted as FAT32 with your boot
+        images copied on (up to 4&nbsp;GB per file).
+      </p>
+      <template v-else-if="storage">
+        <p class="setting-note">
+          {{ formatBytes(storage.freeBytes) }} free of {{ formatBytes(storage.totalBytes) }}.
+          The chosen image is served to the target read-only; turn on
+          <em>Expose virtual media</em> above for it to appear.
+        </p>
+        <p v-if="!storage.writable" class="setting-note setting-note-blocked">
+          {{ storage.writeReason ?? "The card is read-only on this device." }}
+          Format it FAT32 and copy images in a card reader &mdash; one file up to
+          4&nbsp;GB (a FAT32 limit) &mdash; then pick one below.
+        </p>
+
+        <ul class="image-list">
+          <li
+            v-for="img in storage.images"
+            :key="img.name"
+            :class="['image-row', { 'image-active': img.name === storage.active }]"
+          >
+            <label class="image-pick">
+              <input
+                type="radio"
+                name="active-image"
+                :checked="img.name === storage.active"
+                @change="selectImage(img.name)"
+              />
+              <span class="mono image-name">{{ img.name }}</span>
+              <span class="muted">{{ formatBytes(img.size) }}</span>
+            </label>
+            <button
+              v-if="storage.writable"
+              type="button"
+              class="btn btn-sm btn-quiet"
+              @click="removeImage(img.name)"
+            >
+              Delete
+            </button>
+          </li>
+          <li v-if="storage.images.length === 0" class="muted image-empty">
+            No images on the card yet. Upload one below.
+          </li>
+        </ul>
+
+        <label class="image-pick image-eject">
+          <input
+            type="radio"
+            name="active-image"
+            :checked="!storage.active"
+            @change="selectImage('')"
+          />
+          <span>Eject &mdash; offer the target no medium</span>
+        </label>
+
+        <label
+          v-if="storage.writable"
+          :class="['btn', 'btn-sm', { 'btn-disabled': uploadingImage }]"
+        >
+          {{ uploadingImage ? `Uploading ${uploadPct}%...` : "Upload image..." }}
+          <input type="file" class="sr-only" :disabled="uploadingImage" @change="onImageChosen" />
+        </label>
+      </template>
     </div>
 
     <form

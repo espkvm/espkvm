@@ -332,3 +332,51 @@
   margin: 0;
   font-size: var(--text-sm);
 }
+
+/* ---- virtual media image list ------------------------------------------- */
+
+.image-list {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.image-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.image-row.image-active {
+  border-color: var(--accent);
+}
+
+.image-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.image-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-eject {
+  margin-bottom: var(--space-3);
+  color: var(--text-muted);
+}
+
+.image-empty {
+  padding: var(--space-2) 0;
+}
