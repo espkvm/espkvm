@@ -247,16 +247,22 @@ export function useInput(opts: InputOptions) {
   });
 
   /**
-   * The engaging click reaches the target too - swallowing it would cost the
-   * operator a click on every interaction. Its release comes from the normal
-   * pointerup handler, which by then sees control as held.
+   * Taking control positions the pointer but sends no button.
+   *
+   * The engage prompt is a button that is removed from the page the instant
+   * control is taken, and the pointerup that would release a press sent here
+   * goes with it - leaving the button held down on the target, which is the
+   * machine the operator is sitting at. So the engaging click only moves the
+   * pointer to where it landed; the first real click, once engaged, does the
+   * clicking. One extra click to take control is a small price against a
+   * pointer button stuck down on someone's desktop.
    */
   function engageFromPointer(e: PointerEvent) {
     const p = mapToTarget(e);
     if (!p) return;
     lastPos.x = p.x;
     lastPos.y = p.y;
-    control.mouseAbsolute(buttonsOf(e), p.x, p.y);
+    control.mouseAbsolute(0, p.x, p.y);
   }
 
   return { target, connection, control, engageFromPointer };
