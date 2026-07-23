@@ -789,6 +789,10 @@ static bool password_stored(void)
 
 void kvm_auth_check_reset_button(void)
 {
+    /* A board with no reachable button (Kconfig set to -1) has no reset. */
+    if (KVM_BOARD_BUTTON_GPIO < 0) {
+        return;
+    }
     /*
      * Nothing to reset, nothing to wait for. This is what keeps the window
      * from costing every boot four seconds: a device that has never been

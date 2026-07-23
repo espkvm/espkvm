@@ -51,6 +51,13 @@ menu "ESP-KVM"
             range -1 ENV_GPIO_RANGE_MAX
             default 23
 
+        config KVM_TC358743_REFCLK_HZ
+            int "TC358743 reference clock (Hz)"
+            default 27000000
+            help
+                The crystal fitted on the capture board. The Geekworm C790 uses
+                27 MHz; change it only for a board with a different clock.
+
         config KVM_JPEG_QUALITY
             int "Default JPEG quality 1-100"
             range 1 100
@@ -63,6 +70,72 @@ menu "ESP-KVM"
                 When enabled, CSI frame timeouts log extra TC358743 register state, AVI
                 infoframe dumps, and periodic bridge status. Adds I2C traffic on error paths.
                 Boot-time SYS_STATUS lines from init are unchanged.
+    endmenu
+
+    menu "Board pins"
+        comment "Defaults are for the Waveshare ESP32-P4-ETH."
+        comment "Change these, and the Ethernet pins under Network, to port to another board."
+
+        config KVM_I2C_SDA_GPIO
+            int "TC358743 I2C SDA"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 7
+
+        config KVM_I2C_SCL_GPIO
+            int "TC358743 I2C SCL"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 8
+
+        config KVM_BUTTON_GPIO
+            int "BOOT button GPIO for password reset (-1 if none)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default 35
+            help
+                Held at start-up it clears a forgotten password. Set to -1 on a
+                board with no reachable button; the reset feature is then off.
+
+        config KVM_SD_CLK_GPIO
+            int "microSD CLK"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 43
+
+        config KVM_SD_CMD_GPIO
+            int "microSD CMD"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 44
+
+        config KVM_SD_D0_GPIO
+            int "microSD D0"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 39
+
+        config KVM_SD_D1_GPIO
+            int "microSD D1"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 40
+
+        config KVM_SD_D2_GPIO
+            int "microSD D2"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 41
+
+        config KVM_SD_D3_GPIO
+            int "microSD D3"
+            range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
+            default 42
+
+        config KVM_SD_PWR_GPIO
+            int "microSD slot power-gate GPIO (-1 if always powered)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default 45
+            help
+                Gates 3.3 V to the card. Set to -1 on a board whose slot is
+                always powered; the firmware then does not touch a power pin.
+
+        config KVM_SD_PWR_ACTIVE_LOW
+            bool "microSD power-gate is active-low"
+            default y
+            depends on KVM_SD_PWR_GPIO >= 0
     endmenu
 
     menu "Network"

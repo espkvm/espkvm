@@ -7,6 +7,22 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-24
+
+### Changed
+- Board wiring is now configured in `menuconfig` instead of a hardcoded header:
+  the microSD pins and slot power-gate, the TC358743 I2C pins and reference
+  clock, and the BOOT button GPIO joined the Ethernet pins that were already
+  there, all with the Waveshare ESP32-P4-ETH values as defaults. Porting to
+  another ESP32-P4 board is now a menuconfig edit; set the button or SD
+  power-gate GPIO to `-1` on a board that lacks them. No behaviour change on
+  the reference board - the binary is identical. See `docs/PORTING.md`.
+
+### Added
+- `docs/PORTING.md` - adapting the firmware to another ESP32-P4 board.
+- `AGENTS.md` - repo conventions, build/flash commands and hard-won gotchas,
+  for contributors and AI coding agents.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added

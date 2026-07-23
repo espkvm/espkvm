@@ -56,6 +56,9 @@ static char s_media_name[64];
 
 static void slot_power_claim(void)
 {
+    if (KVM_BOARD_SD_PWR_GPIO < 0) {
+        return; /* board has no power gate; the slot is always powered */
+    }
     const gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << KVM_BOARD_SD_PWR_GPIO,
         .mode = GPIO_MODE_OUTPUT,
@@ -92,7 +95,9 @@ static void slot_power_settle(void)
      * and waits a moment. The real mitigation for the flakiness is the retry
      * loop and staying off the UHS/DDR speed paths.
      */
-    gpio_set_level(KVM_BOARD_SD_PWR_GPIO, SD_PWR_ON_LEVEL);
+    if (KVM_BOARD_SD_PWR_GPIO >= 0) {
+        gpio_set_level(KVM_BOARD_SD_PWR_GPIO, SD_PWR_ON_LEVEL);
+    }
     vTaskDelay(pdMS_TO_TICKS(20));
 }
 
