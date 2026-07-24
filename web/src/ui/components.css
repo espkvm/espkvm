@@ -221,7 +221,8 @@
   color: var(--ok);
 }
 
-.input-panel {
+.input-panel,
+.power-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);

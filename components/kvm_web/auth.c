@@ -822,12 +822,19 @@ void kvm_auth_check_reset_button(void)
         if (gpio_get_level(KVM_BOARD_BUTTON_GPIO) == 0) {
             held_ms += RESET_POLL_MS;
             if (held_ms >= RESET_HOLD_MS) {
-                ESP_LOGW(TAG, "button held at start-up: clearing the password");
+                ESP_LOGW(TAG, "button held at start-up: clearing the password, reverting to DHCP");
                 /* The format string of a log macro has to be a literal. */
                 if (auth_clear() == ESP_OK) {
                     ESP_LOGW(TAG, "password cleared - the default one works again");
                 } else {
                     ESP_LOGE(TAG, "password could not be cleared");
+                }
+                /* Also drop back to DHCP, so a wrong static address that made the
+                 * device unreachable is recovered the same way a forgotten
+                 * password is. This runs before ethernet_init, so it takes effect
+                 * on this very boot. */
+                if (kvm_setting_set_int("net_dhcp", 1) == ESP_OK) {
+                    ESP_LOGW(TAG, "network reverted to DHCP");
                 }
                 break;
             }

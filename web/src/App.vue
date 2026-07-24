@@ -26,6 +26,7 @@ import {
   loadUsbProbe,
   loadValues,
   loadVideoStatus,
+  wakeTarget,
   type UsbProbe,
   Unauthorized,
 } from "./state/device";
@@ -50,6 +51,21 @@ const status = ref<VideoStatus | null>(null);
 const system = ref<SystemInfo | null>(null);
 const usbProbe = ref<UsbProbe | null>(null);
 const showOsPopup = ref(false);
+
+/* Wake-on-LAN: the target MAC is a setting, the button is here. */
+const wolMac = computed(() => String(values.value.pwr_wol_mac ?? "").trim());
+const waking = ref(false);
+async function wake() {
+  waking.value = true;
+  try {
+    await wakeTarget();
+    toast.info("Wake-on-LAN packet sent");
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    waking.value = false;
+  }
+}
 const OS_NAMES: Record<string, string> = {
   windows: "Windows",
   macos: "macOS",
@@ -447,8 +463,8 @@ const LED_BITS: Array<[number, string]> = [
           type="button"
           :class="['rail-btn', { 'rail-btn-active': panel === 'power' }]"
           aria-label="Power"
-          :disabled="!caps.atx?.available"
-          :title="caps.atx?.reason ?? 'Power'"
+          :disabled="!(caps.wol?.available || caps.atx?.available)"
+          :title="caps.wol?.available || caps.atx?.available ? 'Power' : (caps.atx?.reason ?? 'Power')"
           @click="togglePanel('power')"
         >
           <Icon name="power" :size="18" />
@@ -562,9 +578,26 @@ const LED_BITS: Array<[number, string]> = [
             <p v-else-if="panel === 'media'" class="muted">
               {{ caps.msc?.reason ?? "Virtual media is not available." }}
             </p>
-            <p v-else-if="panel === 'power'" class="muted">
-              {{ caps.atx?.reason ?? "Power control is not available." }}
-            </p>
+            <div v-else-if="panel === 'power'" class="power-panel">
+              <template v-if="caps.wol?.available">
+                <h3>Wake on LAN</h3>
+                <p v-if="!wolMac" class="muted">
+                  Set the target's MAC address under Settings &rarr; Power, then wake it from here.
+                </p>
+                <template v-else>
+                  <p class="muted">
+                    Send a magic packet to <span class="mono">{{ wolMac }}</span>. The target must
+                    have Wake-on-LAN enabled and keep standby power.
+                  </p>
+                  <button type="button" class="btn btn-sm" :disabled="waking" @click="wake">
+                    {{ waking ? "Sending..." : "Wake target" }}
+                  </button>
+                </template>
+              </template>
+              <p v-else class="muted">
+                {{ caps.atx?.reason ?? "Power control is not available." }}
+              </p>
+            </div>
           </div>
         </aside>
       </main>

@@ -45,6 +45,7 @@ static const cap_desc_t s_desc[KVM_CAP_COUNT] = {
                      false,
 #endif
                      "msc_enable"},
+    [KVM_CAP_WOL] = {"wol", true, NULL},
     [KVM_CAP_ATX] = {"atx",
 #if CONFIG_KVM_ENABLE_ATX
                      true,

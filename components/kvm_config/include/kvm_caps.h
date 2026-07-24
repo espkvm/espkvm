@@ -28,6 +28,7 @@ typedef enum {
     KVM_CAP_HID,     /**< USB device stack mounted on the target */
     KVM_CAP_MSC,     /**< virtual media: microSD present and mounted */
     KVM_CAP_ATX,     /**< ATX power control wired and configured */
+    KVM_CAP_WOL,     /**< Wake-on-LAN: can send a magic packet over the network */
     KVM_CAP_AUDIO,   /**< HDMI audio over I2S */
     KVM_CAP_HTTPS,   /**< TLS + authentication */
     KVM_CAP_OTA,     /**< two OTA slots present in the partition table */

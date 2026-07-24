@@ -159,6 +159,19 @@ export async function resetSettings(): Promise<Values> {
 }
 
 /**
+ * Wake the target with a Wake-on-LAN magic packet. The target's MAC is a
+ * setting; the device sends the packet from its own network interface.
+ */
+export async function wakeTarget(): Promise<void> {
+  const res = await fetch("/api/v1/power/wake", { method: "POST" });
+  if (res.status === 401) throw new Unauthorized();
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((body as { error?: string }).error ?? `wake failed (${res.status})`);
+  }
+}
+
+/**
  * Send a firmware image. The device writes it to the inactive slot and
  * restarts; if the new image never comes up, the bootloader returns to this
  * one, so the failure mode is a reboot rather than a dead device.

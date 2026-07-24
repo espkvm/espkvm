@@ -4,17 +4,59 @@
  */
 #include "ethernet.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "esp_check.h"
 #include "esp_eth.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "lwip/sockets.h"
 #include "mdns.h"
 #include "sdkconfig.h"
 
 #include "kvm_settings.h"
 
 static const char *TAG = "net";
+
+esp_err_t kvm_wol_send(const char *mac)
+{
+    /* Parse the six MAC octets. sscanf with %hhx keeps this to one line and
+     * rejects anything that is not six colon-separated hex bytes. */
+    uint8_t m[6];
+    if (!mac || sscanf(mac, "%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx", &m[0], &m[1], &m[2], &m[3], &m[4],
+                       &m[5]) != 6) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* The magic packet: six 0xFF bytes, then the target MAC sixteen times. */
+    uint8_t pkt[6 + 16 * 6];
+    memset(pkt, 0xFF, 6);
+    for (int i = 0; i < 16; i++) {
+        memcpy(pkt + 6 + i * 6, m, 6);
+    }
+
+    int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s < 0) {
+        return ESP_FAIL;
+    }
+    const int on = 1;
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on));
+    struct sockaddr_in dst = {
+        .sin_family = AF_INET,
+        .sin_port = htons(9), /* discard port, the usual WoL destination */
+        .sin_addr.s_addr = htonl(INADDR_BROADCAST),
+    };
+    int sent = sendto(s, pkt, sizeof(pkt), 0, (struct sockaddr *)&dst, sizeof(dst));
+    close(s);
+    if (sent != (int)sizeof(pkt)) {
+        ESP_LOGW(TAG, "WoL send failed (%d)", sent);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "WoL magic packet sent to %s", mac);
+    return ESP_OK;
+}
 
 #if CONFIG_KVM_ETH_ENABLE
 static esp_eth_netif_glue_handle_t s_eth_glue;
@@ -91,6 +133,37 @@ esp_err_t ethernet_init(void)
     ESP_RETURN_ON_ERROR(esp_netif_attach(s_eth_netif, s_eth_glue), TAG, "glue");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, eth_on_got_ip, NULL),
                         TAG, "ip ev");
+
+    /*
+     * Static addressing, when the operator has turned DHCP off. A malformed
+     * address falls back to DHCP rather than stranding the device on boot; a
+     * valid-but-wrong one (unreachable gateway, say) is recovered with the reset
+     * button, which reverts to DHCP the same way it clears a forgotten password.
+     */
+    if (!kvm_setting_bool("net_dhcp")) {
+        esp_netif_ip_info_t ip = {0};
+        if (esp_netif_str_to_ip4(kvm_setting_str("net_ip"), &ip.ip) == ESP_OK &&
+            esp_netif_str_to_ip4(kvm_setting_str("net_mask"), &ip.netmask) == ESP_OK &&
+            esp_netif_str_to_ip4(kvm_setting_str("net_gw"), &ip.gw) == ESP_OK) {
+            esp_netif_dhcpc_stop(s_eth_netif); /* ok if it was not running yet */
+            if (esp_netif_set_ip_info(s_eth_netif, &ip) == ESP_OK) {
+                esp_netif_dns_info_t dns = {0};
+                if (esp_netif_str_to_ip4(kvm_setting_str("net_dns"), &dns.ip.u_addr.ip4) == ESP_OK) {
+                    dns.ip.type = ESP_IPADDR_TYPE_V4;
+                    esp_netif_set_dns_info(s_eth_netif, ESP_NETIF_DNS_MAIN, &dns);
+                }
+                const char *scheme = kvm_setting_bool("sec_https") ? "https" : "http";
+                ESP_LOGI(TAG, "Static IP. Open %s://" IPSTR "/ or %s://%s.local/", scheme,
+                         IP2STR(&ip.ip), scheme, hostname);
+            } else {
+                ESP_LOGW(TAG, "could not apply the static address; falling back to DHCP");
+                esp_netif_dhcpc_start(s_eth_netif);
+            }
+        } else {
+            ESP_LOGW(TAG, "static addressing is on but the address is not valid; using DHCP");
+        }
+    }
+
     ESP_RETURN_ON_ERROR(esp_eth_start(s_eth_handle), TAG, "eth start");
 
     esp_err_t mdns_err = mdns_init();

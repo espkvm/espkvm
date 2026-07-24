@@ -153,6 +153,14 @@ static const kvm_setting_t s_settings[] = {
 
     /* ---- power ---------------------------------------------------------- */
     {
+        .key = "pwr_wol_mac", .section = "power", .type = KVM_VT_STR,
+        .title = "Target MAC for Wake-on-LAN",
+        .help = "The target's Ethernet MAC, e.g. AA:BB:CC:DD:EE:FF. The Wake button sends "
+                "it a magic packet. The target must have Wake-on-LAN enabled in its BIOS and "
+                "keep standby power.",
+        .def_str = "", .max_len = 17, .requires_cap = KVM_CAP_WOL,
+    },
+    {
         .key = "atx_enable", .section = "power", .type = KVM_VT_BOOL,
         .title = "Enable ATX control",
         .help = "Requires optocouplers wired to the target's front-panel header.",

@@ -7,6 +7,19 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-25
+
+### Added
+- **Wake-on-LAN.** The Power panel gains a Wake button that sends a magic packet
+  to the target's MAC (set under Settings -> Power), to power on a machine that
+  keeps standby power and has WoL enabled - no ATX wiring needed.
+- **Static network addressing.** The Network tab's static IP, mask, gateway and
+  DNS now take effect; DHCP stays the default. A malformed address falls back to
+  DHCP at boot so a typo cannot strand the device, and the board button now
+  reverts to DHCP alongside clearing the password, so a valid-but-wrong address
+  is recoverable the same way a forgotten password is. (The hostname / mDNS name
+  already applied.)
+
 ## [0.3.0] - 2026-07-24
 
 ### Fixed

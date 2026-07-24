@@ -32,6 +32,7 @@
 #include "cJSON.h"
 
 #include "capture.h"
+#include "ethernet.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
@@ -348,6 +349,31 @@ static esp_err_t api_system_restart_post(httpd_req_t *req)
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
     return sent;
+}
+
+/*
+ * Wake the target with a Wake-on-LAN magic packet. Needs no ATX wiring - just
+ * the target's MAC and a target that keeps standby power with WoL enabled.
+ */
+static esp_err_t api_power_wake_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    const char *mac = kvm_setting_str("pwr_wol_mac");
+    if (!mac || !mac[0]) {
+        return send_json_error(req, "409 Conflict", "no target MAC set (Settings -> Power)");
+    }
+    esp_err_t err = kvm_wol_send(mac);
+    if (err == ESP_ERR_INVALID_ARG) {
+        return send_json_error(req, "400 Bad Request", "the target MAC is not a valid address");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", "could not send the packet");
+    }
+    ESP_LOGW(TAG, "Wake-on-LAN sent to %s", mac);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
 }
 
 static esp_err_t api_settings_reset_post(httpd_req_t *req)
@@ -1620,6 +1646,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
+        {.uri = "/api/v1/power/wake", .method = HTTP_POST, .handler = api_power_wake_post},
         {.uri = "/api/v1/settings", .method = HTTP_GET, .handler = api_settings_get},
         {.uri = "/api/v1/settings", .method = HTTP_PUT, .handler = api_settings_put},
         {.uri = "/api/v1/storage/images", .method = HTTP_GET, .handler = api_storage_images_get},

@@ -126,9 +126,11 @@ static void report_pending_capabilities(void)
 {
     apply_media_selection();
     kvm_cap_report(KVM_CAP_ATX, false, "power control not implemented yet");
+    /* Wake-on-LAN needs only the network, which is up by the time anything can
+     * ask for it. */
+    kvm_cap_report(KVM_CAP_WOL, true, NULL);
     kvm_cap_report(KVM_CAP_AUDIO, false, "audio capture not implemented yet");
-    kvm_cap_report(KVM_CAP_NET_STATIC, false, "static addressing not implemented yet; the "
-                                              "device takes an address by DHCP");
+    kvm_cap_report(KVM_CAP_NET_STATIC, true, NULL);
     /* HTTPS reports itself from the web server, which knows whether the TLS
      * listener actually came up. */
 
