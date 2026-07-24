@@ -20,6 +20,8 @@ static const char *const s_engage_choices[] = {"click", "hover"};
 static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
 static const char *const s_media_choices[] = {"cdrom", "removable", "whole_sd"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
+/* "auto" follows the OS guessed from USB enumeration; the rest force it. */
+static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
 
 /* clang-format off */
 static const kvm_setting_t s_settings[] = {
@@ -72,6 +74,15 @@ static const kvm_setting_t s_settings[] = {
     },
 
     /* ---- input ---------------------------------------------------------- */
+    {
+        .key = "target_os", .section = "input", .type = KVM_VT_ENUM,
+        .title = "Target OS",
+        .help = "Which machine's conventions the console follows - the label on the "
+                "Meta key, and which OS-specific key combinations it offers. \"auto\" "
+                "trusts the guess made from how the target enumerates USB, shown next "
+                "to the USB status; set it by hand if that guess is wrong or unknown.",
+        .min = 0, .max = 4, .def = 0, .choices = s_targetos_choices, .requires_cap = KVM_CAP_HID,
+    },
     {
         .key = "mouse_mode", .section = "input", .type = KVM_VT_ENUM,
         .title = "Pointer mode",

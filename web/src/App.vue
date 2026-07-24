@@ -23,12 +23,15 @@ import {
   loadCapabilities,
   loadSchema,
   loadSystemInfo,
+  loadUsbProbe,
   loadValues,
   loadVideoStatus,
+  type UsbProbe,
   Unauthorized,
 } from "./state/device";
 import { loadSession, type SessionState } from "./state/auth";
 import { toast } from "./state/toasts";
+import OsIcon from "./components/OsIcon.vue";
 
 type PanelId = "video" | "input" | "media" | "power" | "settings" | null;
 
@@ -45,6 +48,15 @@ const values = ref<Values>({});
 const caps = ref<Record<string, Capability>>({});
 const status = ref<VideoStatus | null>(null);
 const system = ref<SystemInfo | null>(null);
+const usbProbe = ref<UsbProbe | null>(null);
+const showOsPopup = ref(false);
+const OS_NAMES: Record<string, string> = {
+  windows: "Windows",
+  macos: "macOS",
+  linux: "Linux",
+  android: "Android",
+  unknown: "not detected",
+};
 const ready = ref(false);
 const loadError = ref<string | null>(null);
 const session = ref<SessionState | null>(null);
@@ -158,10 +170,13 @@ async function startConsole() {
   systemPollId = window.setInterval(async () => {
     try {
       system.value = await loadSystemInfo();
+      usbProbe.value = await loadUsbProbe();
     } catch {
       /* The video poll reports loss of contact, and handles being signed out. */
     }
   }, 10000);
+
+  usbProbe.value = await loadUsbProbe().catch(() => null);
 
   window.addEventListener("keydown", onGlobalKey);
 }
@@ -542,6 +557,7 @@ const LED_BITS: Array<[number, string]> = [
               :schema="schema"
               :values="values"
               :attached="input.target.value.attached"
+              :detected-os="usbProbe?.os ?? 'unknown'"
             />
             <p v-else-if="panel === 'media'" class="muted">
               {{ caps.msc?.reason ?? "Virtual media is not available." }}
@@ -575,6 +591,35 @@ const LED_BITS: Array<[number, string]> = [
                 : "No target on USB"
           }}
         </span>
+
+        <span
+          v-if="input.target.value.attached && usbProbe && usbProbe.os !== 'unknown'"
+          class="os-wrap"
+        >
+          <button
+            type="button"
+            class="os-badge"
+            :title="`Target looks like ${OS_NAMES[usbProbe.os]} - click for the USB fingerprint`"
+            @click="showOsPopup = !showOsPopup"
+          >
+            <OsIcon :os="usbProbe.os" />
+          </button>
+          <template v-if="showOsPopup">
+            <div class="os-popup-backdrop" @click="showOsPopup = false" />
+            <div class="os-popup">
+              <div class="os-popup-head">
+                <OsIcon :os="usbProbe.os" />
+                Looks like <strong>{{ OS_NAMES[usbProbe.os] ?? usbProbe.os }}</strong>
+              </div>
+              <p>
+                Inferred from how the target enumerated over USB. If that is wrong,
+                send us this fingerprint so a later build can learn it:
+              </p>
+              <pre class="fingerprint">{{ usbProbe.trace }}</pre>
+            </div>
+          </template>
+        </span>
+
         <span class="leds">
           <span
             v-for="[bit, name] in LED_BITS"

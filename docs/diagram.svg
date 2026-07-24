@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img"
+     aria-labelledby="diagram-title" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <title id="diagram-title">The target machine's HDMI goes to the capture board, which feeds the ESP32-P4 over MIPI CSI-2. The ESP32-P4 reaches the operator's browser over Ethernet, and plugs back into the target as a USB keyboard and mouse.</title>
+
+  <style>
+    :root {
+      --bg-soft: #eaeef3; --box: #ffffff; --border: #d3d9e0;
+      --text: #10151c; --muted: #4c5764; --accent: #1f6feb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-soft: #12171e; --box: #161b22; --border: #2a313c;
+        --text: #e6edf3; --muted: #9aa7b4; --accent: #4c9aff;
+      }
+    }
+    .panel { fill: var(--bg-soft); stroke: var(--border); stroke-width: 1; }
+    .box { fill: var(--box); stroke: var(--border); stroke-width: 1.5; }
+    .box-accent { stroke: var(--accent); }
+    .label { fill: var(--text); font-size: 13px; font-weight: 600; }
+    .sub { fill: var(--muted); font-size: 11px; }
+    .wire { stroke: var(--muted); stroke-width: 1.5; fill: none; color: var(--muted); }
+    .wire-accent { stroke: var(--accent); color: var(--accent); }
+    .wire-label { fill: var(--muted); font-size: 11px;
+                  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
+    </marker>
+  </defs>
+
+  <rect class="panel" x="1" y="1" width="758" height="248" rx="12" />
+
+  <rect class="box" x="8" y="34" width="150" height="76" rx="8" />
+  <text class="label" x="83" y="66" text-anchor="middle">target machine</text>
+  <text class="sub" x="83" y="86" text-anchor="middle">no OS needed</text>
+
+  <rect class="box" x="212" y="34" width="150" height="76" rx="8" />
+  <text class="label" x="287" y="60" text-anchor="middle">TC358743</text>
+  <text class="sub" x="287" y="78" text-anchor="middle">HDMI capture</text>
+  <text class="sub" x="287" y="94" text-anchor="middle">Geekworm C790</text>
+
+  <rect class="box box-accent" x="416" y="34" width="150" height="76" rx="8" />
+  <text class="label" x="491" y="60" text-anchor="middle">ESP32-P4</text>
+  <text class="sub" x="491" y="78" text-anchor="middle">ESP-KVM firmware</text>
+  <text class="sub" x="491" y="94" text-anchor="middle">Waveshare P4-ETH</text>
+
+  <rect class="box" x="620" y="34" width="132" height="76" rx="8" />
+  <text class="label" x="686" y="66" text-anchor="middle">your browser</text>
+  <text class="sub" x="686" y="86" text-anchor="middle">anywhere on the LAN</text>
+
+  <line class="wire" x1="158" y1="72" x2="206" y2="72" marker-end="url(#arrow)" />
+  <text class="wire-label" x="182" y="60" text-anchor="middle">HDMI</text>
+
+  <line class="wire" x1="362" y1="72" x2="410" y2="72" marker-end="url(#arrow)" />
+  <text class="wire-label" x="386" y="60" text-anchor="middle">CSI-2</text>
+
+  <line class="wire wire-accent" x1="566" y1="72" x2="614" y2="72" marker-end="url(#arrow)" />
+  <text class="wire-label" x="590" y="60" text-anchor="middle">HTTPS</text>
+
+  <path class="wire" d="M491,110 L491,180 L83,180 L83,116" marker-end="url(#arrow)" />
+  <text class="wire-label" x="287" y="200" text-anchor="middle">USB - keyboard and mouse the target cannot tell from real ones</text>
+</svg>

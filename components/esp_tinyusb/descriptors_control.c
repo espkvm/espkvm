@@ -19,6 +19,20 @@
 
 static const char *TAG = "tusb_desc";
 
+/*
+ * ESP-KVM: a hook to observe how the host enumerates this device, for target-OS
+ * detection. Weak so a build without an implementation still links; kvm_hid
+ * provides the real one. kind: 0 = device descriptor, 1 = configuration
+ * descriptor (index = which), 2 = string descriptor (index = which). Windows
+ * asks for string index 0xEE (the MS OS descriptor); macOS and Linux never do,
+ * and differ from each other in the device/config request pattern.
+ */
+__attribute__((weak)) void kvm_usb_host_probe(int kind, uint16_t index)
+{
+    (void)kind;
+    (void)index;
+}
+
 // =============================================================================
 // STRUCTS
 // =============================================================================
@@ -53,6 +67,7 @@ static tinyusb_descriptors_map_t s_desc_cfg;
  */
 uint8_t const *tud_descriptor_device_cb(void)
 {
+    kvm_usb_host_probe(0, 0);
     assert(s_desc_cfg.dev);
     return (uint8_t const *)s_desc_cfg.dev;
 }
@@ -66,6 +81,7 @@ uint8_t const *tud_descriptor_device_cb(void)
  */
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
 {
+    kvm_usb_host_probe(1, index);
     (void)index; // Unused, this driver supports only 1 configuration
     // Return configuration descriptor based on Host speed
     return (TUSB_SPEED_HIGH == tud_speed_get())
@@ -120,6 +136,7 @@ uint8_t const *tud_descriptor_other_speed_configuration_cb(uint8_t index)
  */
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
+    kvm_usb_host_probe(2, index);
     (void) langid; // Unused, this driver supports only one language in string descriptors
     assert(s_desc_cfg.str);
     uint8_t chr_count;

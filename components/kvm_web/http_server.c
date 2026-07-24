@@ -226,6 +226,22 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     return httpd_resp_send(req, body, n);
 }
 
+/* The current host's USB enumeration trace, for target-OS fingerprinting. */
+static esp_err_t api_system_usbprobe_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    char trace[500];
+    usb_hid_probe_trace(trace, sizeof(trace));
+    char body[600];
+    int n = snprintf(body, sizeof(body), "{\"os\":\"%s\",\"trace\":\"%s\"}",
+                     usb_hid_target_os(), trace);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, body, n);
+}
+
 /*
  * Receive a firmware image and boot it next.
  *
@@ -1530,6 +1546,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/settings/schema", .method = HTTP_GET, .handler = api_settings_schema_get},
         {.uri = "/api/v1/video/status", .method = HTTP_GET, .handler = api_video_status_get},
         {.uri = "/api/v1/system/info", .method = HTTP_GET, .handler = api_system_info_get},
+        {.uri = "/api/v1/system/usbprobe", .method = HTTP_GET, .handler = api_system_usbprobe_get},
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},

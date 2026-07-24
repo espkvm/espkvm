@@ -50,6 +50,10 @@ p {
 /* ---- buttons ------------------------------------------------------------ */
 
 .btn {
+  /* Positioned so a .sr-only file <input> inside a button-label is anchored
+     here (in the scroll flow) rather than to a distant ancestor; otherwise
+     focusing it scrolls the whole page to reach it. */
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -280,6 +280,115 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_
     }
 }
 
+/* ---- target-OS detection ------------------------------------------------ */
+/*
+ * The host reveals its OS in how it enumerates us. Fingerprints measured on
+ * real machines (the string column is the descriptor index; "D" device, "Cx"
+ * configuration, "Sxx" string):
+ *
+ *   Windows  requests string 0xEE (the MS OS descriptor); the others never do.
+ *   Android  D D C0 C0 <strings> then a second pass re-reading every string,
+ *            each preceded by a langid (S00) request - so many S00 requests.
+ *   macOS    reads each string twice in a row (S02 S02 ...) and asks for the
+ *            langid (S00) last.
+ *   Linux    reads the langid (S00) first and each string once; ~16 requests.
+ *
+ * The trace is recorded here and also exposed raw over the API
+ * (usb_hid_probe_trace). kvm_usb_host_probe overrides the weak stub in
+ * esp_tinyusb/descriptors_control.c.
+ */
+#define PROBE_MAX 80
+static volatile int s_probe_n;
+static uint16_t s_probe[PROBE_MAX]; /* (kind << 12) | index, in request order */
+
+void kvm_usb_host_probe(int kind, uint16_t index)
+{
+    /*
+     * A device-descriptor request after strings have already been read is a
+     * fresh enumeration - the target rebooted or was replugged - so start the
+     * trace over. This re-detects the current host without relying on a clean
+     * detach event, which this OTG port does not always deliver.
+     */
+    if (kind == 0) {
+        for (int i = 0; i < s_probe_n; i++) {
+            if ((s_probe[i] >> 12) == 2) {
+                s_probe_n = 0;
+                break;
+            }
+        }
+    }
+    const int n = s_probe_n;
+    if (n < PROBE_MAX) {
+        s_probe[n] = (uint16_t)((kind << 12) | (index & 0x0FFF));
+        s_probe_n = n + 1;
+    }
+}
+
+const char *usb_hid_target_os(void)
+{
+    const int n = s_probe_n;
+    if (n < 6) {
+        return "unknown"; /* too little of an enumeration to tell */
+    }
+    int langid = 0;
+    bool has_ee = false, dup = false;
+    int prev = -1;
+    for (int i = 0; i < n; i++) {
+        if ((s_probe[i] >> 12) != 2) { /* string requests only */
+            prev = -1;
+            continue;
+        }
+        const int idx = s_probe[i] & 0x0FFF;
+        if (idx == 0xEE) {
+            has_ee = true;
+        }
+        if (idx == 0) {
+            langid++;
+            prev = 0;
+        } else {
+            if (idx == prev) {
+                dup = true;
+            }
+            prev = idx;
+        }
+    }
+    if (has_ee) {
+        return "windows";
+    }
+    if (langid >= 3) {
+        return "android";
+    }
+    if (dup) {
+        return "macos";
+    }
+    return "linux";
+}
+
+size_t usb_hid_probe_trace(char *out, size_t len)
+{
+    if (!out || len == 0) {
+        return 0;
+    }
+    size_t off = 0;
+    const int n = s_probe_n;
+    for (int i = 0; i < n && off + 8 < len; i++) {
+        const int kind = s_probe[i] >> 12;
+        const int idx = s_probe[i] & 0x0FFF;
+        if (i) {
+            out[off++] = ' ';
+        }
+        if (kind == 0) {
+            off += snprintf(out + off, len - off, "D");
+        } else if (kind == 1) {
+            off += snprintf(out + off, len - off, "C%x", idx);
+        } else {
+            off += snprintf(out + off, len - off, "S%02x", idx);
+        }
+    }
+    out[off] = '\0';
+    return off;
+}
+
 static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
 {
     (void)arg;
@@ -294,6 +403,7 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
     case TINYUSB_EVENT_DETACHED:
         s_usb_mounted = false;
         s_leds = 0;
+        s_probe_n = 0; /* next host's enumeration starts a fresh trace */
         ESP_LOGI(TAG, "target detached");
         break;
     default:

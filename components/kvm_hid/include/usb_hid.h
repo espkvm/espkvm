@@ -72,6 +72,20 @@ uint8_t usb_hid_leds(void);
 typedef void (*usb_hid_led_cb_t)(uint8_t leds, void *user);
 void usb_hid_set_led_callback(usb_hid_led_cb_t cb, void *user);
 
+/**
+ * The current host's USB enumeration trace, as a compact string ("D" device,
+ * "Cx" configuration, "Sxx" string index in hex) in request order. Used to
+ * fingerprint the target OS. Writes into @p out, returns its length.
+ */
+size_t usb_hid_probe_trace(char *out, size_t len);
+
+/**
+ * The target OS inferred from how it enumerated us: "windows", "macos",
+ * "linux", "android", or "unknown" before enough of an enumeration has been
+ * seen. A best-effort fingerprint; the console lets the operator override it.
+ */
+const char *usb_hid_target_os(void);
+
 #ifdef __cplusplus
 }
 #endif

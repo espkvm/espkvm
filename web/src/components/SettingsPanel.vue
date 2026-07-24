@@ -23,6 +23,7 @@ import {
   fetchRelease,
   formatBytes,
   loadImages,
+  loadUsbProbe,
   resetSettings,
   saveSettings,
   settingBlockedReason,
@@ -30,8 +31,10 @@ import {
   uploadImage,
   type StorageInfo,
   type SystemInfo,
+  type UsbProbe,
 } from "../state/device";
 import { changePassword } from "../state/auth";
+import OsIcon from "./OsIcon.vue";
 import { toast } from "../state/toasts";
 
 const props = defineProps<{
@@ -235,9 +238,28 @@ watch(
   currentSection,
   (s) => {
     if (s === "storage") void refreshImages();
+    if (s === "system") void refreshUsbProbe();
   },
   { immediate: true },
 );
+
+/* The target OS, inferred from how it enumerated over USB. Shown in the system
+   tab with its raw fingerprint so a misdetected machine can be reported. */
+const usbProbe = ref<UsbProbe | null>(null);
+async function refreshUsbProbe() {
+  try {
+    usbProbe.value = await loadUsbProbe();
+  } catch {
+    usbProbe.value = null;
+  }
+}
+const OS_NAMES: Record<string, string> = {
+  windows: "Windows",
+  macos: "macOS",
+  linux: "Linux",
+  android: "Android",
+  unknown: "not detected yet",
+};
 
 async function onImageChosen(e: Event) {
   const input = e.target as HTMLInputElement;
@@ -470,6 +492,25 @@ async function doReset() {
         {{ changingPassword ? "Changing..." : "Change password" }}
       </button>
     </form>
+
+    <div v-if="currentSection === 'system'" class="firmware">
+      <h3>Target machine</h3>
+      <p v-if="!usbProbe || usbProbe.os === 'unknown'" class="setting-note">
+        No USB host has enumerated the device yet &mdash; connect its USB-OTG port
+        to the target machine.
+      </p>
+      <template v-else>
+        <div class="os-line">
+          <OsIcon :os="usbProbe.os" />
+          <span>Looks like <strong>{{ OS_NAMES[usbProbe.os] ?? usbProbe.os }}</strong></span>
+        </div>
+        <p class="setting-note">
+          Inferred from how the target enumerated us over USB. If that is wrong for
+          your machine, send us this fingerprint so a later build can learn it:
+        </p>
+        <pre class="fingerprint">{{ usbProbe.trace }}</pre>
+      </template>
+    </div>
 
     <div v-if="currentSection === 'system' && system" class="firmware">
       <h3>Firmware</h3>

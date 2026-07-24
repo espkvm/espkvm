@@ -7,6 +7,26 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Fixed
+- A network firmware update could come up reachable and then be rolled back on
+  the next reset. The image was confirmed only after every peripheral had
+  started, so a USB or capture block left in a bad state by the warm restart
+  kept the confirmation from being reached. The image is now confirmed the
+  moment the network and web server answer - the point at which the device is
+  re-flashable - and the warm-reset-prone peripherals start afterwards, where a
+  failure degrades the device instead of reverting it. Boot phases are logged
+  so a future failure is diagnosable from the serial console.
+
+### Added
+- **Target-OS awareness.** The device guesses whether the target is Windows,
+  macOS, Linux or Android from how it enumerates USB, and shows the guess (with
+  the raw fingerprint) next to the USB status and in Settings. A `Target OS`
+  setting overrides it when the guess is wrong or unknown.
+- The console tailors input to that OS: it labels the Meta key Win, Cmd or
+  Super, and offers OS-specific key combinations - the Linux magic-SysRq
+  sequences **REISUB** (safely reboot a hung machine) and **REISUO** (safely
+  power it off), and **Ctrl+Alt+F1-F6** to switch virtual terminals.
+
 ## [0.2.1] - 2026-07-24
 
 ### Changed

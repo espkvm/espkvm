@@ -36,6 +36,7 @@ Useful for what it does today, and honest about the rest.
 | Login, and a physical password reset | works |
 | Thermal protection | works |
 | Virtual media: boot the target from a disk image | works; images go on a FAT32 card in a reader (up to 4 GB each) |
+| Guessing the target's OS from how it enumerates USB | works |
 | ATX power control | not implemented |
 | HDMI audio | not implemented |
 
@@ -47,14 +48,45 @@ as WireGuard or Tailscale.
 
 ## Hardware
 
-| | |
-|---|---|
-| Board | Waveshare ESP32-P4-ETH - ESP32-P4, 32 MB PSRAM, 32 MB flash, 100M Ethernet, microSD, USB 2.0 OTG HS |
-| Capture | Geekworm C790 - TC358743 HDMI -> MIPI CSI-2 |
-| Cables | 15-pin CSI ribbon between the two; HDMI from the target; USB-C from the board's OTG port to the target |
+Two boards joined by a CSI ribbon: an ESP32-P4 that does the work, and a
+TC358743 bridge that turns the target's HDMI into a stream it can read.
 
-Any ESP32-P4 module with a Raspberry-Pi-compatible CSI connector and Ethernet
-should do; the pin map is in `components/kvm_board/include/kvm_board.h`.
+<table>
+<tr>
+<td width="50%"><img src="docs/board-p4.webp" alt="Waveshare ESP32-P4-ETH board"></td>
+<td width="50%"><img src="docs/board-c790.webp" alt="Geekworm C790 TC358743 HDMI-to-CSI capture board"></td>
+</tr>
+<tr>
+<td valign="top">
+
+**The device - [Waveshare ESP32-P4-ETH](https://www.waveshare.com/esp32-p4-eth.htm)**
+
+ESP32-P4 with 32 MB PSRAM, 32 MB flash, 100M Ethernet, a Raspberry-Pi-compatible
+CSI connector, USB 2.0 OTG HS and a microSD slot. Another ESP32-P4 board with
+Ethernet and the same CSI connector can run it too - the pins are set in
+[menuconfig](docs/PORTING.md), not in the code.
+
+</td>
+<td valign="top">
+
+**The capture - [Geekworm C790](https://wiki.geekworm.com/C790)**
+
+A TC358743 HDMI -> MIPI CSI-2 bridge that turns the target's HDMI output into a
+camera stream the ESP32-P4 can read. Any other TC358743 capture board should do
+just as well.
+
+</td>
+</tr>
+</table>
+
+**Cables:** a 15-pin CSI ribbon between the two boards, HDMI from the target,
+and USB-C from the board's OTG port to the target. A microSD card if you want
+boot-from-image.
+
+<sub>Board photos (c) their makers, taken from the product pages linked above and
+used only to identify the hardware. ESP-KVM is not affiliated with Espressif,
+Waveshare or Geekworm. The pin map is in
+`components/kvm_board/include/kvm_board.h`.</sub>
 
 **The chip revision matters.** Below revision 3.0 several peripherals behave
 differently - the colour conversion the H.264 encoder needs has to go through
@@ -109,11 +141,7 @@ cd web && npm run dev:mock
 
 ## How it works
 
-```
-target HDMI --> TC358743 --MIPI CSI-2--> ESP32-P4 --> JPEG or H.264 --> browser
-                                             |
-target USB <--- composite HID: keyboard + absolute/relative pointer <---'
-```
+![The target's HDMI goes to the TC358743 capture board, which feeds the ESP32-P4 over MIPI CSI-2. The ESP32-P4 reaches your browser over HTTPS on the LAN, and plugs back into the target as a USB keyboard and mouse.](docs/diagram.svg)
 
 **Video.** The bridge is polled for signal state and timings, so a target
 switching from an 800x600 firmware screen to a 1080p desktop is followed
@@ -150,6 +178,16 @@ regardless of the target's mouse acceleration, a relative pointer for software
 that captures the cursor, and consumer keys. Everything is released when the
 browser goes away, so a dropped connection cannot leave a key held down on the
 target.
+
+**Target OS.** How a machine enumerates a USB device is a fingerprint - Windows
+asks for a Microsoft OS descriptor, macOS reads each string twice, Linux does
+not - so the console guesses whether the target is Windows, macOS, Linux or
+Android and shows it next to the USB status, with the raw request trace behind a
+click. That guess is what the console follows when it offers OS-specific key
+combinations (the Linux magic-SysRq sequences, Task Manager on Windows) and when
+it labels the Meta key Win, Cmd or Super. A `Target OS` setting overrides it, for
+when the guess is wrong or the target never showed enough to tell; if it reads a
+machine wrong, that trace is what to send so a later build can learn it.
 
 **Every feature is optional.** Each one reports whether it is compiled in,
 whether the hardware supports it, and whether it is switched on. A control the
@@ -191,7 +229,7 @@ fetching, and the device never reaches out to the internet on its own.
 
 ## Interface
 
-A Vue 3 console served from the device as a single gzipped file of about 43 KB,
+A Vue 3 console served from the device as a single gzipped file of about 46 KB,
 with no external fonts, scripts or requests: the device has to work on a network
 with no way out.
 

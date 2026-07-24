@@ -115,6 +115,20 @@ export async function loadSystemInfo(): Promise<SystemInfo> {
   return getJson<SystemInfo>("/api/v1/system/info");
 }
 
+/**
+ * How the target enumerated us over USB, and the OS inferred from it.
+ * `trace` is the raw request fingerprint - if `os` is wrong for a machine,
+ * that string is what to send so the heuristic can learn it.
+ */
+export interface UsbProbe {
+  os: "windows" | "macos" | "linux" | "android" | "unknown";
+  trace: string;
+}
+
+export async function loadUsbProbe(): Promise<UsbProbe> {
+  return getJson<UsbProbe>("/api/v1/system/usbprobe");
+}
+
 export async function loadVideoStatus(): Promise<VideoStatus> {
   return getJson<VideoStatus>(VIDEO_URL);
 }

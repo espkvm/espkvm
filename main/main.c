@@ -78,6 +78,38 @@ static void apply_media_selection(void)
     }
 }
 
+/*
+ * Tell the bootloader the running image works, so it stops arming a rollback to
+ * the previous slot. This is only meaningful right after an OTA: the new image
+ * boots as PENDING_VERIFY, and the next reset reverts it unless it confirms
+ * itself. A normal boot of an already-confirmed image finds nothing to do.
+ *
+ * The call is deliberately made the moment the recovery path (network + web
+ * server) is up, not after the whole device has started. What a rollback
+ * protects against is an image you cannot reach to replace; once the web server
+ * answers, the device is reachable and re-flashable, so confirming it there is
+ * exactly right - and it means a later step that a warm esp_restart() left in a
+ * bad state (the USB stack, the capture peripheral) can no longer cost a
+ * reachable unit a spurious revert.
+ */
+static void confirm_ota_image(void)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    if (esp_ota_get_state_partition(running, &ota_state) != ESP_OK) {
+        return;
+    }
+    if (ota_state != ESP_OTA_IMG_PENDING_VERIFY) {
+        return; /* not a freshly-flashed image; nothing awaiting confirmation */
+    }
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG, "OTA image on %s confirmed; rollback cancelled", running->label);
+    } else {
+        ESP_LOGE(TAG, "esp_ota_mark_app_valid_cancel_rollback: %s", esp_err_to_name(err));
+    }
+}
+
 static void report_pending_capabilities(void)
 {
     apply_media_selection();
@@ -112,6 +144,7 @@ void app_main(void)
 
     /* The microSD card, if any. A KVM without one is still a KVM, so a missing
      * or unreadable card never holds up start-up. */
+    ESP_LOGI(TAG, "boot: storage");
     ESP_ERROR_CHECK(kvm_storage_init());
 
     /*
@@ -121,34 +154,46 @@ void app_main(void)
      */
     kvm_auth_check_reset_button();
 
+    /*
+     * The recovery path first: bring up the network and the web server, then
+     * confirm the image the moment they answer. Everything past this point can
+     * fail or hang without stranding the device - the operator can always reach
+     * the console and flash again. This ordering is the fix for an OTA that
+     * came up reachable but was rolled back anyway because a later peripheral,
+     * left in a bad state by the warm restart, never finished starting.
+     */
+    ESP_LOGI(TAG, "boot: ethernet");
     ESP_ERROR_CHECK(ethernet_init());
-    ESP_ERROR_CHECK(usb_hid_init());
 
-    /* Before the web server, which reads published frames, and before the
-     * capture task, which installs the codec's buffers into it. */
+    /* Before the web server, which reads published frames. */
     video_frame_store_init();
-    (void)http_server_start();
+    ESP_LOGI(TAG, "boot: web server");
+    httpd_handle_t httpd = http_server_start();
+    if (httpd) {
+        confirm_ota_image();
+    } else {
+        /* No console means no way to replace a bad image except a cable. Leave
+         * it unconfirmed so the bootloader can still roll back to what worked. */
+        ESP_LOGE(TAG, "web server did not start; leaving the image unconfirmed for rollback");
+    }
 
+    /*
+     * Now the peripherals a warm esp_restart() does not power-cycle. USB is not
+     * fatal: a device that cannot present a keyboard is degraded, but it is
+     * still reachable and re-flashable, which is better than aborting into a
+     * rollback of an image that is otherwise fine.
+     */
+    ESP_LOGI(TAG, "boot: usb");
+    esp_err_t hid_err = usb_hid_init();
+    if (hid_err != ESP_OK) {
+        ESP_LOGE(TAG, "usb_hid_init: %s (continuing without HID)", esp_err_to_name(hid_err));
+    }
+
+    ESP_LOGI(TAG, "boot: capture");
     capture_start();
 
     report_pending_capabilities();
     kvm_caps_log();
-
-    /*
-     * Confirm the image only after everything above came up. With rollback
-     * enabled the bootloader reverts to the previous slot unless it is told
-     * the new one works, which is the behaviour we want on a device that is
-     * often the only way to reach the machine it is attached to. Reaching this
-     * line means USB, the web server and the capture task all started.
-     */
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    esp_ota_img_states_t ota_state;
-    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
-        ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-        if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
-            ESP_LOGI(TAG, "image confirmed, rollback cancelled");
-        }
-    }
 
     ESP_LOGI(TAG, "ready");
 }
