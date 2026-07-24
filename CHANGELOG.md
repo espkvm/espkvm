@@ -7,6 +7,8 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-24
+
 ### Fixed
 - A network firmware update could come up reachable and then be rolled back on
   the next reset. The image was confirmed only after every peripheral had
@@ -44,6 +46,12 @@ bumps the patch).
   offset is unchanged. A device adopts it with a one-time full flash over cable
   (the browser flasher works); it cannot be taken on by an over-the-network
   update.
+
+### Security
+- Bumped the build-time dev dependencies (Vite, esbuild) to clear advisories.
+  These are toolchain packages that never ship in the firmware, and the issues
+  were dev-server-only, so there is no effect on the device - the update just
+  keeps the tree clean.
 
 ## [0.2.1] - 2026-07-24
 

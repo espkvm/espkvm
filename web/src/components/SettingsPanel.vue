@@ -444,12 +444,12 @@ async function doReset() {
                 :disabled="!storage.rescue.hasImage"
                 @change="selectImage(RESCUE_MEDIUM)"
               />
-              <span class="mono image-name">Built-in rescue image</span>
+              <span class="image-name">Rescue image</span>
               <span class="muted">
                 {{
                   storage.rescue.hasImage
-                    ? `on flash, up to ${formatBytes(storage.rescue.capacityBytes)}`
-                    : "empty - upload one"
+                    ? "on flash"
+                    : `empty, up to ${formatBytes(storage.rescue.capacityBytes)}`
                 }}
               </span>
             </label>
@@ -510,7 +510,7 @@ async function doReset() {
           </p>
           <p v-if="!storage.writable" class="setting-note setting-note-blocked">
             {{ storage.writeReason ?? "The card is read-only on this device." }}
-            Prepare it in a card reader (FAT32, one file up to 4&nbsp;GB) to add images.
+            Format it FAT32, one file up to 4&nbsp;GB.
           </p>
           <label
             v-if="storage.writable"
@@ -647,6 +647,16 @@ async function doReset() {
             Check again
           </button>
         </div>
+        <p class="setting-note">
+          Or install a specific build by hand: download its <code>.bin</code> from the
+          <a
+            href="https://github.com/espkvm/espkvm/releases"
+            target="_blank"
+            rel="noreferrer"
+            >releases page</a
+          >
+          and pick it below.
+        </p>
         <label :class="['btn', 'btn-sm', { 'btn-disabled': uploading }]">
           {{ uploading ? "Uploading..." : "Install firmware..." }}
           <input
