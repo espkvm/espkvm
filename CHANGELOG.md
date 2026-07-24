@@ -26,6 +26,24 @@ bumps the patch).
   Super, and offers OS-specific key combinations - the Linux magic-SysRq
   sequences **REISUB** (safely reboot a hung machine) and **REISUO** (safely
   power it off), and **Ctrl+Alt+F1-F6** to switch virtual terminals.
+- **Built-in rescue media.** A small bootable image - iPXE, memtest, a DOS
+  floppy - can be kept in a 4 MB flash partition and served to the target over
+  the same USB drive as the card's files, with no microSD needed. Unlike the
+  card, it can be written from the console, because this board's flash writes are
+  reliable where its SD writes are not. Upload it in the virtual-media tab and
+  pick it as the active medium; the card and the rescue image coexist.
+
+### Changed
+- The set of USB functions is now built into the descriptor at start-up instead
+  of being fixed, so mass storage can be left out to free its endpoints (room a
+  future USB-network interface can use). **Expose virtual media** now controls
+  whether the USB drive is present at all and takes effect after a restart; with
+  it off the device is a plain keyboard and mouse. Swapping the image once the
+  drive exists still takes effect immediately.
+- The partition table gains a 4 MB `rescue` partition, appended so every existing
+  offset is unchanged. A device adopts it with a one-time full flash over cable
+  (the browser flasher works); it cannot be taken on by an over-the-network
+  update.
 
 ## [0.2.1] - 2026-07-24
 

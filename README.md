@@ -35,7 +35,7 @@ Useful for what it does today, and honest about the rest.
 | HTTPS with a certificate the device issues itself | works |
 | Login, and a physical password reset | works |
 | Thermal protection | works |
-| Virtual media: boot the target from a disk image | works; images go on a FAT32 card in a reader (up to 4 GB each) |
+| Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
 | Guessing the target's OS from how it enumerates USB | works |
 | ATX power control | not implemented |
 | HDMI audio | not implemented |
@@ -195,13 +195,19 @@ hardware cannot support is shown disabled, carrying the device's own
 explanation, rather than hidden or left to fail silently. `GET
 /api/capabilities` is that registry.
 
-**Virtual media.** A disk image on a microSD card is presented to the target as
-a USB drive it can boot from - a rescue system, an installer, a live image.
-Images are served read-only: this board reads the card reliably but cannot write
-it at a useful speed, so the card is prepared in an ordinary reader. Format it
-FAT32 and copy your images on (up to 4 GB each, a FAT32 limit); the console
-lists them and lets you pick which one the target sees. Upload and delete from
-the browser are shown disabled with that reason rather than left to fail.
+**Virtual media.** A disk image is presented to the target as a USB drive it can
+boot from - a rescue system, an installer, a live image. The console lists what
+is available and lets you pick which one the target sees, from two places at
+once. Images on a **microSD card** are served read-only: this board reads the
+card reliably but cannot write it at a useful speed, so the card is prepared in
+an ordinary reader (format it FAT32, up to 4 GB per file, a FAT32 limit). A small
+image can also live in the **device's own flash** - a 4 MB partition, enough for
+iPXE, memtest or a DOS floppy, and no card needed. Flash writes are reliable
+here, so that one can be uploaded from the browser (or written over the cable
+with `tools/fetch-rescue.sh`, which fetches netboot.xyz by default). The flash
+partition ships empty; adopting the partition table that carries it is a one-time
+full flash (the browser flasher does it), after which the image updates over the
+network.
 
 **Security.** The device serves HTTPS with a certificate it issues itself on
 first boot, and asks for a password before it will do anything. The password is
