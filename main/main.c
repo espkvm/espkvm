@@ -64,16 +64,28 @@ static void apply_media_selection(void)
 {
     kvm_storage_status_t sd;
     kvm_storage_status(&sd);
-    kvm_cap_report(KVM_CAP_MSC, sd.mounted, "no microSD card in the slot");
+    kvm_rescue_t rescue;
+    kvm_storage_rescue_status(&rescue);
+    /* Virtual media is available whenever there is something to serve - a card
+     * or the built-in rescue image - so it works on a device with no card. */
+    kvm_cap_report(KVM_CAP_MSC, sd.mounted || rescue.supported,
+                   "no microSD card and no rescue partition");
 
+    /* The reserved name "@rescue" selects the on-flash image; any other name is
+     * a file on the card. Booting from the card is unchanged. */
     const char *image = kvm_setting_str("msc_image");
-    if (sd.mounted && kvm_setting_bool("msc_enable") && image && image[0]) {
-        esp_err_t err = kvm_storage_media_select(image);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "cannot offer image '%s': %s", image, esp_err_to_name(err));
-            kvm_storage_media_eject();
-        }
+    const bool want = kvm_setting_bool("msc_enable") && image && image[0];
+    esp_err_t err;
+    if (want && strcmp(image, "@rescue") == 0) {
+        err = kvm_storage_media_select_rescue();
+    } else if (want && sd.mounted) {
+        err = kvm_storage_media_select(image);
     } else {
+        kvm_storage_media_eject();
+        return;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "cannot offer media '%s': %s", image, esp_err_to_name(err));
         kvm_storage_media_eject();
     }
 }

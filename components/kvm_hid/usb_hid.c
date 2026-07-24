@@ -20,6 +20,7 @@
 #include "tinyusb_default_config.h"
 
 #include "kvm_caps.h"
+#include "kvm_settings.h"
 #include "kvm_storage.h"
 
 static const char *TAG = "usb_hid";
@@ -160,30 +161,72 @@ static const char *s_string_descriptor[] = {
     "Virtual Media",
 };
 
-#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + NUM_HID_ITF * TUD_HID_DESC_LEN + TUD_MSC_DESC_LEN)
+/*
+ * The configuration descriptor is assembled at start-up rather than baked in,
+ * because the set of USB functions is not fixed. The keyboard and pointers are
+ * always present - they are a KVM's reason to exist - while mass storage (and,
+ * later, a USB network interface) is optional. Presenting every function at once
+ * can exceed the controller's endpoint budget, so only the enabled ones go into
+ * the descriptor. The optional blocks are always appended after the three HID
+ * interfaces, which keeps the interface numbers contiguous as required; a change
+ * to the set needs a re-enumeration, so the toggles that drive it are marked
+ * restart-required.
+ *
+ * The two speeds differ only in the MSC bulk endpoint size (512 high speed, 64
+ * full speed), so each optional block that has one is kept in both flavours.
+ */
+#define CFG_DESC_MAX (TUD_CONFIG_DESC_LEN + NUM_HID_ITF * TUD_HID_DESC_LEN + TUD_MSC_DESC_LEN + 64)
+
+/* A placeholder header: wTotalLength and bNumInterfaces are patched in once the
+ * enabled blocks are known. */
+static const uint8_t k_cfg_header[] = {
+    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CFG_DESC_MAX, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+};
+/* interface, string index, protocol, report descriptor length, endpoint, size, interval */
+static const uint8_t k_hid_ifaces[] = {
+    TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81,
+                       CFG_TUD_HID_EP_BUFSIZE, 10),
+    TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,
+                       CFG_TUD_HID_EP_BUFSIZE, 10),
+    TUD_HID_DESCRIPTOR(ITF_REL_MOUSE, 6, HID_ITF_PROTOCOL_NONE, sizeof(s_rel_report_desc), 0x83,
+                       CFG_TUD_HID_EP_BUFSIZE, 10),
+};
+/* interface, string index, EP out, EP in, EP size */
+static const uint8_t k_msc_iface_fs[] = {
+    TUD_MSC_DESCRIPTOR(ITF_MSC, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN, 64),
+};
+static const uint8_t k_msc_iface_hs[] = {
+    TUD_MSC_DESCRIPTOR(ITF_MSC, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN, 512),
+};
+
+static uint8_t s_fs_config_descriptor[CFG_DESC_MAX];
+static uint8_t s_hs_config_descriptor[CFG_DESC_MAX];
 
 /*
- * One layout, two instances: the MSC bulk endpoint is 512 bytes at high speed
- * and must be 64 at full speed, so the descriptor is parameterised on that size
- * and built once for each speed. The HID interrupt endpoints keep one buffer
- * size at both speeds, which is legal. On the P4's high-speed PHY the host uses
- * the high-speed config; the full-speed one covers a full-speed host or hub.
+ * Assemble the configuration descriptor for the enabled functions into @p buf
+ * and return its length. HID is always included; @p msc_iface (the speed's MSC
+ * block) is appended when @p with_msc. The config header's wTotalLength and
+ * bNumInterfaces are then patched to match what was actually emitted.
  */
-#define CONFIGURATION_DESCRIPTOR(msc_epsize)                                                        \
-    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, \
-                          100),                                                                     \
-    /* interface, string index, protocol, report descriptor length, endpoint, size, interval */    \
-    TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81, \
-                       CFG_TUD_HID_EP_BUFSIZE, 10),                                                 \
-    TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,  \
-                       CFG_TUD_HID_EP_BUFSIZE, 10),                                                 \
-    TUD_HID_DESCRIPTOR(ITF_REL_MOUSE, 6, HID_ITF_PROTOCOL_NONE, sizeof(s_rel_report_desc), 0x83,    \
-                       CFG_TUD_HID_EP_BUFSIZE, 10),                                                 \
-    /* interface, string index, EP out, EP in, EP size */                                          \
-    TUD_MSC_DESCRIPTOR(ITF_MSC, 7, EPNUM_MSC_OUT, EPNUM_MSC_IN, (msc_epsize))
-
-static const uint8_t s_fs_config_descriptor[] = {CONFIGURATION_DESCRIPTOR(64)};
-static const uint8_t s_hs_config_descriptor[] = {CONFIGURATION_DESCRIPTOR(512)};
+static size_t build_config_descriptor(uint8_t *buf, bool with_msc, const uint8_t *msc_iface,
+                                      size_t msc_len)
+{
+    size_t n = 0;
+    uint8_t ifaces = NUM_HID_ITF;
+    memcpy(buf + n, k_cfg_header, sizeof(k_cfg_header));
+    n += sizeof(k_cfg_header);
+    memcpy(buf + n, k_hid_ifaces, sizeof(k_hid_ifaces));
+    n += sizeof(k_hid_ifaces);
+    if (with_msc) {
+        memcpy(buf + n, msc_iface, msc_len);
+        n += msc_len;
+        ifaces++; /* MSC is ITF_MSC == NUM_HID_ITF, appended last, no renumbering */
+    }
+    buf[2] = (uint8_t)(n & 0xff); /* wTotalLength, little-endian */
+    buf[3] = (uint8_t)(n >> 8);
+    buf[4] = ifaces;              /* bNumInterfaces */
+    return n;
+}
 
 /* ---- report queue ------------------------------------------------------- */
 
@@ -767,6 +810,17 @@ esp_err_t usb_hid_init(void)
 
     s_hid_q = xQueueCreate(192, sizeof(q_msg_t));
     ESP_RETURN_ON_FALSE(s_hid_q, ESP_ERR_NO_MEM, TAG, "queue");
+
+    /*
+     * Decide which optional USB functions to expose before the descriptor is
+     * built. Mass storage is off unless the operator turned it on, so the device
+     * is a plain keyboard and mouse by default and only claims the extra
+     * endpoints when virtual media is actually wanted.
+     */
+    const bool with_msc = kvm_setting_bool("msc_enable");
+    build_config_descriptor(s_fs_config_descriptor, with_msc, k_msc_iface_fs, sizeof(k_msc_iface_fs));
+    build_config_descriptor(s_hs_config_descriptor, with_msc, k_msc_iface_hs, sizeof(k_msc_iface_hs));
+    ESP_LOGI(TAG, "USB functions: HID%s", with_msc ? " + mass storage" : " only");
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(tinyusb_on_event);
     tusb_cfg.descriptor.device = NULL;

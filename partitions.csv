@@ -10,10 +10,19 @@
 # virtual media live on the microSD card, but certificates, logs and a custom
 # EDID need somewhere on-device.
 #
-# Name       Type  SubType   Offset     Size
-nvs,         data, nvs,      0x9000,    0x6000
-otadata,     data, ota,      0xf000,    0x2000
-phy_init,    data, phy,      0x11000,   0x1000
-ota_0,       app,  ota_0,    0x20000,   0x400000
-ota_1,       app,  ota_1,    0x420000,  0x400000
-storage,     data, spiffs,   0x820000,  0x400000
+# The 4 MB "rescue" partition holds a small bootable disk image (iPXE, memtest,
+# a DOS floppy) served to the target over USB straight from flash - no card
+# needed, and flash writes are reliable here where the microSD's are not, so it
+# can be re-flashed from the console. It is kept deliberately small: a full OS
+# image does not fit, and is not the point - that is what the microSD is for.
+# Adding this partition leaves every offset above unchanged, so a device adopts
+# it with a one-time cable flash of the table and keeps its app slots.
+#
+# Name       Type  SubType   Offset      Size
+nvs,         data, nvs,      0x9000,     0x6000
+otadata,     data, ota,      0xf000,     0x2000
+phy_init,    data, phy,      0x11000,    0x1000
+ota_0,       app,  ota_0,    0x20000,    0x400000
+ota_1,       app,  ota_1,    0x420000,   0x400000
+storage,     data, spiffs,   0x820000,   0x400000
+rescue,      data, 0x40,     0xc20000,   0x400000

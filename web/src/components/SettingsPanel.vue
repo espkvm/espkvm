@@ -29,6 +29,8 @@ import {
   settingBlockedReason,
   uploadFirmware,
   uploadImage,
+  uploadRescue,
+  RESCUE_MEDIUM,
   type StorageInfo,
   type SystemInfo,
   type UsbProbe,
@@ -220,6 +222,8 @@ const storage = ref<StorageInfo | null>(null);
 const loadingImages = ref(false);
 const uploadingImage = ref(false);
 const uploadPct = ref(0);
+const uploadingRescue = ref(false);
+const rescuePct = ref(0);
 
 async function refreshImages() {
   loadingImages.value = true;
@@ -275,6 +279,29 @@ async function onImageChosen(e: Event) {
     toast.error(err instanceof Error ? err.message : String(err));
   } finally {
     uploadingImage.value = false;
+    input.value = "";
+  }
+}
+
+async function onRescueChosen(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  const cap = storage.value?.rescue?.capacityBytes ?? 0;
+  if (cap && file.size > cap) {
+    toast.error(`${file.name} is larger than the ${formatBytes(cap)} rescue partition`);
+    input.value = "";
+    return;
+  }
+  uploadingRescue.value = true;
+  rescuePct.value = 0;
+  try {
+    storage.value = await uploadRescue(file, (f) => (rescuePct.value = Math.round(f * 100)));
+    toast.info(`Rescue image written (${file.name})`);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    uploadingRescue.value = false;
     input.value = "";
   }
 }
@@ -392,25 +419,52 @@ async function doReset() {
     </div>
 
     <div v-if="currentSection === 'storage'" class="firmware">
-      <h3>Images on the card</h3>
-      <p v-if="loadingImages && !storage" class="setting-note">Reading the card...</p>
-      <p v-else-if="storage && !storage.mounted" class="section-blocked">
-        No microSD card is mounted. Insert one formatted as FAT32 with your boot
-        images copied on (up to 4&nbsp;GB per file).
+      <h3>Virtual media</h3>
+      <p v-if="loadingImages && !storage" class="setting-note">Reading media...</p>
+      <p v-else-if="storage && !storage.mounted && !storage.rescue?.supported" class="section-blocked">
+        No microSD card and no built-in rescue partition. Insert a card formatted
+        FAT32 with your boot images copied on (up to 4&nbsp;GB per file).
       </p>
       <template v-else-if="storage">
         <p class="setting-note">
-          {{ formatBytes(storage.freeBytes) }} free of {{ formatBytes(storage.totalBytes) }}.
-          The chosen image is served to the target read-only; turn on
+          The chosen medium is served to the target; turn on
           <em>Expose virtual media</em> above for it to appear.
-        </p>
-        <p v-if="!storage.writable" class="setting-note setting-note-blocked">
-          {{ storage.writeReason ?? "The card is read-only on this device." }}
-          Format it FAT32 and copy images in a card reader &mdash; one file up to
-          4&nbsp;GB (a FAT32 limit) &mdash; then pick one below.
         </p>
 
         <ul class="image-list">
+          <li
+            v-if="storage.rescue?.supported"
+            :class="['image-row', { 'image-active': storage.active === RESCUE_MEDIUM }]"
+          >
+            <label class="image-pick">
+              <input
+                type="radio"
+                name="active-image"
+                :checked="storage.active === RESCUE_MEDIUM"
+                :disabled="!storage.rescue.hasImage"
+                @change="selectImage(RESCUE_MEDIUM)"
+              />
+              <span class="mono image-name">Built-in rescue image</span>
+              <span class="muted">
+                {{
+                  storage.rescue.hasImage
+                    ? `on flash, up to ${formatBytes(storage.rescue.capacityBytes)}`
+                    : "empty - upload one"
+                }}
+              </span>
+            </label>
+            <label :class="['btn', 'btn-sm', 'btn-quiet', { 'btn-disabled': uploadingRescue }]">
+              {{
+                uploadingRescue
+                  ? `${rescuePct}%...`
+                  : storage.rescue.hasImage
+                    ? "Replace..."
+                    : "Upload..."
+              }}
+              <input type="file" class="sr-only" :disabled="uploadingRescue" @change="onRescueChosen" />
+            </label>
+          </li>
+
           <li
             v-for="img in storage.images"
             :key="img.name"
@@ -435,7 +489,7 @@ async function doReset() {
               Delete
             </button>
           </li>
-          <li v-if="storage.images.length === 0" class="muted image-empty">
+          <li v-if="storage.mounted && storage.images.length === 0" class="muted image-empty">
             No images on the card yet. Upload one below.
           </li>
         </ul>
@@ -447,16 +501,25 @@ async function doReset() {
             :checked="!storage.active"
             @change="selectImage('')"
           />
-          <span>Eject &mdash; offer the target no medium</span>
+          <span>Eject - offer the target no medium</span>
         </label>
 
-        <label
-          v-if="storage.writable"
-          :class="['btn', 'btn-sm', { 'btn-disabled': uploadingImage }]"
-        >
-          {{ uploadingImage ? `Uploading ${uploadPct}%...` : "Upload image..." }}
-          <input type="file" class="sr-only" :disabled="uploadingImage" @change="onImageChosen" />
-        </label>
+        <template v-if="storage.mounted">
+          <p class="setting-note">
+            {{ formatBytes(storage.freeBytes) }} free of {{ formatBytes(storage.totalBytes) }} on the card.
+          </p>
+          <p v-if="!storage.writable" class="setting-note setting-note-blocked">
+            {{ storage.writeReason ?? "The card is read-only on this device." }}
+            Prepare it in a card reader (FAT32, one file up to 4&nbsp;GB) to add images.
+          </p>
+          <label
+            v-if="storage.writable"
+            :class="['btn', 'btn-sm', { 'btn-disabled': uploadingImage }]"
+          >
+            {{ uploadingImage ? `Uploading ${uploadPct}%...` : "Upload card image..." }}
+            <input type="file" class="sr-only" :disabled="uploadingImage" @change="onImageChosen" />
+          </label>
+        </template>
       </template>
     </div>
 

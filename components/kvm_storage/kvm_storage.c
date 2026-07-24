@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
+#include "esp_partition.h"
 #include "esp_vfs_fat.h"
 #include "ff.h"
 #include "sdmmc_cmd.h"
@@ -51,6 +52,43 @@ static FIL s_media_file;
 static bool s_media_open;
 static uint64_t s_media_blocks;
 static char s_media_name[64];
+
+/*
+ * What the inserted image is backed by. The target sees one USB drive; behind
+ * it is either a file on the microSD card or the on-flash "rescue" partition.
+ * Both coexist - the operator picks which one is inserted - so booting from the
+ * card is unaffected by the built-in image, and the built-in image is there
+ * even with no card in the slot.
+ */
+typedef enum { MEDIA_SRC_NONE, MEDIA_SRC_SD, MEDIA_SRC_FLASH } media_src_t;
+static media_src_t s_media_src;
+/* The rescue partition, found once at init; NULL on a device whose partition
+ * table predates it (it is served only when present). */
+static const esp_partition_t *s_rescue;
+/* An upload in progress: the partition is being erased/written, so it must not
+ * be served to the target meanwhile. */
+static bool s_rescue_writing;
+static size_t s_rescue_wpos;
+
+/* An erased flash sector reads as 0xFF; a written image never leaves its first
+ * sector all-ones, so this is how "is there an image at all" is answered
+ * without storing a separate flag. */
+static bool rescue_has_image(void)
+{
+    if (!s_rescue) {
+        return false;
+    }
+    uint8_t head[MEDIA_BLOCK_SIZE];
+    if (esp_partition_read(s_rescue, 0, head, sizeof(head)) != ESP_OK) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(head); i++) {
+        if (head[i] != 0xFF) {
+            return true;
+        }
+    }
+    return false;
+}
 
 #define SD_PWR_ON_LEVEL (KVM_BOARD_SD_PWR_ACTIVE_LOW ? 0 : 1)
 
@@ -144,10 +182,11 @@ void kvm_storage_status(kvm_storage_status_t *out)
 
 static void media_close_locked(void)
 {
-    if (s_media_open) {
+    if (s_media_src == MEDIA_SRC_SD && s_media_open) {
         f_close(&s_media_file);
-        s_media_open = false;
     }
+    s_media_open = false;
+    s_media_src = MEDIA_SRC_NONE;
     s_media_blocks = 0;
     s_media_name[0] = '\0';
 }
@@ -192,6 +231,7 @@ esp_err_t kvm_storage_media_select(const char *name)
         return ESP_ERR_INVALID_SIZE;
     }
     s_media_open = true;
+    s_media_src = MEDIA_SRC_SD;
     s_media_blocks = size / MEDIA_BLOCK_SIZE;
     snprintf(s_media_name, sizeof(s_media_name), "%s", name);
     xSemaphoreGive(s_media_lock);
@@ -201,9 +241,125 @@ esp_err_t kvm_storage_media_select(const char *name)
     return ESP_OK;
 }
 
+esp_err_t kvm_storage_media_select_rescue(void)
+{
+    if (!s_media_lock) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_media_lock, portMAX_DELAY);
+    if (s_rescue_writing) {
+        xSemaphoreGive(s_media_lock);
+        return ESP_ERR_INVALID_STATE; /* being re-flashed; cannot serve it now */
+    }
+    media_close_locked();
+    if (!s_rescue) {
+        xSemaphoreGive(s_media_lock);
+        return ESP_ERR_NOT_SUPPORTED; /* table predates the rescue partition */
+    }
+    if (!rescue_has_image()) {
+        xSemaphoreGive(s_media_lock);
+        return ESP_ERR_NOT_FOUND; /* partition is erased; nothing to boot */
+    }
+    /* The whole partition is offered as the disk. A raw boot image (an iPXE
+     * .usb, a floppy) describes its real extent in its own MBR; the erased tail
+     * past it is never read by a booting target. */
+    s_media_open = true;
+    s_media_src = MEDIA_SRC_FLASH;
+    s_media_blocks = s_rescue->size / MEDIA_BLOCK_SIZE;
+    snprintf(s_media_name, sizeof(s_media_name), "rescue");
+    xSemaphoreGive(s_media_lock);
+    ESP_LOGI(TAG, "media inserted: built-in rescue image, %llu blocks",
+             (unsigned long long)s_media_blocks);
+    return ESP_OK;
+}
+
 void kvm_storage_media_eject(void)
 {
     (void)kvm_storage_media_select(NULL);
+}
+
+void kvm_storage_rescue_status(kvm_rescue_t *out)
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->supported = s_rescue != NULL;
+    if (s_rescue) {
+        out->capacity_bytes = s_rescue->size;
+        out->has_image = rescue_has_image();
+    }
+}
+
+esp_err_t kvm_storage_rescue_write_begin(size_t total)
+{
+    if (!s_rescue || !s_media_lock) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (total == 0 || total > s_rescue->size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    /* Stop serving the image while it changes underneath the target, and lock
+     * out a second uploader. */
+    xSemaphoreTake(s_media_lock, portMAX_DELAY);
+    if (s_rescue_writing) {
+        xSemaphoreGive(s_media_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_media_src == MEDIA_SRC_FLASH) {
+        media_close_locked();
+    }
+    s_rescue_writing = true;
+    s_rescue_wpos = 0;
+    xSemaphoreGive(s_media_lock);
+
+    /* Erase only what the image needs, rounded up to the 4 KB sector. */
+    size_t erase = (total + 0xFFFu) & ~(size_t)0xFFFu;
+    if (erase > s_rescue->size) {
+        erase = s_rescue->size;
+    }
+    esp_err_t err = esp_partition_erase_range(s_rescue, 0, erase);
+    if (err != ESP_OK) {
+        s_rescue_writing = false;
+        ESP_LOGE(TAG, "rescue erase failed: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "rescue upload started: %u bytes into a %u KB partition",
+                 (unsigned)total, (unsigned)(s_rescue->size / 1024));
+    }
+    return err;
+}
+
+esp_err_t kvm_storage_rescue_write(const void *buf, size_t len)
+{
+    if (!s_rescue_writing) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!buf || s_rescue_wpos + len > s_rescue->size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    esp_err_t err = esp_partition_write(s_rescue, s_rescue_wpos, buf, len);
+    if (err == ESP_OK) {
+        s_rescue_wpos += len;
+    } else {
+        ESP_LOGE(TAG, "rescue write at %u failed: %s", (unsigned)s_rescue_wpos,
+                 esp_err_to_name(err));
+    }
+    return err;
+}
+
+esp_err_t kvm_storage_rescue_write_end(void)
+{
+    if (!s_rescue_writing) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_rescue_writing = false;
+    ESP_LOGI(TAG, "rescue image written: %u bytes", (unsigned)s_rescue_wpos);
+    return ESP_OK;
+}
+
+void kvm_storage_rescue_write_abort(void)
+{
+    s_rescue_writing = false;
 }
 
 void kvm_storage_media_info(kvm_media_t *out)
@@ -237,22 +393,36 @@ int32_t kvm_storage_media_read(uint64_t offset, void *buf, uint32_t len)
         xSemaphoreGive(s_media_lock);
         return -1;
     }
-    /*
-     * Retry a failed read: this board occasionally returns a CRC error (0x109)
-     * on an SD read at full speed, and such errors are transient - the same
-     * block reads clean on the next try. Over a multi-gigabyte boot image the
-     * rare miss would otherwise reach the target as a disk error. A handful of
-     * attempts turns those into a slight hitch instead.
-     */
+
     int32_t got = -1;
-    for (int attempt = 0; attempt < 4 && got < 0; attempt++) {
-        if (f_lseek(&s_media_file, (FSIZE_t)offset) != FR_OK) {
-            continue;
+    if (s_media_src == MEDIA_SRC_FLASH) {
+        /* Memory-mapped flash: fast and reliable, no retry needed. A read past
+         * the end of the partition keeps the zero fill from the memset above. */
+        uint32_t avail = 0;
+        if (offset < s_rescue->size) {
+            const uint64_t rest = s_rescue->size - offset;
+            avail = rest < len ? (uint32_t)rest : len;
         }
-        UINT br = 0;
-        if (f_read(&s_media_file, buf, len, &br) == FR_OK) {
-            got = (int32_t)len; /* zero-padded above, so the block is complete */
-            (void)br;
+        if (avail == 0 || esp_partition_read(s_rescue, (size_t)offset, buf, avail) == ESP_OK) {
+            got = (int32_t)len;
+        }
+    } else {
+        /*
+         * Retry a failed read: this board occasionally returns a CRC error
+         * (0x109) on an SD read at full speed, and such errors are transient -
+         * the same block reads clean on the next try. Over a multi-gigabyte boot
+         * image the rare miss would otherwise reach the target as a disk error.
+         * A handful of attempts turns those into a slight hitch instead.
+         */
+        for (int attempt = 0; attempt < 4 && got < 0; attempt++) {
+            if (f_lseek(&s_media_file, (FSIZE_t)offset) != FR_OK) {
+                continue;
+            }
+            UINT br = 0;
+            if (f_read(&s_media_file, buf, len, &br) == FR_OK) {
+                got = (int32_t)len; /* zero-padded above, so the block is complete */
+                (void)br;
+            }
         }
     }
     if (got < 0) {
@@ -272,6 +442,15 @@ esp_err_t kvm_storage_init(void)
 {
     if (!s_media_lock) {
         s_media_lock = xSemaphoreCreateMutex();
+    }
+    /* The built-in rescue image lives here; independent of the card, so this is
+     * found whether or not a card ever mounts. Absent on an older table. */
+    if (!s_rescue) {
+        s_rescue = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, 0x40, "rescue");
+        if (s_rescue) {
+            ESP_LOGI(TAG, "rescue partition: %lu KB, %s", (unsigned long)(s_rescue->size / 1024),
+                     rescue_has_image() ? "image present" : "empty");
+        }
     }
     slot_power_claim();
 

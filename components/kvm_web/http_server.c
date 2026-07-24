@@ -437,6 +437,17 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
     if (!kvm_storage_writable()) {
         cJSON_AddStringToObject(root, "writeReason", kvm_storage_write_unavailable_reason());
     }
+    /* The built-in rescue image on flash, offered alongside the card's files.
+     * Writable from the console because this board's flash writes are reliable,
+     * unlike the card's. */
+    kvm_rescue_t rescue;
+    kvm_storage_rescue_status(&rescue);
+    cJSON *rj = cJSON_AddObjectToObject(root, "rescue");
+    if (rj) {
+        cJSON_AddBoolToObject(rj, "supported", rescue.supported);
+        cJSON_AddBoolToObject(rj, "hasImage", rescue.has_image);
+        cJSON_AddNumberToObject(rj, "capacityBytes", (double)rescue.capacity_bytes);
+    }
     cJSON *images = cJSON_AddArrayToObject(root, "images");
 
     if (sd.mounted && images) {
@@ -671,6 +682,65 @@ static esp_err_t api_storage_delete_post(httpd_req_t *req)
     }
     ESP_LOGI(TAG, "image '%s' deleted", name);
     return api_storage_images_get(req);
+}
+
+/*
+ * Write an image into the on-flash rescue partition.
+ *
+ * Streamed straight into flash like a firmware update, and small (a few MB at
+ * most), so unlike the gigabyte card uploads it runs inline on the control task
+ * rather than on a worker. Flash writes are reliable on this board, which is why
+ * this is offered where card writes are not. To boot from it afterwards, select
+ * the rescue image as the active medium (msc_image = "@rescue") with virtual
+ * media enabled.
+ */
+static esp_err_t api_storage_rescue_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    kvm_rescue_t rescue;
+    kvm_storage_rescue_status(&rescue);
+    if (!rescue.supported) {
+        return send_json_error(req, "409 Conflict",
+                               "no rescue partition; flash the current partition table first");
+    }
+    if (req->content_len <= 0) {
+        return send_json_error(req, "400 Bad Request", "empty body");
+    }
+    if ((size_t)req->content_len > rescue.capacity_bytes) {
+        return send_json_error(req, "413 Payload Too Large", "image larger than the rescue partition");
+    }
+    esp_err_t err = kvm_storage_rescue_write_begin((size_t)req->content_len);
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
+    }
+    ESP_LOGW(TAG, "rescue upload: %d bytes", req->content_len);
+
+    char chunk[2048];
+    int received = 0;
+    while (received < req->content_len) {
+        const int want = (int)sizeof(chunk) < (req->content_len - received)
+                             ? (int)sizeof(chunk)
+                             : (req->content_len - received);
+        const int n = httpd_req_recv(req, chunk, (size_t)want);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (n <= 0) {
+            kvm_storage_rescue_write_abort();
+            return send_json_error(req, "400 Bad Request", "upload was cut short");
+        }
+        err = kvm_storage_rescue_write(chunk, (size_t)n);
+        if (err != ESP_OK) {
+            kvm_storage_rescue_write_abort();
+            return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
+        }
+        received += n;
+    }
+    kvm_storage_rescue_write_end();
+    ESP_LOGW(TAG, "rescue image written (%d bytes)", req->content_len);
+    return api_storage_images_get(req); /* echo the new state, incl. rescue.hasImage */
 }
 
 /* Long MJPEG response must not run on the httpd select() thread; see httpd_req_async_handler_begin(). */
@@ -1555,6 +1625,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/storage/images", .method = HTTP_GET, .handler = api_storage_images_get},
         {.uri = "/api/v1/storage/upload", .method = HTTP_POST, .handler = api_storage_upload_post},
         {.uri = "/api/v1/storage/delete", .method = HTTP_POST, .handler = api_storage_delete_post},
+        {.uri = "/api/v1/storage/rescue", .method = HTTP_POST, .handler = api_storage_rescue_post},
     };
     for (size_t i = 0; i < sizeof(api_uris) / sizeof(api_uris[0]); i++) {
         httpd_register_uri_handler(h, &api_uris[i]);

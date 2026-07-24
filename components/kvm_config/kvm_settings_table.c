@@ -130,9 +130,12 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "msc_enable", .section = "storage", .type = KVM_VT_BOOL,
         .title = "Expose virtual media",
-        .help = "Present a disk image to the target as a USB drive. Turn off to keep "
-                "the device a plain keyboard and mouse.",
-        .def = 0, .requires_cap = KVM_CAP_MSC,
+        .help = "Present a USB drive to the target that it can boot from. Off keeps the "
+                "device a plain keyboard and mouse, which also frees the USB endpoints the "
+                "drive would use. Adding or removing the drive re-enumerates the device to "
+                "the target, so it takes effect after a restart; swapping the image once the "
+                "drive exists does not.",
+        .def = 0, .requires_cap = KVM_CAP_MSC, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "msc_mode", .section = "storage", .type = KVM_VT_ENUM,

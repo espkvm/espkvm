@@ -89,6 +89,44 @@ void kvm_storage_media_eject(void);
 
 void kvm_storage_media_info(kvm_media_t *out);
 
+/* ---- built-in rescue image (on-flash) -------------------------------------
+ *
+ * A small bootable image - iPXE, memtest, a DOS floppy - kept in a flash
+ * partition and served to the target over the same USB drive as the card
+ * images. It needs no microSD, reads fast because flash is memory-mapped, and
+ * unlike the card it can be (re)written from the console, since this board's
+ * flash writes are reliable where its SD writes are not. It is small by design:
+ * a full OS image belongs on the card. Absent on a device whose partition table
+ * predates the feature.
+ */
+typedef struct {
+    bool supported;         /**< the rescue partition exists on this device */
+    bool has_image;         /**< it holds an image (its first sector is written) */
+    uint64_t capacity_bytes; /**< partition size, the largest image it can hold */
+} kvm_rescue_t;
+
+void kvm_storage_rescue_status(kvm_rescue_t *out);
+
+/**
+ * Insert the built-in rescue image as the USB drive. Coexists with the card:
+ * this simply makes the flash image the inserted medium instead of a file.
+ * @return ESP_OK, ESP_ERR_NOT_SUPPORTED with no rescue partition, or
+ *         ESP_ERR_NOT_FOUND when the partition is present but empty.
+ */
+esp_err_t kvm_storage_media_select_rescue(void);
+
+/*
+ * Write a new image into the rescue partition, streamed like a firmware update.
+ * Unlike the microSD, this board's flash writes are reliable, so this is offered
+ * from the console. begin() ejects the rescue image if it is currently served,
+ * erases what @p total needs, and locks out a second writer; write() appends;
+ * end() finishes; abort() releases the lock on a failed transfer.
+ */
+esp_err_t kvm_storage_rescue_write_begin(size_t total);
+esp_err_t kvm_storage_rescue_write(const void *buf, size_t len);
+esp_err_t kvm_storage_rescue_write_end(void);
+void kvm_storage_rescue_write_abort(void);
+
 /**
  * Read @p len bytes at byte @p offset from the inserted image. Thread-safe
  * against selection and against itself. Missing bytes past end-of-file are

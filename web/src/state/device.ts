@@ -256,6 +256,24 @@ export interface StorageImage {
   size: number;
 }
 
+/**
+ * The built-in rescue image, kept in a flash partition and served over the same
+ * USB drive as the card's files. It needs no card and, unlike the card, can be
+ * written from here. Selected as the active medium by the reserved name
+ * "@rescue".
+ */
+export interface RescueInfo {
+  /** The rescue partition exists on this device (absent on an older table). */
+  supported: boolean;
+  /** It holds an image, so it can be offered to the target. */
+  hasImage: boolean;
+  /** Partition size - the largest image it can hold. */
+  capacityBytes: number;
+}
+
+/** The reserved active-medium name that selects the on-flash rescue image. */
+export const RESCUE_MEDIUM = "@rescue";
+
 export interface StorageInfo {
   mounted: boolean;
   totalBytes: number;
@@ -267,6 +285,8 @@ export interface StorageInfo {
   writable: boolean;
   /** Why writing is unavailable, when it is. */
   writeReason?: string;
+  /** The on-flash rescue image, present on devices whose table has it. */
+  rescue?: RescueInfo;
 }
 
 export async function loadImages(): Promise<StorageInfo> {
@@ -289,6 +309,43 @@ export function uploadImage(file: File, onProgress?: (fraction: number) => void)
     xhr.onload = () => {
       if (xhr.status === 401) return reject(new Unauthorized());
       if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = `upload failed (${xhr.status})`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        /* keep the status-code message */
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("upload failed: the connection dropped"));
+    xhr.send(file);
+  });
+}
+
+/**
+ * Write an image into the on-flash rescue partition. Same streaming shape as a
+ * card upload, but it POSTs the whole body (no name) and the device writes flash
+ * directly - which works here where card writes do not. Returns the refreshed
+ * storage state the endpoint echoes back.
+ */
+export function uploadRescue(file: File, onProgress?: (fraction: number) => void): Promise<StorageInfo> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/storage/rescue");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status === 401) return reject(new Unauthorized());
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          return resolve(JSON.parse(xhr.responseText) as StorageInfo);
+        } catch {
+          return reject(new Error("upload succeeded but the reply was unreadable"));
+        }
+      }
       let message = `upload failed (${xhr.status})`;
       try {
         const body = JSON.parse(xhr.responseText) as { error?: string };
