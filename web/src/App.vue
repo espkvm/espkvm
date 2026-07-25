@@ -10,8 +10,12 @@ import Icon from "./components/Icon.vue";
 import InputPanel from "./components/InputPanel.vue";
 import LoginView from "./components/LoginView.vue";
 import ScreenView from "./components/ScreenView.vue";
+import DiagWidget from "./components/DiagWidget.vue";
+import OsWidget from "./components/OsWidget.vue";
+import MediaPanel from "./components/MediaPanel.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import ToastHost from "./components/ToastHost.vue";
+import UpdateWidget from "./components/UpdateWidget.vue";
 import { useInput } from "./input/useInput";
 import {
   type Capability,
@@ -32,7 +36,6 @@ import {
 } from "./state/device";
 import { loadSession, type SessionState } from "./state/auth";
 import { toast } from "./state/toasts";
-import OsIcon from "./components/OsIcon.vue";
 
 type PanelId = "video" | "input" | "media" | "power" | "settings" | null;
 
@@ -50,7 +53,6 @@ const caps = ref<Record<string, Capability>>({});
 const status = ref<VideoStatus | null>(null);
 const system = ref<SystemInfo | null>(null);
 const usbProbe = ref<UsbProbe | null>(null);
-const showOsPopup = ref(false);
 
 /* Wake-on-LAN: the target MAC is a setting, the button is here. */
 const wolMac = computed(() => String(values.value.pwr_wol_mac ?? "").trim());
@@ -66,13 +68,6 @@ async function wake() {
     waking.value = false;
   }
 }
-const OS_NAMES: Record<string, string> = {
-  windows: "Windows",
-  macos: "macOS",
-  linux: "Linux",
-  android: "Android",
-  unknown: "not detected",
-};
 const ready = ref(false);
 const loadError = ref<string | null>(null);
 const session = ref<SessionState | null>(null);
@@ -100,6 +95,8 @@ const pointerMode = computed(
       | "auto") ?? "absolute",
 );
 const invertScroll = computed(() => Boolean(values.value.scroll_inv));
+/* Which side the rail and its panels sit on, from the ui_side setting. */
+const uiRight = computed(() => enumName(schema.value, values.value, "ui_side") === "right");
 
 const input = useInput({
   engaged,
@@ -413,13 +410,7 @@ const LED_BITS: Array<[number, string]> = [
 
       <span class="statusbar-spacer" />
 
-      <span
-        v-if="system"
-        class="stat mono"
-        :title="`${system.project} ${system.version}\nbuilt ${system.built}\nESP-IDF ${system.idf}\nrunning from ${system.partition}`"
-      >
-        {{ system.version }}
-      </span>
+      <UpdateWidget :system="system" :values="values" />
 
       <button
         type="button"
@@ -431,7 +422,7 @@ const LED_BITS: Array<[number, string]> = [
       </button>
     </header>
 
-    <div class="body">
+    <div :class="['body', { 'layout-right': uiRight }]">
       <nav class="rail" aria-label="Panels">
         <button
           type="button"
@@ -470,6 +461,12 @@ const LED_BITS: Array<[number, string]> = [
           <Icon name="power" :size="18" />
         </button>
         <div class="rail-spacer" />
+        <OsWidget
+          :probe="usbProbe"
+          :attached="input.target.value.attached"
+          :side="uiRight ? 'right' : 'left'"
+        />
+        <DiagWidget :system="system" :side="uiRight ? 'right' : 'left'" />
         <button
           type="button"
           :class="['rail-btn', { 'rail-btn-active': panel === 'settings' }]"
@@ -515,7 +512,6 @@ const LED_BITS: Array<[number, string]> = [
               :schema="schema"
               :values="values"
               :caps="caps"
-              :system="system"
               @values="values = $event"
               @password-changed="onPasswordChanged"
             />
@@ -576,9 +572,7 @@ const LED_BITS: Array<[number, string]> = [
               :detected-os="usbProbe?.os ?? 'unknown'"
               @values="values = $event"
             />
-            <p v-else-if="panel === 'media'" class="muted">
-              {{ caps.msc?.reason ?? "Virtual media is not available." }}
-            </p>
+            <MediaPanel v-else-if="panel === 'media'" @values="values = $event" />
             <div v-else-if="panel === 'power'" class="power-panel">
               <template v-if="caps.wol?.available">
                 <h3>Wake on LAN</h3>
@@ -624,34 +618,6 @@ const LED_BITS: Array<[number, string]> = [
                 ? "USB attached"
                 : "No target on USB"
           }}
-        </span>
-
-        <span
-          v-if="input.target.value.attached && usbProbe && usbProbe.os !== 'unknown'"
-          class="os-wrap"
-        >
-          <button
-            type="button"
-            class="os-badge"
-            :title="`Target looks like ${OS_NAMES[usbProbe.os]} - click for the USB fingerprint`"
-            @click="showOsPopup = !showOsPopup"
-          >
-            <OsIcon :os="usbProbe.os" />
-          </button>
-          <template v-if="showOsPopup">
-            <div class="os-popup-backdrop" @click="showOsPopup = false" />
-            <div class="os-popup">
-              <div class="os-popup-head">
-                <OsIcon :os="usbProbe.os" />
-                Looks like <strong>{{ OS_NAMES[usbProbe.os] ?? usbProbe.os }}</strong>
-              </div>
-              <p>
-                Inferred from how the target enumerated over USB. If that is wrong,
-                send us this fingerprint so a later build can learn it:
-              </p>
-              <pre class="fingerprint">{{ usbProbe.trace }}</pre>
-            </div>
-          </template>
         </span>
 
         <span class="leds">

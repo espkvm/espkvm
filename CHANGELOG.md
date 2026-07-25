@@ -7,6 +7,26 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-25
+
+### Changed
+- The firmware version is now a widget in the status bar: an outlined badge that
+  shows a dot when a newer build is published and whose outline fills as a
+  progress ring while an update installs. Clicking it opens the firmware panel -
+  the update check, installing a release or a hand-picked `.bin` - which moved
+  out of Settings so the whole flow is one click from the version.
+- Live diagnostics (chip temperature, memory, uptime, ESP-IDF version) moved from
+  the Settings System tab into a rail button above Settings: the button shows the
+  temperature and a coarse uptime (55min, 1h, 3d, 2w, 5m, 1y), the rest opens in
+  a popup beside the rail.
+- The guessed target OS moved out of the action bar into its own rail button
+  above Settings (next to the diagnostics one); clicking it shows the raw USB
+  fingerprint. The popups open toward the stage on whichever side the rail is on.
+- The image list, active-medium choice and uploads moved out of Settings into the
+  Virtual media panel itself; Settings keeps only the media settings.
+- The button rail and its panels now open on the same side, and a `Panel side`
+  setting (Settings -> System) flips the whole unit left or right.
+
 ## [0.5.1] - 2026-07-25
 
 ### Added

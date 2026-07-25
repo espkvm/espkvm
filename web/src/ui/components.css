@@ -222,7 +222,8 @@
 }
 
 .input-panel,
-.power-panel {
+.power-panel,
+.media-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -421,22 +422,6 @@
   padding: var(--space-2) 0;
 }
 
-/* ---- target-OS panel ---------------------------------------------------- */
-
-.os-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
-  margin: 4px 0 10px;
-}
-
-.os-line .os-icon {
-  width: 28px;
-  height: 28px;
-  color: var(--text);
-}
-
 .fingerprint {
   margin: 8px 0 0;
   padding: 10px 12px;
@@ -452,67 +437,3 @@
   overflow-x: auto;
 }
 
-/* ---- target-OS badge in the action bar ---------------------------------- */
-
-.os-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.os-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  line-height: 0;
-}
-.os-badge:hover {
-  color: var(--text);
-  background: var(--surface-2, rgba(127, 127, 127, 0.12));
-}
-.os-badge .os-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.os-popup-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-}
-
-.os-popup {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 41;
-  width: min(340px, 80vw);
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
-  background: var(--bg-raised);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-}
-.os-popup-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  margin-bottom: 8px;
-}
-.os-popup-head .os-icon {
-  width: 22px;
-  height: 22px;
-  color: var(--text);
-}
-.os-popup p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 13px;
-}

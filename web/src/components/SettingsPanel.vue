@@ -8,7 +8,7 @@
  * device's own reason, rather than hidden. Hiding it would leave the operator
  * wondering whether the feature exists at all.
  */
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 
 import {
   SECTION_ORDER,
@@ -16,34 +16,17 @@ import {
   type Capability,
   type Setting,
   type Values,
-  type FirmwareRelease,
-  compareVersions,
-  downloadFirmware,
-  deleteImage,
-  fetchRelease,
-  formatBytes,
-  loadImages,
-  loadUsbProbe,
   resetSettings,
   saveSettings,
   settingBlockedReason,
-  uploadFirmware,
-  uploadImage,
-  uploadRescue,
-  RESCUE_MEDIUM,
-  type StorageInfo,
-  type SystemInfo,
-  type UsbProbe,
 } from "../state/device";
 import { changePassword } from "../state/auth";
-import OsIcon from "./OsIcon.vue";
 import { toast } from "../state/toasts";
 
 const props = defineProps<{
   schema: Setting[];
   values: Values;
   caps: Record<string, Capability>;
-  system: SystemInfo | null;
 }>();
 
 const emit = defineEmits<{ values: [Values]; passwordChanged: [] }>();
@@ -83,98 +66,6 @@ async function write(key: string, value: number | string | boolean) {
   }
 }
 
-const uploading = ref(false);
-const firmwarePct = ref(0);
-
-async function onFirmwareChosen(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (!file) return;
-  if (!confirm(`Install ${file.name} and restart the device?`)) return;
-  uploading.value = true;
-  firmwarePct.value = 0;
-  try {
-    await uploadFirmware(file, (f) => (firmwarePct.value = Math.round(f * 100)));
-    toast.info("Firmware written, the device is restarting");
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
-  } finally {
-    uploading.value = false;
-    (e.target as HTMLInputElement).value = "";
-  }
-}
-
-/*
- * The update check.
- *
- * The browser asks, not the device: on an isolated network the device has no
- * way out, and on any other it should not be taking one. What arrives is
- * handed to the same endpoint a manual upload uses, so there is one path into
- * the flash and one thing to trust.
- */
-const release = ref<FirmwareRelease | null>(null);
-const checking = ref(false);
-const checkError = ref<string | null>(null);
-
-const updateUrl = computed(() => String(props.values.upd_url ?? "").trim());
-const updateEnabled = computed(() => Boolean(props.values.upd_check) && updateUrl.value !== "");
-/*
- * What the published build is, relative to the running one. Version numbers are
- * compared as numbers - "v1.10.0" is newer than "v1.2.0", which a string
- * comparison gets backwards - and a device running an untagged build cannot be
- * ordered against a release at all, so it is offered the choice rather than
- * told it is behind.
- */
-const updateState = computed<"none" | "newer" | "same" | "older" | "unknown">(() => {
-  const published = release.value?.version;
-  const running = props.system?.version;
-  if (!published || !running) return "none";
-  const order = compareVersions(published, running);
-  if (order === null) return published === running ? "same" : "unknown";
-  if (order > 0) return "newer";
-  return order === 0 ? "same" : "older";
-});
-const updateAvailable = computed(
-  () => updateState.value === "newer" || updateState.value === "unknown",
-);
-
-async function checkForUpdate() {
-  if (!updateEnabled.value) return;
-  checking.value = true;
-  checkError.value = null;
-  try {
-    release.value = await fetchRelease(updateUrl.value);
-  } catch (err) {
-    release.value = null;
-    checkError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    checking.value = false;
-  }
-}
-
-/* Check when the panel first has what it needs, and again whenever the address
-   or the switch changes - not on a timer: nobody needs a background poll to
-   the internet from a page that is open for minutes at a time. */
-watch(updateEnabled, (on) => (on ? void checkForUpdate() : (release.value = null)), {
-  immediate: true,
-});
-watch(updateUrl, () => void checkForUpdate());
-
-async function installRelease() {
-  const target = release.value;
-  if (!target) return;
-  if (!confirm(`Install ${target.version} and restart the device?`)) return;
-  uploading.value = true;
-  firmwarePct.value = 0;
-  try {
-    const image = await downloadFirmware(target);
-    await uploadFirmware(image, (f) => (firmwarePct.value = Math.round(f * 100)));
-    toast.info(`${target.version} written, the device is restarting`);
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
-  } finally {
-    uploading.value = false;
-  }
-}
 
 /*
  * Changing the password.
@@ -211,119 +102,6 @@ async function submitPassword() {
     toast.error(err instanceof Error ? err.message : String(err));
   } finally {
     changingPassword.value = false;
-  }
-}
-
-/*
- * Virtual media.
- *
- * The card is the store; this panel lists what is on it, uploads more and
- * chooses which image the target sees. Choosing writes the msc_image setting,
- * the same value the text field above holds, so the two always agree.
- */
-const storage = ref<StorageInfo | null>(null);
-const loadingImages = ref(false);
-const uploadingImage = ref(false);
-const uploadPct = ref(0);
-const uploadingRescue = ref(false);
-const rescuePct = ref(0);
-
-async function refreshImages() {
-  loadingImages.value = true;
-  try {
-    storage.value = await loadImages();
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
-  } finally {
-    loadingImages.value = false;
-  }
-}
-
-/* Load the card's contents when the operator opens the media tab, not before:
-   an idle console has no reason to be reading the directory. */
-watch(
-  currentSection,
-  (s) => {
-    if (s === "storage") void refreshImages();
-    if (s === "system") void refreshUsbProbe();
-  },
-  { immediate: true },
-);
-
-/* The target OS, inferred from how it enumerated over USB. Shown in the system
-   tab with its raw fingerprint so a misdetected machine can be reported. */
-const usbProbe = ref<UsbProbe | null>(null);
-async function refreshUsbProbe() {
-  try {
-    usbProbe.value = await loadUsbProbe();
-  } catch {
-    usbProbe.value = null;
-  }
-}
-const OS_NAMES: Record<string, string> = {
-  windows: "Windows",
-  macos: "macOS",
-  linux: "Linux",
-  android: "Android",
-  unknown: "not detected yet",
-};
-
-async function onImageChosen(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  uploadingImage.value = true;
-  uploadPct.value = 0;
-  try {
-    await uploadImage(file, (f) => (uploadPct.value = Math.round(f * 100)));
-    toast.info(`${file.name} uploaded`);
-    await refreshImages();
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
-  } finally {
-    uploadingImage.value = false;
-    input.value = "";
-  }
-}
-
-async function onRescueChosen(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  const cap = storage.value?.rescue?.capacityBytes ?? 0;
-  if (cap && file.size > cap) {
-    toast.error(`${file.name} is larger than the ${formatBytes(cap)} rescue partition`);
-    input.value = "";
-    return;
-  }
-  uploadingRescue.value = true;
-  rescuePct.value = 0;
-  try {
-    storage.value = await uploadRescue(file, (f) => (rescuePct.value = Math.round(f * 100)));
-    toast.info(`Rescue image written (${file.name})`);
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
-  } finally {
-    uploadingRescue.value = false;
-    input.value = "";
-  }
-}
-
-async function selectImage(name: string) {
-  try {
-    emit("values", await saveSettings({ msc_image: name }));
-    if (storage.value) storage.value.active = name;
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
-  }
-}
-
-async function removeImage(name: string) {
-  if (!confirm(`Delete ${name} from the card?`)) return;
-  try {
-    storage.value = await deleteImage(name);
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -421,139 +199,6 @@ async function doReset() {
       </div>
     </div>
 
-    <div v-if="currentSection === 'storage'" class="firmware">
-      <h3>Virtual media</h3>
-      <p v-if="loadingImages && !storage" class="setting-note">Reading media...</p>
-      <p v-else-if="storage && !storage.mounted && !storage.rescue?.supported" class="section-blocked">
-        No microSD card and no built-in rescue partition. Insert a card formatted
-        FAT32 with your boot images copied on (up to 4&nbsp;GB per file).
-      </p>
-      <template v-else-if="storage">
-        <p class="setting-note">
-          The chosen medium is served to the target; turn on
-          <em>Expose virtual media</em> above for it to appear.
-        </p>
-
-        <ul class="image-list">
-          <li
-            v-if="storage.rescue?.supported"
-            :class="['image-row', { 'image-active': storage.active === RESCUE_MEDIUM }]"
-          >
-            <label class="image-pick">
-              <input
-                type="radio"
-                name="active-image"
-                :checked="storage.active === RESCUE_MEDIUM"
-                :disabled="!storage.rescue.hasImage"
-                @change="selectImage(RESCUE_MEDIUM)"
-              />
-              <span class="image-name">Rescue image</span>
-              <span class="muted">
-                {{
-                  storage.rescue.hasImage
-                    ? "on flash"
-                    : `empty, up to ${formatBytes(storage.rescue.capacityBytes)}`
-                }}
-              </span>
-            </label>
-            <label :class="['btn', 'btn-sm', 'btn-quiet', { 'btn-disabled': uploadingRescue }]">
-              {{
-                uploadingRescue
-                  ? `${rescuePct}%...`
-                  : storage.rescue.hasImage
-                    ? "Replace..."
-                    : "Upload..."
-              }}
-              <input type="file" class="sr-only" :disabled="uploadingRescue" @change="onRescueChosen" />
-            </label>
-          </li>
-
-          <li
-            v-for="img in storage.images"
-            :key="img.name"
-            :class="['image-row', { 'image-active': img.name === storage.active }]"
-          >
-            <label class="image-pick">
-              <input
-                type="radio"
-                name="active-image"
-                :checked="img.name === storage.active"
-                @change="selectImage(img.name)"
-              />
-              <span class="mono image-name">{{ img.name }}</span>
-              <span class="muted">{{ formatBytes(img.size) }}</span>
-            </label>
-            <button
-              v-if="storage.writable"
-              type="button"
-              class="btn btn-sm btn-quiet"
-              @click="removeImage(img.name)"
-            >
-              Delete
-            </button>
-          </li>
-          <li v-if="storage.mounted && storage.images.length === 0" class="muted image-empty">
-            No images on the card yet. Upload one below.
-          </li>
-        </ul>
-
-        <div
-          v-if="uploadingRescue"
-          class="progress"
-          role="progressbar"
-          :aria-valuenow="rescuePct"
-          aria-valuemin="0"
-          aria-valuemax="100"
-        >
-          <div class="progress-fill" :style="{ width: rescuePct + '%' }"></div>
-        </div>
-
-        <p v-if="storage.rescue?.supported" class="setting-note">
-          Need a rescue image? A small one fits the flash slot -
-          <a href="https://netboot.xyz" target="_blank" rel="noreferrer">netboot.xyz</a>
-          boots a menu of rescue systems and installers over the network. Download it, then use
-          Upload above.
-        </p>
-
-        <label class="image-pick image-eject">
-          <input
-            type="radio"
-            name="active-image"
-            :checked="!storage.active"
-            @change="selectImage('')"
-          />
-          <span>Eject - offer the target no medium</span>
-        </label>
-
-        <template v-if="storage.mounted">
-          <p class="setting-note">
-            {{ formatBytes(storage.freeBytes) }} free of {{ formatBytes(storage.totalBytes) }} on the card.
-          </p>
-          <p v-if="!storage.writable" class="setting-note setting-note-blocked">
-            {{ storage.writeReason ?? "The card is read-only on this device." }}
-            Format it FAT32, one file up to 4&nbsp;GB.
-          </p>
-          <label
-            v-if="storage.writable"
-            :class="['btn', 'btn-sm', { 'btn-disabled': uploadingImage }]"
-          >
-            {{ uploadingImage ? `Uploading ${uploadPct}%...` : "Upload card image..." }}
-            <input type="file" class="sr-only" :disabled="uploadingImage" @change="onImageChosen" />
-          </label>
-          <div
-            v-if="uploadingImage"
-            class="progress"
-            role="progressbar"
-            :aria-valuenow="uploadPct"
-            aria-valuemin="0"
-            aria-valuemax="100"
-          >
-            <div class="progress-fill" :style="{ width: uploadPct + '%' }"></div>
-          </div>
-        </template>
-      </template>
-    </div>
-
     <form
       v-if="currentSection === 'security'"
       class="firmware"
@@ -586,133 +231,6 @@ async function doReset() {
         {{ changingPassword ? "Changing..." : "Change password" }}
       </button>
     </form>
-
-    <div v-if="currentSection === 'system'" class="firmware">
-      <h3>Target machine</h3>
-      <p v-if="!usbProbe || usbProbe.os === 'unknown'" class="setting-note">
-        No USB host has enumerated the device yet &mdash; connect its USB-OTG port
-        to the target machine.
-      </p>
-      <template v-else>
-        <div class="os-line">
-          <OsIcon :os="usbProbe.os" />
-          <span>Looks like <strong>{{ OS_NAMES[usbProbe.os] ?? usbProbe.os }}</strong></span>
-        </div>
-        <p class="setting-note">
-          Inferred from how the target enumerated us over USB. If that is wrong for
-          your machine, send us this fingerprint so a later build can learn it:
-        </p>
-        <pre class="fingerprint">{{ usbProbe.trace }}</pre>
-      </template>
-    </div>
-
-    <div v-if="currentSection === 'system' && system" class="firmware">
-      <h3>Firmware</h3>
-      <dl class="facts">
-        <div class="fact"><dt>Version</dt><dd class="mono">{{ system.version }}</dd></div>
-        <div class="fact"><dt>Built</dt><dd class="mono">{{ system.built }}</dd></div>
-        <div class="fact"><dt>Running from</dt><dd class="mono">{{ system.partition }}</dd></div>
-        <div v-if="system.tempC > 0" class="fact">
-          <dt>Chip temperature</dt>
-          <dd class="mono">{{ system.tempC.toFixed(1) }} C</dd>
-        </div>
-        <div class="fact">
-          <dt>Free memory</dt>
-          <dd class="mono">
-            {{ Math.round(system.heapFree / 1024) }}K heap,
-            {{ Math.round(system.psramFree / 1024 / 1024) }}M PSRAM
-          </dd>
-        </div>
-        <div class="fact">
-          <dt>Uptime</dt>
-          <dd class="mono">{{ Math.floor(system.uptimeSeconds / 60) }} min</dd>
-        </div>
-      </dl>
-      <p v-if="!system.updatable" class="section-blocked">
-        This firmware has a single app slot, so it cannot update itself.
-      </p>
-      <template v-else>
-        <p class="setting-note">
-          The image is written to the spare slot. If it fails to start, the device returns to
-          this one on its own.
-        </p>
-
-        <div v-if="updateEnabled" class="update">
-          <p v-if="checking" class="setting-note">Checking for a newer build...</p>
-          <p v-else-if="checkError" class="setting-note setting-note-blocked">
-            Could not read the update manifest: {{ checkError }}
-          </p>
-          <template v-else-if="release">
-            <p v-if="updateState === 'newer'" class="setting-note">
-              <strong>{{ release.version }}</strong> is published; this device runs
-              {{ system.version }}.
-              <a v-if="release.notes" :href="release.notes" target="_blank" rel="noreferrer">
-                What changed
-              </a>
-            </p>
-            <p v-else-if="updateState === 'unknown'" class="setting-note">
-              <strong>{{ release.version }}</strong> is published. This device runs
-              {{ system.version }}, which is not a release, so which is newer is anyone's guess.
-            </p>
-            <p v-else-if="updateState === 'older'" class="setting-note">
-              This device runs {{ system.version }}, ahead of the published
-              {{ release.version }}.
-            </p>
-            <p v-else class="setting-note">This device runs the newest published build.</p>
-            <button
-              v-if="updateAvailable"
-              type="button"
-              class="btn btn-sm"
-              :disabled="uploading"
-              @click="installRelease"
-            >
-              {{ uploading ? `Installing ${firmwarePct}%...` : `Install ${release.version}` }}
-            </button>
-          </template>
-          <button
-            type="button"
-            class="btn btn-sm btn-quiet"
-            :disabled="checking"
-            @click="checkForUpdate"
-          >
-            Check again
-          </button>
-        </div>
-        <p class="setting-note">
-          Or install a specific build by hand: download its <code>.bin</code> from the
-          <a
-            href="https://github.com/espkvm/espkvm/releases"
-            target="_blank"
-            rel="noreferrer"
-            >releases page</a
-          >
-          and pick it below.
-        </p>
-        <label :class="['btn', 'btn-sm', { 'btn-disabled': uploading }]">
-          {{ uploading ? `Uploading ${firmwarePct}%...` : "Install firmware..." }}
-          <input
-            type="file"
-            accept=".bin"
-            class="sr-only"
-            :disabled="uploading"
-            @change="onFirmwareChosen"
-          />
-        </label>
-        <div
-          v-if="uploading"
-          class="progress"
-          role="progressbar"
-          :aria-valuenow="firmwarePct"
-          aria-valuemin="0"
-          aria-valuemax="100"
-        >
-          <div class="progress-fill" :style="{ width: firmwarePct + '%' }"></div>
-        </div>
-        <p v-if="uploading" class="setting-note">
-          Keep this page open until it finishes and the device restarts.
-        </p>
-      </template>
-    </div>
 
     <div class="settings-footer">
       <button type="button" class="btn btn-sm btn-danger" :disabled="busy" @click="doReset">

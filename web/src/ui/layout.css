@@ -114,14 +114,32 @@
 .panel {
   position: absolute;
   top: 0;
-  right: 0;
+  left: 0;
   bottom: 0;
   width: min(var(--panel-width), 100%);
   display: flex;
   flex-direction: column;
   background: var(--bg-overlay);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   box-shadow: var(--shadow-panel);
+}
+
+/* Rail and its panels are one unit; the ui_side setting flips the unit to the
+   right - the rail moves over (row-reverse) and the panel opens beside it. */
+.body.layout-right {
+  flex-direction: row-reverse;
+}
+
+.layout-right .rail {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+.layout-right .panel {
+  left: auto;
+  right: 0;
+  border-right: none;
+  border-left: 1px solid var(--border);
 }
 
 .panel-head {
@@ -284,7 +302,13 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .body {
+  .body,
+  .body.layout-right {
     flex-direction: column;
+  }
+
+  .layout-right .rail {
+    border-left: none;
+    border-bottom: 1px solid var(--border);
   }
 }

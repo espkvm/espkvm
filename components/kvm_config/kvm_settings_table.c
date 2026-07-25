@@ -20,6 +20,7 @@ static const char *const s_engage_choices[] = {"click", "hover"};
 static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
 static const char *const s_media_choices[] = {"cdrom", "removable", "whole_sd"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
+static const char *const s_side_choices[] = {"left", "right"};
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
 
@@ -306,6 +307,12 @@ static const kvm_setting_t s_settings[] = {
         .key = "log_level", .section = "system", .type = KVM_VT_ENUM,
         .title = "Log verbosity",
         .min = 0, .max = 3, .def = 2, .choices = s_log_choices, .requires_cap = -1,
+    },
+    {
+        .key = "ui_side", .section = "system", .type = KVM_VT_ENUM,
+        .title = "Panel side",
+        .help = "Which side of the screen the button rail and its panels sit on.",
+        .min = 0, .max = 1, .def = 0, .choices = s_side_choices, .requires_cap = -1,
     },
 };
 /* clang-format on */
