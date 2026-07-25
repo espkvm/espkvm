@@ -574,6 +574,7 @@ const LED_BITS: Array<[number, string]> = [
               :values="values"
               :attached="input.target.value.attached"
               :detected-os="usbProbe?.os ?? 'unknown'"
+              @values="values = $event"
             />
             <p v-else-if="panel === 'media'" class="muted">
               {{ caps.msc?.reason ?? "Virtual media is not available." }}

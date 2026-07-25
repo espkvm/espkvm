@@ -125,6 +125,15 @@ static const kvm_setting_t s_settings[] = {
         .help = "Raise it if the target drops characters while text is being pasted.",
         .min = 1, .max = 200, .def = 8, .requires_cap = KVM_CAP_HID,
     },
+    {
+        /* User-defined key macros, as a JSON array the console reads and writes.
+         * The section is deliberately one the settings panel does not render, so
+         * this stays a store rather than a text field a person edits by hand. */
+        .key = "macros_json", .section = "macros", .type = KVM_VT_STR,
+        .title = "User key macros",
+        .help = "Saved macros, edited from the Input panel.",
+        .def_str = "[]", .max_len = 2000, .requires_cap = KVM_CAP_HID,
+    },
 
     /* ---- storage -------------------------------------------------------- */
     {

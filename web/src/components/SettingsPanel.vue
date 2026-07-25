@@ -494,6 +494,13 @@ async function doReset() {
           </li>
         </ul>
 
+        <p v-if="storage.rescue?.supported" class="setting-note">
+          Need a rescue image? A small one fits the flash slot -
+          <a href="https://netboot.xyz" target="_blank" rel="noreferrer">netboot.xyz</a>
+          boots a menu of rescue systems and installers over the network. Download it, then use
+          Upload above.
+        </p>
+
         <label class="image-pick image-eject">
           <input
             type="radio"

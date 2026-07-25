@@ -7,6 +7,19 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-25
+
+### Added
+- **User macros.** Save named key macros - a short script of key chords, typed
+  text and delays (`key ctrl+alt+f2`, `type root`, `delay 500`) - in the Input
+  panel and replay them with one click, for a fixed sequence like stepping
+  through a BIOS or an unattended install. Stored on the device, so they follow
+  it rather than the browser.
+
+### Changed
+- The virtual-media tab now points at netboot.xyz for where to get a rescue
+  image, since the browser cannot fetch one cross-origin to install in one click.
+
 ## [0.4.0] - 2026-07-25
 
 ### Added

@@ -228,6 +228,30 @@
   gap: var(--space-3);
 }
 
+.macro-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.macro-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.macro-editor textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 96px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font: var(--text-sm) / 1.4 var(--font-mono);
+}
+
 /* Key combinations the operator's own browser intercepts. */
 .macro-bar {
   display: flex;

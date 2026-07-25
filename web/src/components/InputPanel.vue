@@ -12,8 +12,15 @@ import { computed, ref } from "vue";
 
 import { macrosForOs, macroLabel, SYSRQ_MOD, SYSRQ_KEY, SYSRQ_LETTERS } from "../macros.js";
 import { charToHid, untypeableChars, DEFAULT_LAYOUT } from "../layouts.js";
+import {
+  runMacroScript,
+  parseMacroScript,
+  loadMacros,
+  serializeMacros,
+  type Macro as UserMacro,
+} from "../macroScript";
 import type { Control } from "../input/control";
-import { enumName, type Setting, type Values } from "../state/device";
+import { enumName, saveSettings, type Setting, type Values } from "../state/device";
 import { toast } from "../state/toasts";
 
 const props = defineProps<{
@@ -24,6 +31,8 @@ const props = defineProps<{
   /** OS guessed from USB enumeration; "auto" resolves to this. */
   detectedOs: string;
 }>();
+
+const emit = defineEmits<{ (e: "values", v: Values): void }>();
 
 const layout = computed(() => enumName(props.schema, props.values, "kbd_layout") ?? DEFAULT_LAYOUT);
 const typeDelay = computed(() => Math.max(1, Number(props.values.type_delay) || 8));
@@ -133,6 +142,96 @@ async function paste() {
     pasting.value = false;
   }
 }
+
+/* ---- user macros -------------------------------------------------------- */
+
+const userMacros = computed<UserMacro[]>(() => loadMacros(props.values.macros_json));
+const runningMacro = ref<string | null>(null);
+
+/* The editor: index -1 means a new macro, >= 0 edits an existing one, null hides
+   it. Parsing the draft on the fly gives the operator an error before running. */
+const editIndex = ref<number | null>(null);
+const editName = ref("");
+const editScript = ref("");
+const savingMacro = ref(false);
+
+const scriptError = computed(() => {
+  if (editIndex.value === null || !editScript.value.trim()) return null;
+  try {
+    parseMacroScript(editScript.value);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+});
+
+function newMacro() {
+  editIndex.value = -1;
+  editName.value = "";
+  editScript.value = "key ctrl+alt+delete\ndelay 500\ntype hello";
+}
+
+function editMacro(i: number) {
+  const m = userMacros.value[i];
+  editIndex.value = i;
+  editName.value = m.name;
+  editScript.value = m.script;
+}
+
+function cancelEdit() {
+  editIndex.value = null;
+}
+
+async function persistMacros(list: UserMacro[]) {
+  savingMacro.value = true;
+  try {
+    emit("values", await saveSettings({ macros_json: serializeMacros(list) }));
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    savingMacro.value = false;
+  }
+}
+
+async function saveMacro() {
+  const name = editName.value.trim();
+  if (!name) {
+    toast.error("Give the macro a name");
+    return;
+  }
+  if (scriptError.value) {
+    toast.error(scriptError.value);
+    return;
+  }
+  const list = userMacros.value.slice();
+  const entry = { name, script: editScript.value };
+  if (editIndex.value !== null && editIndex.value >= 0) {
+    list[editIndex.value] = entry;
+  } else {
+    list.push(entry);
+  }
+  await persistMacros(list);
+  editIndex.value = null;
+}
+
+async function deleteMacro(i: number) {
+  if (!confirm(`Delete the macro "${userMacros.value[i].name}"?`)) return;
+  const list = userMacros.value.slice();
+  list.splice(i, 1);
+  await persistMacros(list);
+}
+
+async function runMacro(m: UserMacro) {
+  if (runningMacro.value) return;
+  runningMacro.value = m.name;
+  try {
+    await runMacroScript(m.script, props.control, layout.value, typeDelay.value);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    runningMacro.value = null;
+  }
+}
 </script>
 
 <template>
@@ -155,6 +254,52 @@ async function paste() {
         {{ labelFor(m) }}
       </button>
     </div>
+
+    <h3>Macros</h3>
+    <ul v-if="userMacros.length" class="image-list">
+      <li v-for="(m, i) in userMacros" :key="i" class="image-row">
+        <span class="image-name mono">{{ m.name }}</span>
+        <span class="macro-actions">
+          <button type="button" class="btn btn-sm" :disabled="!!runningMacro" @click="runMacro(m)">
+            {{ runningMacro === m.name ? "Running..." : "Run" }}
+          </button>
+          <button type="button" class="btn btn-sm btn-quiet" @click="editMacro(i)">Edit</button>
+          <button type="button" class="btn btn-sm btn-quiet" @click="deleteMacro(i)">Delete</button>
+        </span>
+      </li>
+    </ul>
+    <p v-else class="setting-note">
+      A macro is a short script - key chords, typed text and delays - that you replay with one
+      click. Handy for a fixed sequence like stepping through a BIOS.
+    </p>
+
+    <div v-if="editIndex !== null" class="macro-editor">
+      <input v-model="editName" type="text" placeholder="Macro name" />
+      <textarea
+        v-model="editScript"
+        rows="6"
+        class="mono"
+        spellcheck="false"
+        placeholder="key ctrl+alt+f2&#10;delay 500&#10;type root&#10;key enter"
+      ></textarea>
+      <p class="setting-note">
+        One command per line: <code>key ctrl+alt+f2</code>, <code>type some text</code>,
+        <code>delay 500</code>. Lines starting with # are ignored.
+      </p>
+      <p v-if="scriptError" class="setting-note setting-note-blocked">{{ scriptError }}</p>
+      <div class="macro-actions">
+        <button
+          type="button"
+          class="btn btn-sm"
+          :disabled="savingMacro || !!scriptError"
+          @click="saveMacro"
+        >
+          {{ savingMacro ? "Saving..." : "Save" }}
+        </button>
+        <button type="button" class="btn btn-sm btn-quiet" @click="cancelEdit">Cancel</button>
+      </div>
+    </div>
+    <button v-else type="button" class="btn btn-sm" @click="newMacro">New macro...</button>
 
     <h3>Paste text</h3>
     <p class="setting-note">
