@@ -84,14 +84,16 @@ async function write(key: string, value: number | string | boolean) {
 }
 
 const uploading = ref(false);
+const firmwarePct = ref(0);
 
 async function onFirmwareChosen(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (!file) return;
   if (!confirm(`Install ${file.name} and restart the device?`)) return;
   uploading.value = true;
+  firmwarePct.value = 0;
   try {
-    await uploadFirmware(file);
+    await uploadFirmware(file, (f) => (firmwarePct.value = Math.round(f * 100)));
     toast.info("Firmware written, the device is restarting");
   } catch (err) {
     toast.error(err instanceof Error ? err.message : String(err));
@@ -162,9 +164,10 @@ async function installRelease() {
   if (!target) return;
   if (!confirm(`Install ${target.version} and restart the device?`)) return;
   uploading.value = true;
+  firmwarePct.value = 0;
   try {
     const image = await downloadFirmware(target);
-    await uploadFirmware(image);
+    await uploadFirmware(image, (f) => (firmwarePct.value = Math.round(f * 100)));
     toast.info(`${target.version} written, the device is restarting`);
   } catch (err) {
     toast.error(err instanceof Error ? err.message : String(err));
@@ -494,6 +497,17 @@ async function doReset() {
           </li>
         </ul>
 
+        <div
+          v-if="uploadingRescue"
+          class="progress"
+          role="progressbar"
+          :aria-valuenow="rescuePct"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div class="progress-fill" :style="{ width: rescuePct + '%' }"></div>
+        </div>
+
         <p v-if="storage.rescue?.supported" class="setting-note">
           Need a rescue image? A small one fits the flash slot -
           <a href="https://netboot.xyz" target="_blank" rel="noreferrer">netboot.xyz</a>
@@ -526,6 +540,16 @@ async function doReset() {
             {{ uploadingImage ? `Uploading ${uploadPct}%...` : "Upload card image..." }}
             <input type="file" class="sr-only" :disabled="uploadingImage" @change="onImageChosen" />
           </label>
+          <div
+            v-if="uploadingImage"
+            class="progress"
+            role="progressbar"
+            :aria-valuenow="uploadPct"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <div class="progress-fill" :style="{ width: uploadPct + '%' }"></div>
+          </div>
         </template>
       </template>
     </div>
@@ -642,7 +666,7 @@ async function doReset() {
               :disabled="uploading"
               @click="installRelease"
             >
-              {{ uploading ? "Installing..." : `Install ${release.version}` }}
+              {{ uploading ? `Installing ${firmwarePct}%...` : `Install ${release.version}` }}
             </button>
           </template>
           <button
@@ -665,7 +689,7 @@ async function doReset() {
           and pick it below.
         </p>
         <label :class="['btn', 'btn-sm', { 'btn-disabled': uploading }]">
-          {{ uploading ? "Uploading..." : "Install firmware..." }}
+          {{ uploading ? `Uploading ${firmwarePct}%...` : "Install firmware..." }}
           <input
             type="file"
             accept=".bin"
@@ -674,6 +698,19 @@ async function doReset() {
             @change="onFirmwareChosen"
           />
         </label>
+        <div
+          v-if="uploading"
+          class="progress"
+          role="progressbar"
+          :aria-valuenow="firmwarePct"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div class="progress-fill" :style="{ width: firmwarePct + '%' }"></div>
+        </div>
+        <p v-if="uploading" class="setting-note">
+          Keep this page open until it finishes and the device restarts.
+        </p>
       </template>
     </div>
 

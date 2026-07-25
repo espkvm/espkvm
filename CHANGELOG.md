@@ -7,6 +7,12 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-25
+
+### Added
+- A progress bar while an image uploads - a firmware update, a microSD image or
+  the on-flash rescue image - so it is clear the upload is moving, not stalled.
+
 ## [0.5.0] - 2026-07-25
 
 ### Added

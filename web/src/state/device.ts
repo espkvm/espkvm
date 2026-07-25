@@ -176,17 +176,31 @@ export async function wakeTarget(): Promise<void> {
  * restarts; if the new image never comes up, the bootloader returns to this
  * one, so the failure mode is a reboot rather than a dead device.
  */
-export async function uploadFirmware(file: Blob): Promise<void> {
-  const res = await fetch("/api/v1/system/update", {
-    method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
-    body: file,
+export function uploadFirmware(file: Blob, onProgress?: (fraction: number) => void): Promise<void> {
+  /* XMLHttpRequest, not fetch, for the upload progress: writing a firmware image
+     takes seconds and the operator needs to see it move, not wonder if it hung. */
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/system/update");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status === 401) return reject(new Unauthorized());
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = `update failed (${xhr.status})`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        /* keep the status-code message */
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("update failed: the connection dropped"));
+    xhr.send(file);
   });
-  if (res.status === 401) throw new Unauthorized();
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error((body as { error?: string }).error ?? `update failed (${res.status})`);
-  }
 }
 
 /**
