@@ -5,6 +5,18 @@ ESP-KVM is built and tested on the Waveshare ESP32-P4-ETH with a Geekworm C790
 Moving to another ESP32-P4 board is a `menuconfig` edit, not a code change: the
 board's pins are Kconfig options with the Waveshare values as defaults.
 
+For a board you intend to support long-term, capture the deltas as an sdkconfig
+overlay under `boards/` instead of a one-off menuconfig edit, and build it into
+its own build dir. See `boards/README.md`; the Espressif ESP32-P4 Function EV
+Board (chip rev v3.2, 16 MB flash) is set up this way in
+`boards/funcev_p4.defaults` + `partitions_funcev.csv` as a worked example.
+
+> Chip revisions matter. ESP32-P4 rev <3.0 and >=3.0 are mutually exclusive
+> build targets (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3`); a binary built for one
+> family will not boot on the other. The reference board is rev v1.3; the
+> Function EV Board is rev v3.2. That is why boards are built separately rather
+> than as one universal image.
+
 > It has to be an **ESP32-P4**. The value here is the MIPI-CSI capture path and
 > the hardware JPEG/H.264 encoders, which the P4 has and the S3 and friends do
 > not. There is no path to another chip family.

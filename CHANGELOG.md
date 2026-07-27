@@ -7,6 +7,29 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-26
+
+### Added
+- Build target for the Espressif ESP32-P4 Function EV Board (chip rev v3.2,
+  16 MB flash) as an sdkconfig overlay: `boards/funcev_p4.defaults` +
+  `partitions_funcev.csv`, documented in `boards/README.md`. Chip rev <3.0 and
+  >=3.0 are mutually exclusive targets, so boards are built separately; the
+  default `idf.py build` still targets the Waveshare ESP32-P4-ETH (rev v1.3).
+- CI now builds every board and publishes each one's release assets (the `.bin`
+  filenames carry the board name) and its own Pages manifests under
+  `firmware/<board>/` and `flash/<board>/`. The root `firmware/` and `flash/`
+  still mirror the Waveshare board, so devices and flasher pages that predate the
+  per-board layout keep working unchanged.
+- The default update-manifest URL is now a build option (`KVM_UPDATE_URL`) so a
+  board's build points its update check at its own manifest. The Waveshare
+  default is unchanged (the root manifest); the Function EV build points at
+  `firmware/funcev/`, so it never tries to install a rev <3.0 image.
+
+### Fixed
+- The "always powered" microSD configuration (`KVM_SD_PWR_GPIO=-1`, documented
+  in PORTING.md) did not actually compile - a constant negative shift tripped
+  `-Werror=shift-count-negative`. That path now builds.
+
 ## [0.6.0] - 2026-07-25
 
 ### Changed

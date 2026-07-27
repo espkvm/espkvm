@@ -229,4 +229,17 @@ menu "ESP-KVM"
             depends on KVM_ETH_ENABLE
     endmenu
 
+    menu "Updates"
+        config KVM_UPDATE_URL
+            string "Default update manifest URL"
+            default "https://espkvm.github.io/espkvm/firmware/manifest.json"
+            help
+                The default value of the runtime "Update manifest" setting - the
+                manifest.json the console's update check reads. Per board, because
+                each board has its own build: the root path serves the Waveshare
+                image (and older devices that predate the per-board layout), and
+                other boards point at firmware/<board>/manifest.json. A user can
+                still override it at runtime to a fork or an in-network mirror.
+    endmenu
+
 endmenu

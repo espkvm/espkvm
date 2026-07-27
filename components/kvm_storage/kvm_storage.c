@@ -98,7 +98,11 @@ static void slot_power_claim(void)
         return; /* board has no power gate; the slot is always powered */
     }
     const gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << KVM_BOARD_SD_PWR_GPIO,
+        /* The early return above means we never reach here with a negative pin,
+         * but the initializer is still compiled, and 1ULL << -1 is a constant
+         * negative shift (-Werror). Clamp so the always-powered (-1) build is
+         * clean; the value is unused in that case. */
+        .pin_bit_mask = 1ULL << (KVM_BOARD_SD_PWR_GPIO < 0 ? 0 : KVM_BOARD_SD_PWR_GPIO),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,

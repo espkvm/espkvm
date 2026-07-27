@@ -19,6 +19,8 @@
 # Build artifacts and directories
 **/build/
 build/
+# Per-board build dirs (e.g. build.funcev for the Function EV Board target)
+build.*/
 *.o
 *.a
 *.out

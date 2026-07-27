@@ -1,0 +1,49 @@
+# ESP32-P4 Function EV Board (board v1.5.2, chip rev v3.2; 16 MB flash, 32 MB PSRAM).
+#
+# This is an OVERLAY applied on top of sdkconfig.defaults - it only carries the
+# deltas from the Waveshare ESP32-P4-ETH build. Build it with:
+#
+#   idf.py -B build.funcev \
+#     -D SDKCONFIG=build.funcev/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/funcev_p4.defaults" \
+#     build
+#
+# (Plain `idf.py build` still builds the Waveshare v1.3 image, unchanged.)
+
+# --- chip revision ----------------------------------------------------------
+# The base pins the target to rev <3.0 for the Waveshare v1.3 board. This board
+# is rev v3.2, and rev <3.0 / >=3.0 are mutually exclusive targets, so drop the
+# cap and target rev >=3.0. min-rev >=300 is also what compiles the esp_h264
+# encoder's RGB-direct path in (no PPA colour convert), which is faster at 1080p.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- flash / partitions -----------------------------------------------------
+# 16 MB here vs 32 MB on Waveshare: the 32 MB partitions.csv does not fit, so
+# use the 16 MB table.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_funcev.csv"
+
+# --- updates ----------------------------------------------------------------
+# This board has its own build, hence its own manifest. Without this, the funcev
+# device would default to the root (Waveshare) manifest and try to OTA a rev<3.0
+# image, which will not boot on this rev v3.2 chip.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/funcev/manifest.json"
+
+# --- board pins -------------------------------------------------------------
+# This board's microSD slot is always powered (no power-gate GPIO).
+CONFIG_KVM_SD_PWR_GPIO=-1
+
+# These match the Waveshare defaults, so no override is needed:
+#   I2C SDA/SCL 7/8, microSD CLK/CMD/D0-D3 43/44/39/40/41/42,
+#   Ethernet IP101 MDC31 MDIO52 REFCLK50(EXT_IN) PHY_reset51 PHY_addr1.
+#
+# The RMII data pins and the BOOT button come from the board schematic; if a
+# board differs from the values below, uncomment and correct them:
+# CONFIG_KVM_ETH_RMII_TX_EN_GPIO=49
+# CONFIG_KVM_ETH_RMII_TXD0_GPIO=34
+# CONFIG_KVM_ETH_RMII_TXD1_GPIO=35
+# CONFIG_KVM_ETH_RMII_CRS_DV_GPIO=28
+# CONFIG_KVM_ETH_RMII_RXD0_GPIO=29
+# CONFIG_KVM_ETH_RMII_RXD1_GPIO=30
+# CONFIG_KVM_BUTTON_GPIO=35   # set to -1 if there is no reachable BOOT button

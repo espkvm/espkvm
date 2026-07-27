@@ -4,6 +4,18 @@
 
 # ESP-KVM
 
+<p align="center">
+  <a href="https://github.com/espkvm/espkvm/actions/workflows/firmware.yml"><img src="https://github.com/espkvm/espkvm/actions/workflows/firmware.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/espkvm/espkvm/releases/latest"><img src="https://img.shields.io/github/v/release/espkvm/espkvm?sort=semver" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/espkvm/espkvm" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/ESP--IDF-v6.0.1-blue" alt="ESP-IDF v6.0.1">
+  <img src="https://img.shields.io/badge/target-ESP32--P4-informational" alt="Target: ESP32-P4">
+</p>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/dexif"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=dexif&button_colour=FFDD00&font_colour=000000&font_family=Inter&outline_colour=000000&coffee_colour=ffffff" height="40" alt="Buy me a coffee"></a>
+</p>
+
 An IP-KVM built from an ESP32-P4 and a Toshiba TC358743 HDMI-to-CSI bridge. It
 captures the target machine's HDMI output, presents itself to that machine as a
 USB keyboard and mouse, and puts both in a browser.
@@ -30,6 +42,7 @@ Useful for what it does today, and honest about the rest.
 | H.264 streaming | works; needs HTTPS in the browser (see below) |
 | Keyboard, absolute and relative pointer, media keys | works |
 | Pasting text with a keyboard layout | works |
+| User-defined key macros | works |
 | Settings, capability reporting, diagnostics | works |
 | Firmware update over the network, with rollback | works |
 | HTTPS with a certificate the device issues itself | works |
@@ -37,6 +50,7 @@ Useful for what it does today, and honest about the rest.
 | Thermal protection | works |
 | Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
 | Guessing the target's OS from how it enumerates USB | works |
+| Wake-on-LAN (magic packet to the target's MAC) | works |
 | ATX power control | not implemented |
 | HDMI audio | not implemented |
 
@@ -64,7 +78,8 @@ TC358743 bridge that turns the target's HDMI into a stream it can read.
 ESP32-P4 with 32 MB PSRAM, 32 MB flash, 100M Ethernet, a Raspberry-Pi-compatible
 CSI connector, USB 2.0 OTG HS and a microSD slot. Another ESP32-P4 board with
 Ethernet and the same CSI connector can run it too - the pins are set in
-[menuconfig](docs/PORTING.md), not in the code.
+[menuconfig](docs/PORTING.md), not in the code. The Espressif ESP32-P4 Function
+EV Board (chip rev v3.2) has its own build target; see [boards/](boards/README.md).
 
 </td>
 <td valign="top">
@@ -90,14 +105,17 @@ Waveshare or Geekworm. The pin map is in
 
 **The chip revision matters.** Below revision 3.0 several peripherals behave
 differently - the colour conversion the H.264 encoder needs has to go through
-the PPA, for one. `sdkconfig.defaults` selects the pre-3.0 family, so a v1.x
-part builds and runs as shipped. What was measured on the board in front of us,
-including the documented claims that turned out to be false, is written down in
-[docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
+the PPA, for one - and rev <3.0 and >=3.0 are mutually exclusive build targets.
+The default build (`sdkconfig.defaults`) selects the pre-3.0 family, so a v1.x
+part builds and runs as shipped; a rev 3.x board is built from its own overlay
+(see [boards/](boards/README.md)). What was measured on the board in front of
+us, including the documented claims that turned out to be false, is written down
+in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
 ## Quick start
 
-Take `espkvm-<version>-full-flash.zip` from the
+Take your board's `espkvm-<version>-<board>-full-flash.zip` (for example
+`-waveshare-`) from the
 [releases](https://github.com/espkvm/espkvm/releases), unpack it, and write it
 with [esptool](https://github.com/espressif/esptool):
 
@@ -129,8 +147,9 @@ idf.py build
 idf.py -p /dev/ttyACM0 -b 921600 flash
 ```
 
-There is no `menuconfig` step: everything the project needs is in
-`sdkconfig.defaults`.
+There is no `menuconfig` step for the default board: everything it needs is in
+`sdkconfig.defaults`. To build for another board, apply its overlay - see
+[boards/](boards/README.md).
 
 The console can also be developed against a simulated device, with no hardware
 attached at all:
@@ -235,21 +254,9 @@ fetching, and the device never reaches out to the internet on its own.
 
 ## Interface
 
-A Vue 3 console served from the device as a single gzipped file of about 46 KB,
+A Vue 3 console served from the device as a single gzipped file of about 50 KB,
 with no external fonts, scripts or requests: the device has to work on a network
 with no way out.
-
-```
-+------------------------------------------------------------+
-| ESP-KVM  * Online  1920x1080  mjpeg 20 fps 8.5 Mbit/s  v1.0 |
-+---+--------------------------------------------------------+
-| S |                                                        |
-| c |                  the target's screen                   |
-| f |                                                        |
-+---+--------------------------------------------------------+
-| [Ctrl+Alt+Del] [Alt+Tab] [Win]    Caps * Num o     [ ] Pause|
-+------------------------------------------------------------+
-```
 
 ## API
 
@@ -261,6 +268,10 @@ Everything the console does is available over HTTP.
 | `GET /api/v1/settings`, `PUT` | settings, validated and applied as a whole |
 | `GET /api/v1/settings/schema` | title, range and help text for every setting |
 | `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers |
+| `GET /api/v1/system/usbprobe` | the target's USB enumeration fingerprint and the OS guessed from it |
+| `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active |
+| `POST /api/v1/storage/upload`, `/rescue`, `/delete` | manage the virtual-media images |
+| `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
 | `GET /api/v1/system/info` | version, uptime, free memory, chip temperature and thermal state |
 | `POST /api/v1/system/update` | firmware image, written to the spare slot |
 | `POST /api/v1/system/restart` | restart, for settings that need one |
@@ -277,11 +288,13 @@ components/
   tc358743/       HDMI bridge driver, EDID profiles
   video_pipeline/ CSI capture, MJPEG and H.264 codecs, published frame store
   kvm_hid/        composite USB HID
+  kvm_storage/    microSD and on-flash rescue image, virtual media
   kvm_config/     settings registry and capability registry
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
-  kvm_net/        Ethernet and mDNS
+  kvm_net/        Ethernet, mDNS, Wake-on-LAN
   kvm_board/      pin map
 web/              the console (Vue 3 + TypeScript + Vite)
+boards/           per-board build overlays (Waveshare, Function EV)
 tools/            toolchain setup, EDID generation, hardware probes
 docs/             what the hardware actually does
 ```
@@ -320,6 +333,13 @@ that those sets deserve the credit; see [NOTICE](NOTICE).
 
 A 3D-printed enclosure for the original parts is published by jrowny on
 [MakerWorld](https://makerworld.com/en/models/2961981-esp32-p4-ip-kvm-enclosure).
+
+## Support
+
+ESP-KVM is free and open source. If it saved you a trip to a dead machine and you
+want to say thanks, you can [buy me a coffee](https://buymeacoffee.com/dexif) -
+entirely optional, and contributions of code, issues and ideas are just as
+welcome.
 
 ## Licence
 

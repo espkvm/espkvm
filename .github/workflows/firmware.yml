@@ -1,5 +1,6 @@
-# Build the firmware, and on a version tag publish it twice: as a release for
-# people, and on GitHub Pages for the console's update check.
+# Build the firmware for every supported board, and on a version tag publish it
+# twice: as a release for people, and on GitHub Pages for the console's update
+# check.
 #
 # The two destinations exist for one reason: a browser cannot fetch a release
 # asset. GitHub serves those without an Access-Control-Allow-Origin header, so
@@ -7,6 +8,13 @@
 # everything with `*`. The console therefore reads a small manifest from Pages
 # and hands the image to the device itself - the device never talks to the
 # internet, which is the point.
+#
+# Boards are built separately (see boards/README.md): ESP32-P4 rev <3.0 and
+# >=3.0 are mutually exclusive build targets, so there is no single universal
+# image. Each board gets its own release assets and its own Pages manifests
+# under firmware/<board>/ and flash/<board>/. The root firmware/ and flash/
+# manifests mirror the Waveshare board, so devices and flasher pages that
+# predate the per-board layout keep working.
 name: firmware
 
 on:
@@ -22,6 +30,19 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          # Default build - Waveshare ESP32-P4-ETH (chip rev v1.3, 32 MB).
+          - id: waveshare
+            build_dir: build
+            sdkconfig_defaults: sdkconfig.defaults
+          # Espressif ESP32-P4 Function EV Board (chip rev v3.2, 16 MB) - an
+          # overlay on top of the common defaults; see boards/funcev_p4.defaults.
+          - id: funcev
+            build_dir: build.funcev
+            sdkconfig_defaults: sdkconfig.defaults;boards/funcev_p4.defaults
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,9 +55,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # The console is embedded in the firmware as a gzip blob. Building it here
-      # rather than trusting the committed copy means the image always carries
-      # the interface that matches its sources.
+      # The console is embedded in the firmware as a gzip blob (identical for
+      # every board). Building it here rather than trusting the committed copy
+      # means the image always carries the interface that matches its sources.
       - name: Build the console
         working-directory: web
         run: |
@@ -53,7 +74,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: echo "${GITHUB_REF_NAME}" > version.txt
 
-      - name: Build
+      - name: Build ${{ matrix.board.id }}
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.1
@@ -64,35 +85,41 @@ jobs:
           # with this IDF, which does not exist on the runner.
           command: >-
             git config --global --add safe.directory "$PWD" &&
-            idf.py build &&
-            idf.py merge-bin -o espkvm-merged.bin
+            idf.py -B ${{ matrix.board.build_dir }}
+            -D SDKCONFIG=${{ matrix.board.build_dir }}/sdkconfig
+            -D SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig_defaults }}"
+            build &&
+            idf.py -B ${{ matrix.board.build_dir }}
+            merge-bin -o espkvm-merged.bin
 
       - name: Collect what a person or a device might want
         run: |
           version="${GITHUB_REF_NAME}"
+          board="${{ matrix.board.id }}"
+          bdir="${{ matrix.board.build_dir }}"
           case "$GITHUB_REF" in
-            refs/tags/*) name="espkvm-${version}" ;;
-            *)           name="espkvm-$(git describe --always --dirty)" ;;
+            refs/tags/*) base="espkvm-${version}-${board}" ;;
+            *)           base="espkvm-$(git describe --always --dirty)-${board}" ;;
           esac
           mkdir -p out
-          cp build/espkvm.bin "out/${name}.bin"
+          cp "${bdir}/espkvm.bin" "out/${base}.bin"
           # Everything needed to flash a board that has never run this firmware.
           mkdir -p full
-          cp build/espkvm.bin build/bootloader/bootloader.bin \
-             build/partition_table/partition-table.bin build/ota_data_initial.bin \
-             build/flasher_args.json full/
-          (cd full && zip -q "../out/${name}-full-flash.zip" ./*)
+          cp "${bdir}/espkvm.bin" "${bdir}/bootloader/bootloader.bin" \
+             "${bdir}/partition_table/partition-table.bin" "${bdir}/ota_data_initial.bin" \
+             "${bdir}/flasher_args.json" full/
+          (cd full && zip -q "../out/${base}-full-flash.zip" ./*)
           # One image for the browser flasher: it writes a single blob at 0x0
           # rather than juggling offsets, and this also covers a board that has
           # never had a bootloader. Built in the container, above.
-          cp build/espkvm-merged.bin "out/${name}-merged.bin"
-          (cd out && sha256sum ./*.bin ./*.zip > sha256sums.txt)
-          echo "asset_name=${name}" >> "$GITHUB_ENV"
+          cp "${bdir}/espkvm-merged.bin" "out/${base}-merged.bin"
+          # Per-board so the two matrix jobs' sums do not clobber on merge.
+          (cd out && sha256sum ./*"${board}"* > "sha256sums-${board}.txt")
           ls -l out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware
+          name: firmware-${{ matrix.board.id }}
           path: out/
           if-no-files-found: error
 
@@ -106,8 +133,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: firmware
+          pattern: firmware-*
           path: out
+          merge-multiple: true
 
       - name: Publish the release
         env:
@@ -141,39 +169,42 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: firmware
+          pattern: firmware-*
           path: out
+          merge-multiple: true
 
-      # What the console reads. Only the newest build lives here; older ones
-      # stay on the releases page, where a human can pick one deliberately.
-      - name: Assemble the update manifest
+      # What the console (firmware/) and the browser flasher (flash/) read, one
+      # set per board. The console's update check reads the plain .bin; the
+      # flasher reads esp-web-tools' schema pointing at the merged image - a
+      # different consumer, hence a separate file.
+      - name: Assemble the per-board manifests
         run: |
           version="${GITHUB_REF_NAME}"
-          # Not the merged image: that one is for the browser flasher and would
-          # match this glob too, leaving the console with an update manifest
-          # pointing at a whole-flash blob.
-          bin="$(cd out && ls espkvm-*.bin | grep -v -- '-merged')"
-          mkdir -p site/firmware
-          cp "out/${bin}" site/firmware/
-          cat > site/firmware/manifest.json <<EOF
+          released="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p site
+          for board in waveshare funcev; do
+            bin="$(cd out && ls espkvm-*-"${board}".bin | grep -v -- '-merged')"
+            merged="$(cd out && ls espkvm-*-"${board}"-merged.bin)"
+
+            mkdir -p "site/firmware/${board}"
+            cp "out/${bin}" "site/firmware/${board}/"
+            cat > "site/firmware/${board}/manifest.json" <<EOF
           {
             "version": "${version}",
+            "board": "${board}",
             "file": "${bin}",
             "size": $(stat -c%s "out/${bin}"),
             "sha256": "$(sha256sum "out/${bin}" | cut -d' ' -f1)",
-            "released": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "released": "${released}",
             "notes": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${version}"
           }
           EOF
-          # What the browser flasher on the project site reads. Different
-          # schema, different consumer, hence a separate file: this one is
-          # esp-web-tools', the one above is the console's update check.
-          merged="$(cd out && ls espkvm-*-merged.bin)"
-          mkdir -p site/flash
-          cp "out/${merged}" site/flash/
-          cat > site/flash/manifest.json <<EOF
+
+            mkdir -p "site/flash/${board}"
+            cp "out/${merged}" "site/flash/${board}/"
+            cat > "site/flash/${board}/manifest.json" <<EOF
           {
-            "name": "ESP-KVM",
+            "name": "ESP-KVM (${board})",
             "version": "${version}",
             "new_install_prompt_erase": true,
             "builds": [
@@ -184,13 +215,25 @@ jobs:
             ]
           }
           EOF
+          done
+
+          # Back-compat: devices and flasher pages that predate the per-board
+          # layout fetch firmware/manifest.json and flash/manifest.json at the
+          # root. Mirror the Waveshare board there (its .bin filename inside the
+          # manifest is relative, so the copied bin resolves alongside it).
+          cp site/firmware/waveshare/. site/firmware/ -r
+          cp site/flash/waveshare/. site/flash/ -r
+
           cat > site/index.html <<'EOF'
           <!doctype html><meta charset="utf-8"><title>ESP-KVM firmware</title>
-          <p>Artefacts for the ESP-KVM console and the browser flasher:
-          <code>firmware/manifest.json</code> is the update check,
-          <code>flash/manifest.json</code> is esp-web-tools.</p>
+          <p>Artefacts for the ESP-KVM console and the browser flasher, per board:
+          <code>firmware/&lt;board&gt;/manifest.json</code> is the update check,
+          <code>flash/&lt;board&gt;/manifest.json</code> is esp-web-tools.
+          Boards: <code>waveshare</code>, <code>funcev</code>. The root
+          <code>firmware/</code> and <code>flash/</code> mirror
+          <code>waveshare</code> for older clients.</p>
           EOF
-          cat site/firmware/manifest.json site/flash/manifest.json
+          find site -name manifest.json -print -exec cat {} \;
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

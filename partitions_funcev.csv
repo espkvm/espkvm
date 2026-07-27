@@ -1,0 +1,19 @@
+# ESP-KVM partition table - ESP32-P4 Function EV Board (16 MB flash).
+#
+# Same scheme as the 32 MB Waveshare table (partitions.csv) - two app slots for
+# rollback, a rescue image served over USB, and an on-device storage area - but
+# squeezed into 16 MB: the app slots and rescue keep their 4 MB, and the storage
+# area takes whatever is left (3.875 MB) instead of a full 4 MB. Everything ends
+# exactly at 0x1000000 (16 MB).
+#
+# This is a SEPARATE table for the 16 MB board; the 32 MB Waveshare table is
+# unchanged. OTA is per-board, so the different storage size is not a problem.
+#
+# Name       Type  SubType   Offset      Size
+nvs,         data, nvs,      0x9000,     0x6000
+otadata,     data, ota,      0xf000,     0x2000
+phy_init,    data, phy,      0x11000,    0x1000
+ota_0,       app,  ota_0,    0x20000,    0x400000
+ota_1,       app,  ota_1,    0x420000,   0x400000
+rescue,      data, 0x40,     0x820000,   0x400000
+storage,     data, spiffs,   0xc20000,   0x3e0000

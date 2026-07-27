@@ -275,7 +275,7 @@ static const kvm_setting_t s_settings[] = {
                 "are published at the default address; point it at your fork, or at a file "
                 "server inside your network, and it will use that instead. Whatever it points "
                 "at is what gets written to the device, so point it somewhere you trust.",
-        .def_str = "https://espkvm.github.io/espkvm/firmware/manifest.json",
+        .def_str = CONFIG_KVM_UPDATE_URL,
         .max_len = 200, .requires_cap = KVM_CAP_OTA,
     },
 
