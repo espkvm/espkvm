@@ -28,17 +28,23 @@ idf.py menuconfig                 # settings live under the "ESP-KVM" menu
 
 ## Web console
 
-The console is Vue 3 + Vite in `web/`, built to a single gzipped file that the
-firmware embeds. **After changing anything under `web/`, rebuild it and then
-rebuild the firmware** so the new bundle is embedded:
+The console is Vue 3 + Vite and lives in a **git submodule** at `web/`
+([espkvm/console](https://github.com/espkvm/console)). Clone with `--recursive`
+(or `git submodule update --init`), or `web/` is empty. It builds to a single
+gzipped file that the firmware embeds. **After changing anything under `web/`,
+rebuild it and then rebuild the firmware** so the new bundle is embedded:
 
 ```sh
 cd web
 npm run typecheck
-npm run build        # writes components/kvm_web/assets/index.html.gz
+npm run build        # writes ../components/kvm_web/assets/index.html.gz
 npm run dev          # local dev against a real device
 npm run dev:mock     # local dev with a mock backend (no device)
 ```
+
+Because `web/` is a submodule, a console change is two commits: commit and push
+in the `console` repo, then in this repo `git add web` (bump the pinned commit)
+and commit. The pin is what the firmware builds against.
 
 ## Layout
 
@@ -53,7 +59,7 @@ components/
   kvm_net/        Ethernet + mDNS
   kvm_board/      pin map (thin: names the Kconfig CONFIG_ values)
   esp_tinyusb/    VENDORED fork of esp_tinyusb (see gotchas)
-web/              Vue 3 console
+web/              Vue 3 console (git submodule: espkvm/console)
 main/             app_main and start-up order
 docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
 ```

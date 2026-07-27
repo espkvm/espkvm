@@ -141,7 +141,12 @@ installed from the console itself.
 
 ## Building from source
 
+The web console lives in a submodule ([espkvm/console](https://github.com/espkvm/console)),
+so clone with `--recursive` (or run `git submodule update --init` in an existing
+clone):
+
 ```sh
+git clone --recursive https://github.com/espkvm/espkvm
 tools/install-idf.sh                          # ESP-IDF 6.0.1, once
 . tools/env.sh
 cd web && npm ci && npm run build && cd ..    # the console is embedded in the firmware
