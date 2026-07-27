@@ -48,6 +48,8 @@ jobs:
         with:
           # The version string comes from `git describe`, which needs history.
           fetch-depth: 0
+          # The web console lives in the espkvm/console submodule at web/.
+          submodules: recursive
 
       - uses: actions/setup-node@v4
         with:
