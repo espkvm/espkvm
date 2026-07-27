@@ -77,6 +77,40 @@ static void eth_on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *da
              kvm_setting_str("net_hostname"));
 }
 
+/* Live link state, so the console can show whether the cable is up and at what
+ * speed. Updated from the driver's connect/disconnect events. */
+static volatile bool s_eth_up = false;
+static volatile int s_eth_mbps = 0;
+
+static void eth_on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)data;
+    if (id == ETHERNET_EVENT_CONNECTED) {
+        eth_speed_t speed = ETH_SPEED_10M;
+        if (esp_eth_ioctl(s_eth_handle, ETH_CMD_G_SPEED, &speed) == ESP_OK) {
+            s_eth_mbps = (speed == ETH_SPEED_100M) ? 100 : 10;
+        }
+        s_eth_up = true;
+        ESP_LOGI(TAG, "Ethernet link up (%d Mbps)", s_eth_mbps);
+    } else if (id == ETHERNET_EVENT_DISCONNECTED) {
+        s_eth_up = false;
+        s_eth_mbps = 0;
+        ESP_LOGI(TAG, "Ethernet link down");
+    }
+}
+
+void kvm_eth_link(bool *up, int *mbps)
+{
+    if (up) {
+        *up = s_eth_up;
+    }
+    if (mbps) {
+        *mbps = s_eth_mbps;
+    }
+}
+
 esp_err_t ethernet_init(void)
 {
     esp_err_t err = esp_netif_init();
@@ -133,6 +167,8 @@ esp_err_t ethernet_init(void)
     ESP_RETURN_ON_ERROR(esp_netif_attach(s_eth_netif, s_eth_glue), TAG, "glue");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, eth_on_got_ip, NULL),
                         TAG, "ip ev");
+    ESP_RETURN_ON_ERROR(
+        esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_on_event, NULL), TAG, "eth ev");
 
     /*
      * Static addressing, when the operator has turned DHCP off. A malformed
@@ -199,5 +235,15 @@ esp_err_t ethernet_init(void)
 {
     ESP_LOGW(TAG, "Ethernet disabled (enable KVM_BOARD_ETH_ENABLE for HTTP)");
     return ESP_OK;
+}
+
+void kvm_eth_link(bool *up, int *mbps)
+{
+    if (up) {
+        *up = false;
+    }
+    if (mbps) {
+        *mbps = 0;
+    }
 }
 #endif

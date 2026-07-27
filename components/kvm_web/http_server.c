@@ -205,20 +205,25 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     const float temp_c = kvm_thermal_celsius();
+    bool net_up = false;
+    int net_mbps = 0;
+    kvm_eth_link(&net_up, &net_mbps);
 
     char body[512];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
-                     "\"tempC\":%d.%01u,\"thermal\":\"%s\"}",
+                     "\"tempC\":%d.%01u,\"thermal\":\"%s\","
+                     "\"net\":{\"up\":%s,\"mbps\":%d}}",
                      app->project_name, app->version, app->date, app->time, app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false",
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
-                     kvm_thermal_state_name(kvm_thermal_state()));
+                     kvm_thermal_state_name(kvm_thermal_state()),
+                     net_up ? "true" : "false", net_mbps);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }

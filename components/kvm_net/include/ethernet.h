@@ -4,9 +4,17 @@
  */
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 esp_err_t ethernet_init(void);
+
+/**
+ * Current Ethernet link state. @p up is set to whether the cable is up, @p mbps
+ * to the negotiated speed (10 or 100, 0 when down). Either pointer may be NULL.
+ */
+void kvm_eth_link(bool *up, int *mbps);
 
 /**
  * Send a Wake-on-LAN magic packet to @p mac ("AA:BB:CC:DD:EE:FF") as a UDP

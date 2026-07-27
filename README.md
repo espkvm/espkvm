@@ -279,7 +279,7 @@ Everything the console does is available over HTTP.
 | `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active |
 | `POST /api/v1/storage/upload`, `/rescue`, `/delete` | manage the virtual-media images |
 | `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
-| `GET /api/v1/system/info` | version, uptime, free memory, chip temperature and thermal state |
+| `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, Ethernet link |
 | `POST /api/v1/system/update` | firmware image, written to the spare slot |
 | `POST /api/v1/system/restart` | restart, for settings that need one |
 | `GET /api/v1/auth/session` | whether a login is required, and who is signed in |

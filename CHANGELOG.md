@@ -7,6 +7,25 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-28
+
+### Added
+- Connection icons in the action bar - HDMI in, USB to the target, microSD and
+  Ethernet - each lit by its live state (green when active, amber when the HDMI
+  cable is up but there is no picture, dim when nothing is connected), so a
+  glance shows what is plugged in.
+- Ethernet link state (up/down and negotiated speed) is reported in
+  `/api/v1/system/info` under `net`, and drives the Ethernet connection icon.
+
+### Changed
+- The status bar adapts to phones: on a narrow screen the secondary video stats
+  (codec/fps, skipped frames, bitrate, encoder load) are hidden, keeping the
+  online state, resolution, the version widget and the theme toggle; the full
+  figures remain in the Video panel.
+- The web console now lives in its own repository
+  ([espkvm/console](https://github.com/espkvm/console)) and is pulled in as a
+  git submodule at `web/`. Clone with `--recursive`; see the README.
+
 ## [0.7.0] - 2026-07-26
 
 ### Added
