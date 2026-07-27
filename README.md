@@ -54,6 +54,8 @@ Useful for what it does today, and honest about the rest.
 | ATX power control | not implemented |
 | HDMI audio | not implemented |
 
+What is coming next is in the [roadmap](ROADMAP.md).
+
 **Still: do not put this on the public internet.** There is a login now, and
 TLS, but nothing here has been through a security review, and a device that
 holds a keyboard on someone else's machine is worth more to an attacker than
