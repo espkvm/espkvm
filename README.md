@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/public/icon.svg" width="96" height="96" alt="">
+  <img src="docs/icon.svg" width="96" height="96" alt="">
 </p>
 
 # ESP-KVM
