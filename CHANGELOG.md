@@ -7,6 +7,36 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-29
+
+### Fixed
+- The WebSocket endpoints (`/video`, `/ws`) returned 404, so nothing that rides
+  them worked in a browser - no H.264 video, no keyboard or mouse - even though
+  every REST route was fine. The HTTP server's handler table was one size too
+  small for the number of routes (the ATX endpoints added in 0.9.0 pushed it
+  over), and `/video` and `/ws` are registered last, so they were the ones
+  silently dropped. Raised the limit with headroom. This is why H.264 and input
+  had stopped working in the browser since 0.9.0.
+- The "JPEG quality" setting no longer shows "not probed yet" when the device
+  booted on the H.264 codec: MJPEG is now probed at start-up like H.264, rather
+  than only when its encoder first opens.
+
+### Added
+- The device is its own certificate authority. It generates a small root CA once
+  (kept in NVS) and signs its server certificate with it; the CA is offered at
+  `/cert.pem` (also on the plain port-80 server) and from Settings -> Security.
+  Importing the CA into a client's trust store is what a self-signed *leaf* could
+  never do - it makes the device genuinely trusted, which clears the browser
+  warning and, being a secure context, enables the WebSocket channel and the
+  H.264 decoder. The leaf is re-issued under the same CA when the hostname or a
+  static IP changes, so the one-time import survives.
+
+### Changed
+- `/api/v1/video/status` reports the PPA colour-conversion time (`ppaUs`)
+  separately from the encode time (`encodeUs`) on the H.264 path. Measured on
+  hardware this showed the conversion, not the encoder, is the bottleneck
+  (~104 ms vs ~45 ms at 1080p) - the encoder-load figure now covers both stages.
+
 ## [0.10.1] - 2026-07-29
 
 ### Changed

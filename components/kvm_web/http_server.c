@@ -168,18 +168,18 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
         break;
     }
 
-    char body[288];
+    char body[320];
     int n = snprintf(body, sizeof(body),
                      "{\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"fps\":%u.%02u,\"skippedFps\":%u.%02u,\"kbps\":%u,"
-                     "\"encodeUs\":%u,\"encoderBusyPct\":%u,"
+                     "\"encodeUs\":%u,\"ppaUs\":%u,\"encoderBusyPct\":%u,"
                      "\"modeChanges\":%u,\"sysStatus\":%u,\"viewers\":%d,"
                      "\"wsClients\":%u,\"imgClients\":%d,\"codec\":\"%s\"}",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
                      st.interlaced ? "true" : "false", (unsigned)(st.fps_x100 / 100u),
                      (unsigned)(st.fps_x100 % 100u), (unsigned)(st.skipped_fps_x100 / 100u),
                      (unsigned)(st.skipped_fps_x100 % 100u), (unsigned)st.kbps,
-                     (unsigned)st.encode_us, (unsigned)st.encoder_busy_pct,
+                     (unsigned)st.encode_us, (unsigned)st.ppa_us, (unsigned)st.encoder_busy_pct,
                      (unsigned)st.mode_changes, (unsigned)st.sys_status,
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
                      s_stream_workers, codec);
@@ -873,6 +873,9 @@ enum {
 static SemaphoreHandle_t s_ws_mu;
 static int s_ws_fd = -1;
 static httpd_handle_t s_httpd;
+/** A copy of the server's own public certificate (PEM), for the download
+ *  endpoint that lets an operator trust this device. NULL when TLS is off. */
+static char *s_cert_pem;
 /** Port 80, answering only with redirects while TLS is on. */
 static httpd_handle_t s_redirect_httpd;
 
@@ -1109,6 +1112,25 @@ static esp_err_t root_get(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     return httpd_resp_send(req, index_html_gz_start, len);
+}
+
+/*
+ * The device's CA certificate, so an operator can import it as a trust anchor
+ * and trust this device - which is what turns wss and the H.264 decoder on in a
+ * browser. A self-signed leaf cannot be trusted this way; a CA can. No
+ * authentication: it is public (a trust anchor, not a secret), and needing it is
+ * a precondition to logging in comfortably. The private key is never served.
+ * Also offered on the plain port-80 server so it can be fetched without first
+ * clicking through the very warning it removes.
+ */
+static esp_err_t cert_get(httpd_req_t *req)
+{
+    if (!s_cert_pem) {
+        return send_json_error(req, "404 Not Found", "no certificate (TLS is off)");
+    }
+    httpd_resp_set_type(req, "application/x-pem-file");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"espkvm-ca.pem\"");
+    return httpd_resp_sendstr(req, s_cert_pem);
 }
 
 static esp_err_t favicon_get(httpd_req_t *req)
@@ -1576,7 +1598,7 @@ static httpd_handle_t start_redirect_server(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = 80;
     cfg.ctrl_port = 32769; /* the TLS server owns the default */
-    cfg.max_uri_handlers = 1;
+    cfg.max_uri_handlers = 2;
     cfg.max_open_sockets = 3;
     cfg.lru_purge_enable = true;
     cfg.stack_size = 4096;
@@ -1587,6 +1609,11 @@ static httpd_handle_t start_redirect_server(void)
         ESP_LOGW(TAG, "no redirect server on port 80");
         return NULL;
     }
+    /* The certificate download is served here too, in the clear, so it can be
+     * fetched and trusted without first clicking through the warning it fixes.
+     * Everything else on port 80 redirects to https. */
+    httpd_uri_t u_cert = {.uri = "/cert.pem", .method = HTTP_GET, .handler = cert_get};
+    httpd_register_uri_handler(h, &u_cert);
     httpd_register_err_handler(h, HTTPD_404_NOT_FOUND, redirect_to_https);
     return h;
 }
@@ -1626,7 +1653,14 @@ httpd_handle_t http_server_start(void)
      */
     cfg.lru_purge_enable = true;
     cfg.max_open_sockets = 12;
-    cfg.max_uri_handlers = 24;
+    /*
+     * Must exceed the total number of registered handlers: registration of the
+     * ones past the limit fails silently, and since /video and /ws are
+     * registered last, an overflow drops exactly the WebSocket endpoints - which
+     * looks like a mysterious 404 on wss (no video, no input) while every REST
+     * route still works. Count them when adding a route; keep headroom.
+     */
+    cfg.max_uri_handlers = 32;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -1651,6 +1685,11 @@ httpd_handle_t http_server_start(void)
             kvm_cap_report(KVM_CAP_HTTPS, false, "no certificate could be generated (%s)",
                            esp_err_to_name(cert_err));
         } else {
+            /* Keep the CA certificate around so a client can download and trust
+             * it; the leaf and the private key are never offered for download. */
+            free(s_cert_pem);
+            s_cert_pem = id.ca_pem ? strdup(id.ca_pem) : NULL;
+
             httpd_ssl_config_t ssl = HTTPD_SSL_CONFIG_DEFAULT();
             ssl.httpd = cfg;
             ssl.port_secure = 443;
@@ -1707,6 +1746,8 @@ httpd_handle_t http_server_start(void)
     httpd_register_uri_handler(h, &u_root);
     httpd_uri_t u_favicon = {.uri = "/favicon.ico", .method = HTTP_GET, .handler = favicon_get};
     httpd_register_uri_handler(h, &u_favicon);
+    httpd_uri_t u_cert = {.uri = "/cert.pem", .method = HTTP_GET, .handler = cert_get};
+    httpd_register_uri_handler(h, &u_cert);
     httpd_uri_t u_stream = {.uri = "/stream", .method = HTTP_GET, .handler = stream_get};
     httpd_register_uri_handler(h, &u_stream);
     static const httpd_uri_t api_uris[] = {

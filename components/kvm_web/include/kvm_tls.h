@@ -20,12 +20,14 @@
 extern "C" {
 #endif
 
-/** A PEM certificate and its private key, both NUL-terminated. */
+/** The server's certificate chain, its private key, and the CA to import. */
 typedef struct {
-    char *cert_pem;
+    char *cert_pem;  /**< leaf followed by the CA (the chain served to clients) */
     size_t cert_len; /**< including the terminator, as esp_https_server wants */
-    char *key_pem;
+    char *key_pem;   /**< the leaf's private key */
     size_t key_len;
+    char *ca_pem;    /**< the CA certificate alone - what an operator imports to trust the device */
+    size_t ca_len;
 } kvm_tls_identity_t;
 
 /**

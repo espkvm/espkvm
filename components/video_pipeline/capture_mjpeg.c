@@ -47,6 +47,24 @@ static void mjpeg_free_buffers(void)
     }
 }
 
+/*
+ * Report the MJPEG capability at start-up, like the H.264 path does, so the
+ * "JPEG quality" setting is not stuck reading "not probed yet" whenever the
+ * device booted on another codec and the JPEG engine has not been opened yet.
+ * The engine is created and immediately freed - the real open happens later.
+ */
+void capture_mjpeg_probe(void)
+{
+    jpeg_encode_engine_cfg_t jcfg = {.intr_priority = 0, .timeout_ms = 120};
+    jpeg_encoder_handle_t enc = NULL;
+    esp_err_t err = jpeg_new_encoder_engine(&jcfg, &enc);
+    kvm_cap_report(KVM_CAP_MJPEG, err == ESP_OK, "hardware JPEG encoder unavailable (%s)",
+                   esp_err_to_name(err));
+    if (enc) {
+        jpeg_del_encoder_engine(enc);
+    }
+}
+
 static esp_err_t mjpeg_open(void)
 {
     jpeg_encode_engine_cfg_t jcfg = {.intr_priority = 0, .timeout_ms = 120};

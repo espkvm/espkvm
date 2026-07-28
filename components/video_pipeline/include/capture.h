@@ -21,8 +21,9 @@ typedef struct {
     uint32_t kbps;         /**< encoded bitrate, kbit/s */
     uint32_t mode_changes; /**< resolution switches handled since boot */
     uint32_t skipped_fps_x100; /**< frames dropped as unchanged, per second */
-    uint32_t encode_us;        /**< mean time one frame took to encode */
-    uint32_t encoder_busy_pct; /**< share of wall clock spent encoding */
+    uint32_t encode_us;        /**< mean time the encoder alone took per frame */
+    uint32_t ppa_us;           /**< mean PPA colour-conversion time per frame (H.264) */
+    uint32_t encoder_busy_pct; /**< share of wall clock spent in conversion + encode */
     uint8_t sys_status;    /**< raw TC358743 SYS_STATUS, for diagnostics */
 } kvm_video_status_t;
 

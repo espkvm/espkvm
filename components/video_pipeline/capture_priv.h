@@ -111,6 +111,9 @@ typedef struct {
 } capture_codec_t;
 
 const capture_codec_t *capture_codec_mjpeg(void);
+
+/** Report the MJPEG capability at start-up (opens and frees the JPEG engine). */
+void capture_mjpeg_probe(void);
 const capture_codec_t *capture_codec_h264(void);
 
 /** Follow `jpg_quality` from the settings registry. Call once at start-up. */
@@ -133,7 +136,10 @@ void capture_status_set_signal(bool present, uint8_t sys_status);
 void capture_status_add_frame(size_t bytes);
 /** An encoded frame identical to the last published one. */
 void capture_status_add_skipped(void);
-/** Time one encode took, in microseconds. */
+/** Time one encode took, in microseconds (the encoder alone, not any colour
+ *  conversion before it). */
 void capture_status_add_encode_time(uint32_t us);
+/** Time one PPA colour conversion took, in microseconds (H.264 path only). */
+void capture_status_add_ppa_time(uint32_t us);
 /** Recompute the rolling fps / bitrate window. Called by the monitor task. */
 void capture_status_tick(void);

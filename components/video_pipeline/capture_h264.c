@@ -289,7 +289,7 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
 
     const uint32_t padded_w = MB_ALIGN(c->hres);
     const uint32_t padded_h = MB_ALIGN(c->vres);
-    const int64_t started_us = esp_timer_get_time();
+    const int64_t ppa_started_us = esp_timer_get_time();
 
     /*
      * scale_x / scale_y stay at 1.0. A PPA transaction that scales while
@@ -325,6 +325,9 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
         ESP_LOGW(CAPTURE_LOG_TAG, "ppa rgb->yuv: %s", esp_err_to_name(err));
         return err;
     }
+    /* PPA and the encoder are separate hardware engines run one after the other
+     * in this task; timing them apart shows how much overlapping them could win. */
+    capture_status_add_ppa_time((uint32_t)(esp_timer_get_time() - ppa_started_us));
 
     int slot = -1;
     uint8_t *dst = NULL;
@@ -334,16 +337,14 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
         return err;
     }
 
+    const int64_t enc_started_us = esp_timer_get_time();
     esp_h264_enc_in_frame_t in = {
         .raw_data = {.buffer = s_yuv, .len = (uint32_t)((size_t)padded_w * padded_h * 3u / 2u)},
         .pts = (uint32_t)(esp_timer_get_time() / 1000),
     };
     esp_h264_enc_out_frame_t out = {.raw_data = {.buffer = dst, .len = (uint32_t)cap}};
     esp_h264_err_t herr = esp_h264_enc_process(s_enc, &in, &out);
-    /* PPA and the encoder are both part of what a frame costs here, and they
-     * run one after the other in this task. Reporting only the encode would
-     * understate the pipeline by two thirds. */
-    capture_status_add_encode_time((uint32_t)(esp_timer_get_time() - started_us));
+    capture_status_add_encode_time((uint32_t)(esp_timer_get_time() - enc_started_us));
     if (herr != ESP_H264_ERR_OK) {
         ESP_LOGW(CAPTURE_LOG_TAG, "h264 encode: %s", h264_err_name(herr));
         if (herr == ESP_H264_ERR_OVERFLOW || herr == ESP_H264_ERR_MEM) {
