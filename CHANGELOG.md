@@ -7,6 +7,16 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-29
+
+### Changed
+- The self-signed certificate now lists a configured static IP as a
+  subjectAltName, so reaching the device by address no longer adds a name
+  mismatch on top of the self-signed warning. The certificate is keyed by
+  hostname and static IP together and regenerates when either changes; a device
+  on DHCP is unaffected (its address can move, so it stays hostname-only) and
+  keeps its certificate across the upgrade.
+
 ## [0.10.0] - 2026-07-28
 
 ### Added

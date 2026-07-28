@@ -42,6 +42,8 @@ Useful for what it does today, and honest about the rest.
 | H.264 streaming | works; needs HTTPS in the browser (see below) |
 | Keyboard, absolute and relative pointer, media keys | works |
 | Pasting text with a keyboard layout | works |
+| Use from a phone or tablet (touch trackpad and on-screen keyboard) | works |
+| Multiple viewers, one in control at a time with takeover | works |
 | User-defined key macros | works |
 | Settings, capability reporting, diagnostics | works |
 | Firmware update over the network, with rollback | works |

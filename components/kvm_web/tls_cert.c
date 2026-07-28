@@ -33,7 +33,8 @@
 #define NVS_NAMESPACE "kvm_tls"
 #define NVS_KEY_CERT "cert"
 #define NVS_KEY_KEY "key"
-/** What the stored certificate was issued for, so a renamed device is noticed. */
+/** What the stored certificate was issued for (hostname, or "hostname|ip" with a
+ *  static address), so a renamed or re-addressed device regenerates. */
 #define NVS_KEY_NAME "name"
 
 /** Comfortably larger than a P-256 key and a small self-signed certificate. */
@@ -58,6 +59,47 @@ static void hostname_now(char *out, size_t len)
     snprintf(out, len, "%s", h);
 }
 
+/** Parse "a.b.c.d" into four bytes. False (and out untouched) if it is not one. */
+static bool parse_ip4(const char *s, uint8_t out[4])
+{
+    if (!s || !s[0]) {
+        return false;
+    }
+    int a, b, c, d, n = 0;
+    if (sscanf(s, "%d.%d.%d.%d%n", &a, &b, &c, &d, &n) != 4 || s[n] != '\0') {
+        return false;
+    }
+    if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) {
+        return false;
+    }
+    out[0] = (uint8_t)a;
+    out[1] = (uint8_t)b;
+    out[2] = (uint8_t)c;
+    out[3] = (uint8_t)d;
+    return true;
+}
+
+/*
+ * The address the certificate should also be valid for, or "" for none. Only a
+ * static address is used: it is known here and now (from the setting, before the
+ * network is even up) and it does not move, so the certificate can name it
+ * without going stale. A DHCP lease can change under the device between boots,
+ * so naming it would mean regenerating the certificate whenever it moved and
+ * churning the browser's store; DHCP therefore keeps hostname-only certificates.
+ */
+static void cert_ip_now(char *out, size_t len)
+{
+    out[0] = '\0';
+    if (kvm_setting_bool("net_dhcp")) {
+        return;
+    }
+    uint8_t tmp[4];
+    const char *ip = kvm_setting_str("net_ip");
+    if (parse_ip4(ip, tmp)) {
+        snprintf(out, len, "%s", ip);
+    }
+}
+
 static esp_err_t nvs_load(kvm_tls_identity_t *out, const char *want_name)
 {
     nvs_handle_t nvs;
@@ -66,7 +108,7 @@ static esp_err_t nvs_load(kvm_tls_identity_t *out, const char *want_name)
         return err;
     }
 
-    char stored_name[40] = {0};
+    char stored_name[64] = {0};
     size_t name_len = sizeof(stored_name);
     err = nvs_get_str(nvs, NVS_KEY_NAME, stored_name, &name_len);
     if (err != ESP_OK || strcmp(stored_name, want_name) != 0) {
@@ -134,11 +176,13 @@ static esp_err_t nvs_store(const kvm_tls_identity_t *id, const char *name)
  * takes tens of seconds to generate here and would hold up the first boot,
  * while P-256 takes a fraction of a second on hardware that accelerates it.
  */
-static esp_err_t generate(const char *name, kvm_tls_identity_t *out)
+static esp_err_t generate(const char *name, const char *ip, kvm_tls_identity_t *out)
 {
     esp_err_t result = ESP_FAIL;
     char subject[80];
     char san_local[48];
+    uint8_t ip_bytes[4];
+    const bool have_ip = parse_ip4(ip, ip_bytes);
     unsigned char *key_pem = NULL;
     unsigned char *cert_pem = NULL;
     mbedtls_svc_key_id_t key_id = MBEDTLS_SVC_KEY_ID_INIT;
@@ -203,6 +247,15 @@ static esp_err_t generate(const char *name, kvm_tls_identity_t *out)
                                                .len = strlen(san_local)}}},
         .next = &san_host,
     };
+    /* A static IP is listed too, so reaching the device by address is not a name
+     * mismatch on top of the self-signed warning. IP SANs carry the raw four
+     * bytes, not text. */
+    mbedtls_x509_san_list san_ip = {
+        .node = {.type = MBEDTLS_X509_SAN_IP_ADDRESS,
+                 .san = {.unstructured_name = {.p = ip_bytes, .len = sizeof(ip_bytes)}}},
+        .next = &san_mdns,
+    };
+    mbedtls_x509_san_list *san_head = have_ip ? &san_ip : &san_mdns;
 
     /* Random serial: two certificates from the same device should not collide
      * in a browser's store after a regeneration. */
@@ -219,7 +272,7 @@ static esp_err_t generate(const char *name, kvm_tls_identity_t *out)
         mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial)) != 0 ||
         mbedtls_x509write_crt_set_validity(&crt, VALID_FROM, VALID_TO) != 0 ||
         mbedtls_x509write_crt_set_basic_constraints(&crt, 0, -1) != 0 ||
-        mbedtls_x509write_crt_set_subject_alternative_name(&crt, &san_mdns) != 0 ||
+        mbedtls_x509write_crt_set_subject_alternative_name(&crt, san_head) != 0 ||
         mbedtls_x509write_crt_set_key_usage(&crt, MBEDTLS_X509_KU_DIGITAL_SIGNATURE |
                                                       MBEDTLS_X509_KU_KEY_AGREEMENT) != 0) {
         ESP_LOGE(TAG, "certificate fields rejected");
@@ -258,6 +311,7 @@ done:
  */
 typedef struct {
     const char *name;
+    const char *ip;
     kvm_tls_identity_t *out;
     esp_err_t result;
     SemaphoreHandle_t done;
@@ -266,14 +320,14 @@ typedef struct {
 static void generate_task(void *arg)
 {
     generate_job_t *job = (generate_job_t *)arg;
-    job->result = generate(job->name, job->out);
+    job->result = generate(job->name, job->ip, job->out);
     xSemaphoreGive(job->done);
     vTaskDelete(NULL);
 }
 
-static esp_err_t generate_off_stack(const char *name, kvm_tls_identity_t *out)
+static esp_err_t generate_off_stack(const char *name, const char *ip, kvm_tls_identity_t *out)
 {
-    generate_job_t job = {.name = name, .out = out, .result = ESP_FAIL};
+    generate_job_t job = {.name = name, .ip = ip, .out = out, .result = ESP_FAIL};
     job.done = xSemaphoreCreateBinary();
     if (!job.done) {
         return ESP_ERR_NO_MEM;
@@ -296,21 +350,34 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out)
 
     char name[40];
     hostname_now(name, sizeof(name));
+    char ip[16];
+    cert_ip_now(ip, sizeof(ip));
 
-    if (nvs_load(out, name) == ESP_OK) {
+    /* The stored certificate is keyed by hostname and static IP together, so a
+     * change to either regenerates it. With no static IP the key is the bare
+     * hostname, which is also what older, IP-unaware builds stored - so a device
+     * on DHCP keeps its certificate across the upgrade. */
+    char idkey[64];
+    if (ip[0]) {
+        snprintf(idkey, sizeof(idkey), "%s|%s", name, ip);
+    } else {
+        snprintf(idkey, sizeof(idkey), "%s", name);
+    }
+
+    if (nvs_load(out, idkey) == ESP_OK) {
         ESP_LOGI(TAG, "certificate for %s.local loaded", name);
         return ESP_OK;
     }
 
     const int64_t started = esp_log_timestamp();
-    esp_err_t err = generate_off_stack(name, out);
+    esp_err_t err = generate_off_stack(name, ip, out);
     if (err != ESP_OK) {
         return err;
     }
-    ESP_LOGI(TAG, "generated a certificate for %s.local in %lld ms", name,
-             (long long)(esp_log_timestamp() - started));
+    ESP_LOGI(TAG, "generated a certificate for %s.local%s%s in %lld ms", name, ip[0] ? " / " : "",
+             ip, (long long)(esp_log_timestamp() - started));
 
-    err = nvs_store(out, name);
+    err = nvs_store(out, idkey);
     if (err != ESP_OK) {
         /* Usable now, regenerated next boot: worth a warning, not a failure. */
         ESP_LOGW(TAG, "certificate not stored (%s); it will be regenerated on the next boot",
