@@ -7,6 +7,21 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-29
+
+### Added
+- A "Restart device" button in Settings, so a reboot no longer needs a
+  power-cycle or a curl call.
+
+### Changed
+- The H.264 path runs its colour conversion (PPA) and the encode on two tasks
+  over two YUV buffers, so one frame encodes while the next converts. Measured
+  on hardware this is a smaller win than hoped (~6.7 -> ~7.3 fps at 1080p): the
+  bottleneck is PSRAM bandwidth, not serialised compute - the conversion moves
+  ~9 MB per frame and running it alongside the encode makes the two contend for
+  the memory bus. The real fix (feeding the encoder YUV directly, without the
+  conversion pass) is a larger change tracked separately.
+
 ## [0.11.0] - 2026-07-29
 
 ### Fixed

@@ -28,6 +28,10 @@
 #include "esp_log.h"
 #include "esp_private/esp_cache_private.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "kvm_settings.h"
 #include "video_frame.h"
@@ -52,10 +56,34 @@
 static ppa_client_handle_t s_ppa;
 static esp_h264_enc_handle_t s_enc;
 static esp_h264_enc_param_hw_handle_t s_param;
-static uint8_t *s_yuv;
-static uint32_t s_yuv_alloc;
 static uint8_t *s_buf[H264_SLOTS];
 static uint32_t s_buf_alloc[H264_SLOTS];
+
+/*
+ * PPA colour conversion and the encode run in two tasks over two YUV buffers, so
+ * one frame is being encoded while the next is being converted. Measured on this
+ * board the conversion dominates (~104 ms vs ~45 ms at 1080p), so overlapping
+ * lifts the frame rate by roughly the encode time. The capture loop runs the PPA
+ * stage (it must consume the CSI frame promptly, before the receiver reuses it);
+ * a dedicated task runs the encoder from whichever YUV buffer the PPA just
+ * filled. A free-slot queue and a job queue pass the two buffers between them.
+ */
+#define H264_YUV_BUFS 2
+static uint8_t *s_yuv[H264_YUV_BUFS];
+static uint32_t s_yuv_alloc[H264_YUV_BUFS];
+
+typedef struct {
+    int slot; /* index into s_yuv, or -1 as the shutdown sentinel */
+    uint32_t hres;
+    uint32_t vres;
+} h264_job_t;
+
+static QueueHandle_t s_free_slots; /* YUV buffers the PPA may write */
+static QueueHandle_t s_jobs;       /* YUV buffers filled and awaiting encode */
+static SemaphoreHandle_t s_enc_done;
+static TaskHandle_t s_enc_task;
+
+static void h264_encode_task(void *arg);
 
 /** Size the encoder is currently configured for, 0 when it is not open. */
 static uint32_t s_enc_w;
@@ -162,9 +190,11 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
 
 static void h264_free_buffers(void)
 {
-    if (s_yuv) {
-        esp_h264_free(s_yuv);
-        s_yuv = NULL;
+    for (int i = 0; i < H264_YUV_BUFS; i++) {
+        if (s_yuv[i]) {
+            esp_h264_free(s_yuv[i]);
+            s_yuv[i] = NULL;
+        }
     }
     for (int i = 0; i < H264_SLOTS; i++) {
         if (s_buf[i]) {
@@ -189,15 +219,22 @@ static esp_err_t h264_open(void)
     size_t align = 64;
     (void)esp_cache_get_alignment(MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, &align);
     const size_t yuv_bytes = (size_t)H264_MAX_W * H264_MAX_H * 3u / 2u;
-    s_yuv = esp_h264_aligned_calloc(align, 1, yuv_bytes, &s_yuv_alloc, ESP_H264_MEM_SPIRAM);
-    for (int i = 0; i < H264_SLOTS && s_yuv; i++) {
+    bool yuv_ok = true;
+    for (int i = 0; i < H264_YUV_BUFS; i++) {
+        s_yuv[i] = esp_h264_aligned_calloc(align, 1, yuv_bytes, &s_yuv_alloc[i], ESP_H264_MEM_SPIRAM);
+        if (!s_yuv[i]) {
+            yuv_ok = false;
+            break;
+        }
+    }
+    for (int i = 0; i < H264_SLOTS && yuv_ok; i++) {
         s_buf[i] = esp_h264_aligned_calloc(align, 1, H264_SLOT_CAP, &s_buf_alloc[i],
                                            ESP_H264_MEM_SPIRAM);
         if (!s_buf[i]) {
             break;
         }
     }
-    if (!s_yuv || !s_buf[H264_SLOTS - 1]) {
+    if (!yuv_ok || !s_buf[H264_SLOTS - 1]) {
         ESP_LOGE(CAPTURE_LOG_TAG, "not enough PSRAM for the H.264 path");
         h264_free_buffers();
         ppa_unregister_client(s_ppa);
@@ -210,7 +247,27 @@ static esp_err_t h264_open(void)
      * DMA, and those stale lines would land on top of what the PPA just put
      * there. Flush them once, here, rather than debug it later.
      */
-    (void)esp_cache_msync(s_yuv, s_yuv_alloc, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    for (int i = 0; i < H264_YUV_BUFS; i++) {
+        (void)esp_cache_msync(s_yuv[i], s_yuv_alloc[i], ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    }
+
+    /* Two YUV buffers cycle between the PPA stage and the encode task. */
+    s_free_slots = xQueueCreate(H264_YUV_BUFS, sizeof(int));
+    s_jobs = xQueueCreate(H264_YUV_BUFS, sizeof(h264_job_t));
+    s_enc_done = xSemaphoreCreateBinary();
+    if (!s_free_slots || !s_jobs || !s_enc_done) {
+        ESP_LOGE(CAPTURE_LOG_TAG, "h264 queues could not be created");
+        goto fail;
+    }
+    for (int i = 0; i < H264_YUV_BUFS; i++) {
+        xQueueSend(s_free_slots, &i, 0);
+    }
+    if (xTaskCreatePinnedToCore(h264_encode_task, "h264enc", 4096, NULL, 5, &s_enc_task, 1) !=
+        pdPASS) {
+        ESP_LOGE(CAPTURE_LOG_TAG, "h264 encode task could not start");
+        s_enc_task = NULL;
+        goto fail;
+    }
 
     size_t cap = H264_SLOT_CAP;
     for (int i = 0; i < H264_SLOTS; i++) {
@@ -220,10 +277,48 @@ static esp_err_t h264_open(void)
     }
     video_frame_install(VIDEO_PAYLOAD_H264, s_buf, H264_SLOTS, cap);
     return ESP_OK;
+
+fail:
+    if (s_jobs) {
+        vQueueDelete(s_jobs);
+        s_jobs = NULL;
+    }
+    if (s_free_slots) {
+        vQueueDelete(s_free_slots);
+        s_free_slots = NULL;
+    }
+    if (s_enc_done) {
+        vSemaphoreDelete(s_enc_done);
+        s_enc_done = NULL;
+    }
+    h264_free_buffers();
+    ppa_unregister_client(s_ppa);
+    s_ppa = NULL;
+    return ESP_ERR_NO_MEM;
 }
 
 static void h264_close(void)
 {
+    /* Stop the encode task: a negative-slot job is the sentinel it breaks on.
+     * Wait for it to finish whatever it was encoding before freeing anything. */
+    if (s_enc_task) {
+        const h264_job_t stop = {.slot = -1};
+        xQueueSend(s_jobs, &stop, portMAX_DELAY);
+        xSemaphoreTake(s_enc_done, portMAX_DELAY);
+        s_enc_task = NULL;
+    }
+    if (s_jobs) {
+        vQueueDelete(s_jobs);
+        s_jobs = NULL;
+    }
+    if (s_free_slots) {
+        vQueueDelete(s_free_slots);
+        s_free_slots = NULL;
+    }
+    if (s_enc_done) {
+        vSemaphoreDelete(s_enc_done);
+        s_enc_done = NULL;
+    }
     encoder_release();
     h264_free_buffers();
     if (s_ppa) {
@@ -266,19 +361,13 @@ static void follow_settings(void)
      * encoder applies a changed value at the next IDR anyway. */
 }
 
-static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publish)
+/* Encode one filled YUV buffer and publish it. Runs on the encode task, so it
+ * overlaps the PPA conversion of the following frame. */
+static void h264_encode_job(const h264_job_t *job)
 {
-    (void)force_publish;
-    if (!s_ppa || !s_yuv) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (c->hres == 0 || c->vres == 0) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (s_enc_w != c->hres || s_enc_h != c->vres) {
-        esp_err_t err = encoder_open(c->hres, c->vres);
-        if (err != ESP_OK) {
-            return err;
+    if (s_enc_w != job->hres || s_enc_h != job->vres) {
+        if (encoder_open(job->hres, job->vres) != ESP_OK) {
+            return;
         }
         /* A fresh encoder starts on an IDR, so nothing else to ask for. */
         (void)video_frame_take_keyframe_request();
@@ -286,6 +375,83 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
         force_idr();
     }
     follow_settings();
+
+    const uint32_t padded_w = MB_ALIGN(job->hres);
+    const uint32_t padded_h = MB_ALIGN(job->vres);
+
+    int slot = -1;
+    uint8_t *dst = NULL;
+    size_t cap = 0;
+    if (video_frame_begin_write(&slot, &dst, &cap, 1000) != ESP_OK) {
+        return;
+    }
+
+    const int64_t enc_started_us = esp_timer_get_time();
+    esp_h264_enc_in_frame_t in = {
+        .raw_data = {.buffer = s_yuv[job->slot],
+                     .len = (uint32_t)((size_t)padded_w * padded_h * 3u / 2u)},
+        .pts = (uint32_t)(esp_timer_get_time() / 1000),
+    };
+    esp_h264_enc_out_frame_t out = {.raw_data = {.buffer = dst, .len = (uint32_t)cap}};
+    esp_h264_err_t herr = esp_h264_enc_process(s_enc, &in, &out);
+    capture_status_add_encode_time((uint32_t)(esp_timer_get_time() - enc_started_us));
+    if (herr != ESP_H264_ERR_OK) {
+        ESP_LOGW(CAPTURE_LOG_TAG, "h264 encode: %s", h264_err_name(herr));
+        if (herr == ESP_H264_ERR_OVERFLOW || herr == ESP_H264_ERR_MEM) {
+            video_frame_request_keyframe();
+        }
+        return;
+    }
+
+    /*
+     * Every frame goes out, including the near-empty ones a still screen
+     * produces. There is no equivalent of the MJPEG skip here and no need for
+     * one: an unchanged screen already costs a few hundred bytes per frame, and
+     * a decoder that stops receiving has no way to tell a still picture from a
+     * dead link.
+     */
+    video_frame_publish(slot, out.length, out.frame_type == ESP_H264_FRAME_TYPE_IDR);
+    capture_status_add_frame(out.length);
+}
+
+static void h264_encode_task(void *arg)
+{
+    (void)arg;
+    h264_job_t job;
+    while (xQueueReceive(s_jobs, &job, portMAX_DELAY) == pdTRUE) {
+        if (job.slot < 0) {
+            break; /* shutdown sentinel from h264_close() */
+        }
+        h264_encode_job(&job);
+        /* Hand the YUV buffer back so the PPA stage can fill it again. */
+        xQueueSend(s_free_slots, &job.slot, 0);
+    }
+    xSemaphoreGive(s_enc_done);
+    vTaskDelete(NULL);
+}
+
+/*
+ * Capture-loop side: convert the RGB frame into a free YUV buffer with the PPA
+ * and hand it to the encode task. Returns as soon as the conversion is done -
+ * the encode happens on the other task, overlapping the next conversion. The
+ * frame is dropped (its buffer returned) if the encoder has not caught up.
+ */
+static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publish)
+{
+    (void)force_publish;
+    if (!s_ppa || !s_yuv[0] || !s_free_slots || !s_jobs) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (c->hres == 0 || c->vres == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    int slot = -1;
+    if (xQueueReceive(s_free_slots, &slot, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        /* The encoder is still busy with both buffers; skip this frame rather
+         * than stall the capture loop. */
+        return ESP_ERR_TIMEOUT;
+    }
 
     const uint32_t padded_w = MB_ALIGN(c->hres);
     const uint32_t padded_h = MB_ALIGN(c->vres);
@@ -308,8 +474,8 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
                .block_w = c->hres,
                .block_h = c->vres,
                .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
-        .out = {.buffer = s_yuv,
-                .buffer_size = s_yuv_alloc,
+        .out = {.buffer = s_yuv[slot],
+                .buffer_size = s_yuv_alloc[slot],
                 .pic_w = padded_w,
                 .pic_h = padded_h,
                 .srm_cm = PPA_SRM_COLOR_MODE_YUV420,
@@ -321,49 +487,18 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
     esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa, &srm);
+    capture_status_add_ppa_time((uint32_t)(esp_timer_get_time() - ppa_started_us));
     if (err != ESP_OK) {
         ESP_LOGW(CAPTURE_LOG_TAG, "ppa rgb->yuv: %s", esp_err_to_name(err));
-        return err;
-    }
-    /* PPA and the encoder are separate hardware engines run one after the other
-     * in this task; timing them apart shows how much overlapping them could win. */
-    capture_status_add_ppa_time((uint32_t)(esp_timer_get_time() - ppa_started_us));
-
-    int slot = -1;
-    uint8_t *dst = NULL;
-    size_t cap = 0;
-    err = video_frame_begin_write(&slot, &dst, &cap, 1000);
-    if (err != ESP_OK) {
+        xQueueSend(s_free_slots, &slot, 0); /* return the unused buffer */
         return err;
     }
 
-    const int64_t enc_started_us = esp_timer_get_time();
-    esp_h264_enc_in_frame_t in = {
-        .raw_data = {.buffer = s_yuv, .len = (uint32_t)((size_t)padded_w * padded_h * 3u / 2u)},
-        .pts = (uint32_t)(esp_timer_get_time() / 1000),
-    };
-    esp_h264_enc_out_frame_t out = {.raw_data = {.buffer = dst, .len = (uint32_t)cap}};
-    esp_h264_err_t herr = esp_h264_enc_process(s_enc, &in, &out);
-    capture_status_add_encode_time((uint32_t)(esp_timer_get_time() - enc_started_us));
-    if (herr != ESP_H264_ERR_OK) {
-        ESP_LOGW(CAPTURE_LOG_TAG, "h264 encode: %s", h264_err_name(herr));
-        if (herr == ESP_H264_ERR_OVERFLOW || herr == ESP_H264_ERR_MEM) {
-            /* The next frame will be smaller if it is a P-frame; ask for a
-             * fresh IDR only once the encoder is back in step. */
-            video_frame_request_keyframe();
-        }
-        return ESP_FAIL;
+    const h264_job_t job = {.slot = slot, .hres = c->hres, .vres = c->vres};
+    if (xQueueSend(s_jobs, &job, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        xQueueSend(s_free_slots, &slot, 0);
+        return ESP_ERR_TIMEOUT;
     }
-
-    /*
-     * Every frame goes out, including the near-empty ones a still screen
-     * produces. There is no equivalent of the MJPEG skip here and no need for
-     * one: an unchanged screen already costs a few hundred bytes per frame, and
-     * a decoder that stops receiving has no way to tell a still picture from a
-     * dead link.
-     */
-    video_frame_publish(slot, out.length, out.frame_type == ESP_H264_FRAME_TYPE_IDR);
-    capture_status_add_frame(out.length);
     return ESP_OK;
 }
 
