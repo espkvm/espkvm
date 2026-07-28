@@ -51,7 +51,7 @@ Useful for what it does today, and honest about the rest.
 | Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
 | Guessing the target's OS from how it enumerates USB | works |
 | Wake-on-LAN (magic packet to the target's MAC) | works |
-| ATX power control | not implemented |
+| ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
 | HDMI audio | not implemented |
 
 What is coming next is in the [roadmap](ROADMAP.md).
@@ -279,7 +279,8 @@ Everything the console does is available over HTTP.
 | `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active |
 | `POST /api/v1/storage/upload`, `/rescue`, `/delete` | manage the virtual-media images |
 | `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
-| `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, Ethernet link |
+| `POST /api/v1/power/click`, `/hold`, `/reset` | ATX: tap power, hold power for a hard off, tap reset |
+| `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, Ethernet link, ATX power state |
 | `POST /api/v1/system/update` | firmware image, written to the spare slot |
 | `POST /api/v1/system/restart` | restart, for settings that need one |
 | `GET /api/v1/auth/session` | whether a login is required, and who is signed in |

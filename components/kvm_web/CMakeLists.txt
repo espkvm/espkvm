@@ -13,6 +13,7 @@ idf_component_register(
         kvm_config
         kvm_storage
         kvm_net
+        kvm_atx
         espressif__cjson
         app_update
         esp_app_format

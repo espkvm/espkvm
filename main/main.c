@@ -13,6 +13,7 @@
 #include "capture.h"
 #include "ethernet.h"
 #include "http_server.h"
+#include "kvm_atx.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_storage.h"
@@ -50,6 +51,9 @@ static void on_setting_changed(const char *key, void *user)
     if (strcmp(key, "msc_enable") == 0 || strcmp(key, "msc_image") == 0 ||
         strcmp(key, "*") == 0) {
         apply_media_selection();
+    }
+    if (strncmp(key, "atx_", 4) == 0 || strcmp(key, "*") == 0) {
+        kvm_atx_apply();
     }
 }
 
@@ -125,7 +129,7 @@ static void confirm_ota_image(void)
 static void report_pending_capabilities(void)
 {
     apply_media_selection();
-    kvm_cap_report(KVM_CAP_ATX, false, "power control not implemented yet");
+    kvm_atx_apply();
     /* Wake-on-LAN needs only the network, which is up by the time anything can
      * ask for it. */
     kvm_cap_report(KVM_CAP_WOL, true, NULL);
@@ -155,6 +159,11 @@ void app_main(void)
     /* Before the capture path: the guard should be watching from the first
      * frame, not from whenever the web server happens to start. */
     kvm_thermal_init();
+
+    /* ATX power control. Touches no GPIO until report_pending_capabilities()
+     * runs kvm_atx_apply(); this only builds the worker task and queue, so it
+     * is ready before the web server can accept a power command. */
+    ESP_ERROR_CHECK(kvm_atx_init());
 
     /* The microSD card, if any. A KVM without one is still a KVM, so a missing
      * or unreadable card never holds up start-up. */

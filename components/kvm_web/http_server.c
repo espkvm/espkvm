@@ -33,6 +33,7 @@
 
 #include "capture.h"
 #include "ethernet.h"
+#include "kvm_atx.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
@@ -208,14 +209,17 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     bool net_up = false;
     int net_mbps = 0;
     kvm_eth_link(&net_up, &net_mbps);
+    kvm_atx_status_t atx;
+    kvm_atx_status(&atx);
 
-    char body[512];
+    char body[640];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
-                     "\"net\":{\"up\":%s,\"mbps\":%d}}",
+                     "\"net\":{\"up\":%s,\"mbps\":%d},"
+                     "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s}}",
                      app->project_name, app->version, app->date, app->time, app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false",
                      (unsigned long long)(esp_timer_get_time() / 1000000),
@@ -223,7 +227,9 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
                      kvm_thermal_state_name(kvm_thermal_state()),
-                     net_up ? "true" : "false", net_mbps);
+                     net_up ? "true" : "false", net_mbps,
+                     atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
+                     atx.power_on ? "true" : "false");
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }
@@ -379,6 +385,48 @@ static esp_err_t api_power_wake_post(httpd_req_t *req)
     ESP_LOGW(TAG, "Wake-on-LAN sent to %s", mac);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"sent\"}");
+}
+
+/*
+ * ATX power control. Each action queues a single button pulse on the device and
+ * returns at once; the pulse itself (up to a five-second hard-off hold) runs on
+ * the ATX worker task, not here, so the response is never held for its length.
+ * The console confirms the destructive ones (hard off, reset) before calling.
+ */
+static esp_err_t atx_action(httpd_req_t *req, esp_err_t (*action)(void), const char *what)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    esp_err_t err = action();
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict",
+                               "ATX control is off or its GPIOs are not set (Settings -> Power)");
+    }
+    if (err == ESP_ERR_TIMEOUT) {
+        return send_json_error(req, "429 Too Many Requests", "a power action is already in progress");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", "could not queue the action");
+    }
+    ESP_LOGW(TAG, "ATX %s requested", what);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+}
+
+static esp_err_t api_power_click_post(httpd_req_t *req)
+{
+    return atx_action(req, kvm_atx_power_click, "power click");
+}
+
+static esp_err_t api_power_hold_post(httpd_req_t *req)
+{
+    return atx_action(req, kvm_atx_power_hold, "power hold (hard off)");
+}
+
+static esp_err_t api_power_reset_post(httpd_req_t *req)
+{
+    return atx_action(req, kvm_atx_reset, "reset");
 }
 
 static esp_err_t api_settings_reset_post(httpd_req_t *req)
@@ -1652,6 +1700,9 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
         {.uri = "/api/v1/power/wake", .method = HTTP_POST, .handler = api_power_wake_post},
+        {.uri = "/api/v1/power/click", .method = HTTP_POST, .handler = api_power_click_post},
+        {.uri = "/api/v1/power/hold", .method = HTTP_POST, .handler = api_power_hold_post},
+        {.uri = "/api/v1/power/reset", .method = HTTP_POST, .handler = api_power_reset_post},
         {.uri = "/api/v1/settings", .method = HTTP_GET, .handler = api_settings_get},
         {.uri = "/api/v1/settings", .method = HTTP_PUT, .handler = api_settings_put},
         {.uri = "/api/v1/storage/images", .method = HTTP_GET, .handler = api_storage_images_get},

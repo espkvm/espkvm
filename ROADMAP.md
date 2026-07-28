@@ -13,6 +13,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - Virtual media: boot the target from a microSD image or an on-flash rescue image
 - Target-OS detection, with OS-specific shortcuts
 - Wake-on-LAN
+- ATX power control - power and reset buttons, and power-LED sensing, through optocouplers
 - DHCP or static networking, mDNS
 - HTTPS with a self-issued certificate, login, and a physical password reset
 - Thermal protection
@@ -21,7 +22,6 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 
 ## Planned
 
-- **ATX power control** - power and reset through GPIO, with power/HDD LED sensing
 - **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser
 - **WiFi** on boards that carry a wireless co-processor (e.g. the ESP32-C6)
 - **Faster H.264 on rev 3.x silicon** - feed the encoder directly, without the

@@ -7,6 +7,26 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-28
+
+### Added
+- ATX power control: the device can "press" the target's front-panel power and
+  reset buttons through optocouplers, and read its power LED back the same way.
+  A PC817 two-channel module on each side does the whole job with no custom
+  board - see `docs/wiring.md`. New endpoints `POST /api/v1/power/click`,
+  `/api/v1/power/hold` (a five-second hard off) and `/api/v1/power/reset`; the
+  target's power state (when a LED is wired) appears in `/api/v1/system/info`
+  under `atx`. A Power panel in the console drives it, with confirmation on the
+  destructive actions.
+- The GPIO pins, pulse lengths and drive/sense polarity are all runtime
+  settings (Settings -> Power), so the same firmware runs on a board with no ATX
+  wiring - it simply reports the capability unavailable with the reason - and a
+  wrong guess about a module's trigger polarity is a checkbox, not a reflash.
+
+Not yet verified against a real optocoupler: the firmware path (capability,
+endpoints, GPIO pulsing, LED sense) is exercised on hardware, but the button
+polarity and LED sensing are confirmed only once a module is wired.
+
 ## [0.8.0] - 2026-07-28
 
 ### Added

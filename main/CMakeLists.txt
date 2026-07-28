@@ -7,6 +7,7 @@ idf_component_register(
         kvm_web
         kvm_hid
         kvm_config
+        kvm_atx
         nvs_flash
         kvm_storage
         app_update
