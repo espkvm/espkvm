@@ -843,9 +843,11 @@ extern const char favicon_ico_end[] asm("_binary_favicon_ico_end");
  *     0x04 consumer    usage:u16
  *     0x05 release all
  *     0x06 ping
+ *     0x07 take control   (become the controlling client, demoting whoever held it)
  *   device -> client
  *     0x81 status      flags:u8 (bit0 target attached), leds:u8
  *     0x82 pong
+ *     0x83 control      state:u8 (0 held by another, 1 you hold it, 2 free)
  */
 enum {
     WS_C2D_MOUSE_ABS = 0x01,
@@ -854,9 +856,18 @@ enum {
     WS_C2D_CONSUMER = 0x04,
     WS_C2D_RELEASE_ALL = 0x05,
     WS_C2D_PING = 0x06,
+    WS_C2D_TAKEOVER = 0x07,
 
     WS_D2C_STATUS = 0x81,
     WS_D2C_PONG = 0x82,
+    WS_D2C_CONTROL = 0x83,
+};
+
+/* WS_D2C_CONTROL states. */
+enum {
+    CTRL_HELD_OTHER = 0, /* another client is in control; input here is ignored */
+    CTRL_YOU = 1,        /* this client holds control */
+    CTRL_FREE = 2,       /* nobody holds control; interacting takes it */
 };
 
 static SemaphoreHandle_t s_ws_mu;
@@ -886,6 +897,13 @@ static void ws_send_pong(int fd)
 {
     const uint8_t pong[] = {WS_D2C_PONG};
     ws_send_binary(fd, pong, sizeof(pong));
+}
+
+/** Tell a client whether it holds control (see CTRL_* / WS_D2C_CONTROL). */
+static void ws_send_control(int fd, uint8_t state)
+{
+    const uint8_t msg[] = {WS_D2C_CONTROL, state};
+    ws_send_binary(fd, msg, sizeof(msg));
 }
 
 /** Push target-attached state and keyboard LEDs to the connected client. */
@@ -949,47 +967,11 @@ static void http_sess_close_cb(httpd_handle_t hd, int sockfd)
     kvm_auth_forget_socket(sockfd);
 }
 
-static void ws_take_session(httpd_req_t *req)
-{
-    int fd = httpd_req_to_sockfd(req);
-    if (xSemaphoreTake(s_ws_mu, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        return;
-    }
-    bool evicted_other = false;
-    if (s_ws_fd >= 0 && s_ws_fd != fd) {
-        httpd_sess_trigger_close(req->handle, s_ws_fd);
-        evicted_other = true;
-    }
-    s_ws_fd = fd;
-    xSemaphoreGive(s_ws_mu);
-
-    /*
-     * Whoever we just evicted can no longer lift what it was holding, and its
-     * own close callback will not do it either: s_ws_fd already points at us,
-     * so that callback no longer recognises the old socket as the control
-     * session. A control channel that drops mid-drag - a reconnect, a network
-     * blip - would otherwise leave a button pressed on the target, which is
-     * the machine the operator is sitting at. Lift everything on takeover; the
-     * new client re-asserts its real state on the next move.
-     */
-    if (evicted_other) {
-        usb_hid_release_all();
-    }
-}
-
 static esp_err_t ws_input_handler(httpd_req_t *req)
 {
     if (!kvm_auth_socket_ok(httpd_req_to_sockfd(req))) {
         return kvm_auth_reject_ws(req);
     }
-    /*
-     * The control session is claimed by the first frame, not at the handshake:
-     * the handler is never called for the upgrade, so a session claimed there
-     * would never be claimed at all - which is how the device ended up with
-     * nowhere to send target and LED state, and the console showed "no target
-     * on USB" for a target that was plainly attached.
-     */
-    ws_take_session(req);
 
     httpd_ws_frame_t pkt = {0};
     esp_err_t ret = httpd_ws_recv_frame(req, &pkt, 0);
@@ -1015,27 +997,61 @@ static esp_err_t ws_input_handler(httpd_req_t *req)
         }
     }
 
+    const int my_fd = httpd_req_to_sockfd(req);
+    const uint8_t op = pkt.len ? buf[0] : 0;
+    const bool is_input = op >= WS_C2D_MOUSE_ABS && op <= WS_C2D_RELEASE_ALL;
+
+    /*
+     * One controlling client at a time, held first-come rather than last-write:
+     * a second viewer no longer silently steals the session (or fights the first
+     * for it). Control is claimed by the first input from whoever holds it or,
+     * when it is free, from whoever acts first; a ping never claims it, so just
+     * watching does not take control from someone using it. A client that wants
+     * it while another holds it must ask - WS_C2D_TAKEOVER, the console's "Take
+     * control" button - which demotes the previous holder to a viewer rather
+     * than disconnecting it.
+     */
     if (xSemaphoreTake(s_ws_mu, pdMS_TO_TICKS(500)) != pdTRUE) {
         return ESP_OK;
     }
-    int my_fd = httpd_req_to_sockfd(req);
-    bool ours;
-    if (s_ws_fd == my_fd) {
-        /* Already the registered owner. */
-        ours = true;
-    } else if (s_ws_fd < 0) {
-        /* No owner registered (handshake's s_ws_fd was cleared by a spurious
-         * close_fn, e.g. esp_http_server's internal session recycling).
-         * Lazily claim this connection so HID input is not lost. */
+    int demoted = -1;
+    uint8_t ctrl_state;
+    if (op == WS_C2D_TAKEOVER) {
+        if (s_ws_fd >= 0 && s_ws_fd != my_fd) demoted = s_ws_fd;
         s_ws_fd = my_fd;
-        ours = true;
+        ctrl_state = CTRL_YOU;
+    } else if (s_ws_fd == my_fd) {
+        ctrl_state = CTRL_YOU;
+    } else if (s_ws_fd < 0) {
+        /* Free: an input takes it; a ping only reports that it is available. */
+        if (is_input) {
+            s_ws_fd = my_fd;
+            ctrl_state = CTRL_YOU;
+        } else {
+            ctrl_state = CTRL_FREE;
+        }
     } else {
-        /* A different client is the active owner, keep single-client enforcement. */
-        ours = false;
+        ctrl_state = CTRL_HELD_OTHER;
     }
     xSemaphoreGive(s_ws_mu);
 
-    if (!ours) {
+    /* Whoever was just demoted can no longer lift what it was holding, so lift
+     * it here; the new holder re-asserts its own state on the next move. */
+    if (demoted >= 0) {
+        ws_send_control(demoted, CTRL_HELD_OTHER);
+        usb_hid_release_all();
+    }
+
+    /* Let this client know where it stands, so the console can show a "someone
+     * else is in control" state instead of input that silently does nothing. */
+    ws_send_control(my_fd, ctrl_state);
+
+    if (ctrl_state != CTRL_YOU) {
+        /* View-only: answer a ping so the keepalive and status poll still work,
+         * but drop any input. */
+        if (op == WS_C2D_PING) {
+            ws_send_pong(my_fd);
+        }
         return ESP_OK;
     }
 
@@ -1075,6 +1091,9 @@ static esp_err_t ws_input_handler(httpd_req_t *req)
         /* Doubles as "what is the current state?", which is what a client wants
          * right after connecting. */
         ws_send_status();
+        break;
+    case WS_C2D_TAKEOVER:
+        /* Control was already transferred above; nothing more to do. */
         break;
     default:
         ESP_LOGD(TAG, "unknown ws message 0x%02x", buf[0]);

@@ -7,7 +7,25 @@ bumps the patch).
 
 ## [Unreleased]
 
-## [0.9.1] - 2026-07-28
+## [0.10.0] - 2026-07-28
+
+### Added
+- Touch mode: on a phone or tablet the screen becomes a trackpad instead of
+  fighting the desktop pointer mapping. One finger moves the pointer, tap is a
+  left click, two-finger tap a right click, two-finger drag scrolls, and a long
+  press then drag holds the button. An on-screen keyboard types through the
+  target's own layout, like paste does. Auto-detected from a coarse pointer,
+  with a manual "Touch" toggle in the action bar.
+- A clear "another session is in control" state. The device now grants control
+  to the first client and holds it there, rather than letting each new frame
+  silently steal the session; a second viewer sees a banner with a "Take
+  control" button instead of dead input, and taking control demotes the previous
+  holder to a viewer rather than disconnecting it.
+
+### Changed
+- The control WebSocket protocol gained a "take control" client message (0x07)
+  and a "control state" device message (0x83); the console polls it so a viewer
+  notices when the session is freed or taken over.
 
 ### Changed
 - Numeric settings (GPIO pins, pulse lengths, thresholds) are now plain number
