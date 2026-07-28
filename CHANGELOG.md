@@ -7,6 +7,16 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-28
+
+### Changed
+- Numeric settings (GPIO pins, pulse lengths, thresholds) are now plain number
+  fields instead of sliders - easier to set a value precisely.
+- The Power panel hides its controls entirely when ATX control is switched off,
+  rather than showing a disabled hint.
+- The ATX wiring guide (`docs/wiring.md`) is board-agnostic, with a wiring
+  diagram (`docs/atx-wiring.svg`) and only illustrative header examples.
+
 ## [0.9.0] - 2026-07-28
 
 ### Added

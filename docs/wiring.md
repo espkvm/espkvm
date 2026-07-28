@@ -35,9 +35,13 @@ the input high turns the optocoupler on, which is the firmware default
 
 ## The front-panel header
 
-The buttons and LEDs are on the motherboard's front-panel header (Gigabyte
-labels it `F_PANEL`; the layout is the same across their AM4/AM5 boards). The
-signal grouping:
+The buttons and LEDs are on the motherboard's front-panel header - the same
+block the PC case's power button, reset button and LEDs plug into. Vendors name
+and arrange it differently (`F_PANEL`, `PANEL1`, `JFP1`, ...), so there is no
+single universal pinout; always read the silkscreen next to the header or the
+motherboard manual.
+
+As one example, a common layout groups the signals in two rows like this:
 
 ```
         (even pins)                 (odd pins)
@@ -48,8 +52,7 @@ signal grouping:
                                9  NC
 ```
 
-Confirm the exact pins against the silkscreen next to the header or the
-motherboard manual before wiring - chassis vary.
+Yours may differ - confirm the exact pins before wiring.
 
 Two things matter:
 
@@ -62,7 +65,7 @@ Two things matter:
   `PLED` tells you the machine is on. LEDs have polarity - wire `PLED+` to the
   module input's `+`, `PLED-` to its `-`.
 
-On Gigabyte boards the power LED is driven through a modest series resistor, so a
+Many motherboards drive the power LED through a modest series resistor, so a
 stock PC817 input module (about 1 kohm in series) may only pass a milliamp or
 two and read weakly. If the reported power state is unreliable, lower that
 module's input resistor to ~220-330 ohm - the one place a soldering iron might be
