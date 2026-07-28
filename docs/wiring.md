@@ -14,6 +14,8 @@ This is optional. With nothing wired, the firmware reports ATX as unavailable
 and the console hides the controls. Everything below is set at runtime under
 **Settings -> Power** - no rebuild to change a pin or fix a polarity.
 
+![ATX wiring: ESP32-P4 GPIO to PC817 optocouplers to the motherboard front-panel header](atx-wiring.svg)
+
 ## Why optocouplers
 
 The target and the KVM must not share a ground through these signals: the front
@@ -82,14 +84,10 @@ Confirm those pins are broken out on your board's 40-pin header. GPIO 9-13 are
 left free deliberately - the board routes its I2S there for a future HDMI-audio
 capture.
 
-```
-  ESP32-P4 GPIO 20 ---> [PC817 ch1 IN]  OUT --->|  power switch pins (PW)
-  ESP32-P4 GPIO 21 ---> [PC817 ch1 IN]  OUT --->|  reset switch pins (RES)
-                                                   (outputs module)
-
-  power LED (PLED+/-) --->|[PC817 ch2 IN]  OUT ---> ESP32-P4 GPIO 22
-                                                   (input module)
-```
+On the module, the `IN` terminals are the input (driven side) and the `V`
+terminals are the output (switched side): for the two button channels the ESP32
+drives `IN`, and `V` goes across the button pins; for LED sensing the power LED
+drives `IN`, and the ESP32 reads `V`.
 
 ## Settings
 

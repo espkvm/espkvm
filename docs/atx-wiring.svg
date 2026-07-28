@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 440" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" role="img" aria-label="ATX wiring: ESP32-P4 GPIO to PC817 optocouplers to the motherboard front-panel header">
+  <style>
+    :root { color-scheme: light dark; }
+    .bg     { fill: #0e1116; }
+    .card   { fill: #161b22; stroke: #2a313c; }
+    .chip   { fill: #12171e; stroke: #2a313c; }
+    .title  { fill: #e6edf3; font-weight: 600; }
+    .label  { fill: #9aa7b4; }
+    .pin    { fill: #e6edf3; font-weight: 600; }
+    .faint  { fill: #6b7885; }
+    .wire   { stroke: #4c9aff; }
+    .wire-in{ stroke: #46c17c; }
+    .iso    { stroke: #3a4450; stroke-dasharray: 5 5; }
+    .isoTxt { fill: #6b7885; }
+    @media (prefers-color-scheme: light) {
+      .bg    { fill: #ffffff; }
+      .card  { fill: #ffffff; stroke: #d3d9e0; }
+      .chip  { fill: #eaeef3; stroke: #d3d9e0; }
+      .title { fill: #10151c; }
+      .label { fill: #4c5764; }
+      .pin   { fill: #10151c; }
+      .faint { fill: #6b7885; }
+      .wire  { stroke: #1f6feb; }
+      .wire-in { stroke: #1a7f4b; }
+      .iso   { stroke: #b6bec8; }
+      .isoTxt{ fill: #6b7885; }
+    }
+    text { font-size: 14px; }
+    .sm { font-size: 12px; }
+    .xs { font-size: 11px; }
+    .wire, .wire-in { stroke-width: 2.2; fill: none; }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="860" height="440" rx="12"/>
+
+  <!-- markers -->
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#4c9aff"/>
+    </marker>
+    <marker id="arrow-in" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#46c17c"/>
+    </marker>
+  </defs>
+
+  <!-- ESP32-P4 -->
+  <rect class="card" x="24" y="70" width="180" height="300" rx="10"/>
+  <text class="title" x="114" y="102" text-anchor="middle">ESP32-P4</text>
+  <text class="label sm" x="114" y="122" text-anchor="middle">any free GPIO</text>
+  <rect class="chip" x="120" y="150" width="84" height="34" rx="6"/>
+  <text class="pin" x="140" y="172">GPIO 20</text>
+  <rect class="chip" x="120" y="214" width="84" height="34" rx="6"/>
+  <text class="pin" x="140" y="236">GPIO 21</text>
+  <rect class="chip" x="120" y="292" width="84" height="34" rx="6"/>
+  <text class="pin" x="140" y="314">GPIO 22</text>
+
+  <!-- Optocoupler modules -->
+  <rect class="card" x="330" y="70" width="200" height="170" rx="10"/>
+  <text class="title" x="430" y="100" text-anchor="middle">PC817 x2 (out)</text>
+  <text class="label sm" x="430" y="120" text-anchor="middle">two-channel module</text>
+  <rect class="chip" x="352" y="146" width="156" height="34" rx="6"/>
+  <text class="pin sm" x="366" y="167">ch1  power</text>
+  <rect class="chip" x="352" y="192" width="156" height="34" rx="6"/>
+  <text class="pin sm" x="366" y="213">ch2  reset</text>
+
+  <rect class="card" x="330" y="270" width="200" height="100" rx="10"/>
+  <text class="title" x="430" y="300" text-anchor="middle">PC817 (in)</text>
+  <text class="label sm" x="430" y="320" text-anchor="middle">LED sense</text>
+  <rect class="chip" x="352" y="326" width="156" height="30" rx="6"/>
+  <text class="pin sm" x="366" y="346">1 channel</text>
+
+  <!-- Isolation barrier -->
+  <line class="iso" x1="620" y1="60" x2="620" y2="380"/>
+  <text class="isoTxt xs" x="620" y="52" text-anchor="middle">galvanic isolation</text>
+
+  <!-- Motherboard F_PANEL -->
+  <rect class="card" x="656" y="70" width="180" height="300" rx="10"/>
+  <text class="title" x="746" y="102" text-anchor="middle">F_PANEL</text>
+  <text class="label sm" x="746" y="122" text-anchor="middle">front-panel header</text>
+  <rect class="chip" x="672" y="150" width="120" height="34" rx="6"/>
+  <text class="pin sm" x="686" y="172">PW  (power)</text>
+  <rect class="chip" x="672" y="214" width="120" height="34" rx="6"/>
+  <text class="pin sm" x="686" y="236">RES (reset)</text>
+  <rect class="chip" x="672" y="292" width="120" height="34" rx="6"/>
+  <text class="pin sm" x="686" y="314">PLED (+/-)</text>
+
+  <!-- Wires: GPIO -> opto out -> header (outputs) -->
+  <path class="wire" marker-end="url(#arrow)" d="M204,167 H352"/>
+  <path class="wire" marker-end="url(#arrow)" d="M204,231 C260,231 300,209 352,209"/>
+  <path class="wire" marker-end="url(#arrow)" d="M508,163 C560,163 600,167 672,167"/>
+  <path class="wire" marker-end="url(#arrow)" d="M508,209 C560,209 600,231 672,231"/>
+
+  <!-- Wires: header PLED -> opto in -> GPIO 22 (input, reversed flow) -->
+  <path class="wire-in" marker-end="url(#arrow-in)" d="M672,309 C600,309 560,341 530,341"/>
+  <path class="wire-in" marker-end="url(#arrow-in)" d="M352,341 C280,341 240,309 204,309"/>
+
+  <!-- legend -->
+  <circle cx="40" cy="410" r="5" fill="#4c9aff"/>
+  <text class="label sm" x="52" y="414">output: KVM presses the button</text>
+  <circle cx="330" cy="410" r="5" fill="#46c17c"/>
+  <text class="label sm" x="342" y="414">input: KVM reads the power LED</text>
+</svg>
