@@ -66,8 +66,12 @@ static media_src_t s_media_src;
  * table predates it (it is served only when present). */
 static const esp_partition_t *s_rescue;
 /* An upload in progress: the partition is being erased/written, so it must not
- * be served to the target meanwhile. */
-static bool s_rescue_writing;
+ * be served to the target meanwhile. The flag is read from other tasks (select,
+ * begin) under s_media_lock, so every transition of it is made under the lock
+ * too; it is volatile so the write path, which reads it without the lock while
+ * streaming, always sees the current value. s_rescue_wpos has no cross-task
+ * reader - begin/write/end/abort run in sequence on the one upload handler. */
+static volatile bool s_rescue_writing;
 static size_t s_rescue_wpos;
 
 /* An erased flash sector reads as 0xFF; a written image never leaves its first
@@ -324,7 +328,9 @@ esp_err_t kvm_storage_rescue_write_begin(size_t total)
     }
     esp_err_t err = esp_partition_erase_range(s_rescue, 0, erase);
     if (err != ESP_OK) {
+        xSemaphoreTake(s_media_lock, portMAX_DELAY);
         s_rescue_writing = false;
+        xSemaphoreGive(s_media_lock);
         ESP_LOGE(TAG, "rescue erase failed: %s", esp_err_to_name(err));
     } else {
         ESP_LOGI(TAG, "rescue upload started: %u bytes into a %u KB partition",
@@ -356,14 +362,18 @@ esp_err_t kvm_storage_rescue_write_end(void)
     if (!s_rescue_writing) {
         return ESP_ERR_INVALID_STATE;
     }
+    xSemaphoreTake(s_media_lock, portMAX_DELAY);
     s_rescue_writing = false;
+    xSemaphoreGive(s_media_lock);
     ESP_LOGI(TAG, "rescue image written: %u bytes", (unsigned)s_rescue_wpos);
     return ESP_OK;
 }
 
 void kvm_storage_rescue_write_abort(void)
 {
+    xSemaphoreTake(s_media_lock, portMAX_DELAY);
     s_rescue_writing = false;
+    xSemaphoreGive(s_media_lock);
 }
 
 void kvm_storage_media_info(kvm_media_t *out)
@@ -474,15 +484,6 @@ esp_err_t kvm_storage_init(void)
     /* No DDR either: double-data-rate clocking is the other speed feature this
      * slot proved flaky on. High-speed SDR is plenty for boot media. */
     host.flags &= ~SDMMC_HOST_FLAG_DDR;
-    /*
-     * Cap the bus at 4 MHz. At the 20 MHz default this board reads single
-     * sectors (mount, directory) fine but fails EVERY multi-block read - which
-     * is what a USB host does when it reads the disk, so a target could not read
-     * the image at all. At 4 MHz bulk reads succeed: a host enumerates the drive
-     * and reads its partition table cleanly. ~2 MB/s is slow but it works, where
-     * full speed did not work at all. (Writes are still unreliable even here, so
-     * the card stays read-only - see kvm_storage_writable.)
-     */
     /*
      * Cap the bus at 4 MHz (40 MHz / 10 - the P4 clock is integer fractions of
      * 40 MHz). At the 20 MHz default this board reads single sectors (mount,

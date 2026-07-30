@@ -467,9 +467,25 @@ bool kvm_auth_check(httpd_req_t *req)
         return false;
     }
     lock();
-    const bool ok = session_find(token) != NULL;
+    const session_t *s = session_find(token);
+    const bool ok = s != NULL;
+    const bool must_change = ok && s->must_change;
     unlock();
-    return ok;
+    if (!ok) {
+        return false;
+    }
+    /*
+     * While the default password is still in force the session may reach only the
+     * auth endpoints - enough to check state and set a real password, nothing
+     * that would let the device (or the machine behind it) be driven without one.
+     * The console forces the change in its UI; this is the same rule on the wire,
+     * so a direct API client - or the video/input WebSocket, whose upgrade also
+     * runs through here - cannot skip it.
+     */
+    if (must_change && strncmp(req->uri, "/api/v1/auth/", 13) != 0) {
+        return false;
+    }
+    return true;
 }
 
 esp_err_t kvm_auth_reject_ws(httpd_req_t *req)
@@ -621,7 +637,9 @@ static esp_err_t auth_login_post(httpd_req_t *req)
     /* The delay grows with the number of failures and is paid before the
      * answer, so guessing costs the guesser time whether or not they are
      * right. */
+    lock();
     const uint32_t failures = s_failures;
+    unlock();
     if (failures > 3) {
         uint32_t delay_ms = 500u << (failures - 4 > 5 ? 5 : failures - 4);
         if (delay_ms > 15000u) {
@@ -632,13 +650,17 @@ static esp_err_t auth_login_post(httpd_req_t *req)
 
     const bool user_ok = strcmp(user, kvm_setting_str("sec_user")) == 0;
     if (!user_ok || !password_matches(password)) {
-        s_failures++;
-        ESP_LOGW(TAG, "failed login as '%s' (%lu in a row)", user, (unsigned long)s_failures);
+        lock();
+        const uint32_t count = ++s_failures;
+        unlock();
+        ESP_LOGW(TAG, "failed login as '%s' (%lu in a row)", user, (unsigned long)count);
         memset(password, 0, sizeof(password));
         return send_json(req, "401 Unauthorized", "{\"error\":\"wrong username or password\"}");
     }
     memset(password, 0, sizeof(password));
+    lock();
     s_failures = 0;
+    unlock();
 
     const bool must_change = !s_have_password;
     const char *token = session_create(must_change);

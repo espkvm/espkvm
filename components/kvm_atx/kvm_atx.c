@@ -48,6 +48,12 @@ typedef struct {
 
 static atx_cfg_t s_cfg;
 static SemaphoreHandle_t s_cfg_mtx;
+/* Serialises a physical press against a reconfigure: apply() must not reset a
+ * pin out from under a hold-in-progress. Held for the whole press (up to the
+ * hard-off duration), so it is separate from s_cfg_mtx, which stays a brief
+ * struct guard that status reads without waiting on a five-second hold. Lock
+ * order where both are taken: op before cfg. */
+static SemaphoreHandle_t s_op_mtx;
 static QueueHandle_t s_cmd_q;
 
 /* Idle level of a button output: whichever level does NOT press it. */
@@ -59,11 +65,17 @@ static void atx_task(void *arg)
     (void)arg;
     atx_cmd_t cmd;
     while (xQueueReceive(s_cmd_q, &cmd, portMAX_DELAY) == pdTRUE) {
+        /* Own the pins for the whole press: apply() waits on this before it may
+         * reset or reconfigure them. The config snapshot is taken inside the
+         * same section, so a reconfigure cannot swap the pin numbers between the
+         * snapshot and the drive. */
+        xSemaphoreTake(s_op_mtx, portMAX_DELAY);
         atx_cfg_t c;
         xSemaphoreTake(s_cfg_mtx, portMAX_DELAY);
         c = s_cfg;
         xSemaphoreGive(s_cfg_mtx);
         if (!c.enabled) {
+            xSemaphoreGive(s_op_mtx);
             continue; /* disabled between queueing and running; drop it */
         }
 
@@ -95,6 +107,7 @@ static void atx_task(void *arg)
         gpio_set_level(pin, idle_level(c.active_high));
         /* A settle gap so a rapid second command is still a distinct press. */
         vTaskDelay(pdMS_TO_TICKS(150));
+        xSemaphoreGive(s_op_mtx);
     }
     vTaskDelete(NULL);
 }
@@ -105,8 +118,9 @@ esp_err_t kvm_atx_init(void)
         return ESP_OK; /* already initialised */
     }
     s_cfg_mtx = xSemaphoreCreateMutex();
+    s_op_mtx = xSemaphoreCreateMutex();
     s_cmd_q = xQueueCreate(4, sizeof(atx_cmd_t));
-    if (!s_cfg_mtx || !s_cmd_q) {
+    if (!s_cfg_mtx || !s_op_mtx || !s_cmd_q) {
         return ESP_ERR_NO_MEM;
     }
     memset(&s_cfg, 0, sizeof(s_cfg));
@@ -174,6 +188,10 @@ esp_err_t kvm_atx_apply(void)
     const bool pins_valid = pwr >= 0 && rst >= 0;
     const bool want_hw = want_enable && pins_valid;
 
+    /* Wait for any press in flight to finish before touching the pins (op before
+     * cfg, the module's lock order), so a reconfigure never resets a GPIO that
+     * the worker is mid-hold on. */
+    xSemaphoreTake(s_op_mtx, portMAX_DELAY);
     xSemaphoreTake(s_cfg_mtx, portMAX_DELAY);
 
     /* Drop whatever we held before; a pin may have moved or been switched off. */
@@ -210,6 +228,7 @@ esp_err_t kvm_atx_apply(void)
     }
 
     xSemaphoreGive(s_cfg_mtx);
+    xSemaphoreGive(s_op_mtx);
 
     /* "available" describes the wiring, not the on/off switch: the console shows
      * the switched-off case through the separate "enabled" flag. */
