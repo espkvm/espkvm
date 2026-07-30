@@ -54,6 +54,7 @@ Useful for what it does today, and honest about the rest.
 | Guessing the target's OS from how it enumerates USB | works |
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
+| Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
 | HDMI audio | not implemented |
 
 What is coming next is in the [roadmap](ROADMAP.md).

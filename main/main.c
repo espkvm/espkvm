@@ -16,6 +16,7 @@
 #include "kvm_atx.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
+#include "kvm_mqtt.h"
 #include "kvm_storage.h"
 #include "kvm_thermal.h"
 #include "kvm_settings.h"
@@ -54,6 +55,15 @@ static void on_setting_changed(const char *key, void *user)
     }
     if (strncmp(key, "atx_", 4) == 0 || strcmp(key, "*") == 0) {
         kvm_atx_apply();
+    }
+    if (strncmp(key, "mqtt_", 5) == 0 || strcmp(key, "*") == 0) {
+        kvm_mqtt_apply();
+    }
+    /* ATX or WoL availability changing alters which Home Assistant entities
+     * should exist; refresh discovery (kvm_atx_apply above already ran, so the
+     * capability is current by now). */
+    if (strncmp(key, "atx_", 4) == 0 || strcmp(key, "pwr_wol_mac") == 0) {
+        kvm_mqtt_notify();
     }
 }
 
@@ -140,6 +150,10 @@ static void report_pending_capabilities(void)
 
     const esp_partition_t *ota = esp_ota_get_next_update_partition(NULL);
     kvm_cap_report(KVM_CAP_OTA, ota != NULL, "partition table has no second app slot");
+
+    /* Every capability the MQTT bridge gates its Home Assistant entities on is
+     * settled now, so connect (if enabled) with the right entity set. */
+    kvm_mqtt_apply();
 }
 
 void app_main(void)
@@ -187,6 +201,11 @@ void app_main(void)
      */
     ESP_LOGI(TAG, "boot: ethernet");
     ESP_ERROR_CHECK(ethernet_init());
+
+    /* MQTT bridge: build its timer/state now; it connects later, from
+     * report_pending_capabilities(), once every capability it advertises to
+     * Home Assistant has been settled. */
+    ESP_ERROR_CHECK(kvm_mqtt_init());
 
     /* Before the web server, which reads published frames. */
     video_frame_store_init();

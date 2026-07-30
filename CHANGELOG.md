@@ -7,6 +7,32 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-31
+
+### Added
+- Home Assistant integration over MQTT. Turn it on and the device is
+  auto-discovered as one Home Assistant device: sensors for temperature,
+  viewers, video mode/frame rate/codec/bitrate, uptime, free PSRAM, HDMI
+  signal, target USB and target power, plus buttons for power, reset,
+  force-off, Wake-on-LAN and restart. Availability is tracked with a last-will
+  topic. TLS is supported (verify against the built-in CA bundle, or skip it
+  for a self-signed broker). Off by default and gated by the `mqtt_*` settings,
+  so a device that never enables it only pays the linked code. esp-mqtt is a
+  managed dependency now that it has left the IDF core in v6.
+
+### Security
+- The must-change-password state is enforced on the device, not only in the
+  console: while the default password is still in force a session may reach
+  only the auth endpoints (including the video/input WebSocket upgrade), so the
+  device cannot be driven over the wire before a real password is set.
+
+### Fixed
+- ATX: a settings change can no longer reset a GPIO out from under a button
+  press in progress (a dedicated operation lock serialises the two).
+- The failed-login counter is now read and updated under the lock.
+- Virtual media: the rescue-write flag is flipped only under the media lock on
+  every path.
+
 ## [0.12.0] - 2026-07-29
 
 ### Added

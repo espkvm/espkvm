@@ -15,6 +15,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - Wake-on-LAN
 - ATX power control - power and reset buttons, and power-LED sensing, through optocouplers
 - DHCP or static networking, mDNS
+- Home Assistant integration over MQTT - auto-discovered sensors and power/reset/Wake-on-LAN buttons, with optional TLS
 - HTTPS with a self-issued certificate, login, and a physical password reset
 - Thermal protection
 - Over-the-network updates with automatic rollback

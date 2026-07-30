@@ -268,6 +268,71 @@ static const kvm_setting_t s_settings[] = {
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
     },
 
+    /* ---- mqtt / home assistant ------------------------------------------ */
+    {
+        .key = "mqtt_enable", .section = "mqtt", .type = KVM_VT_BOOL,
+        .title = "Publish to MQTT",
+        .help = "Report status to an MQTT broker and appear in Home Assistant "
+                "(auto-discovered). Off by default; costs nothing when off.",
+        .def = 0,
+    },
+    {
+        .key = "mqtt_host", .section = "mqtt", .type = KVM_VT_STR,
+        .title = "Broker host",
+        .help = "Hostname or IP of the MQTT broker, e.g. the Home Assistant host.",
+        .def_str = "", .max_len = 63,
+    },
+    {
+        .key = "mqtt_port", .section = "mqtt", .type = KVM_VT_INT,
+        .title = "Broker port",
+        .help = "1883 for plain MQTT, 8883 for MQTT over TLS.",
+        .min = 1, .max = 65535, .def = 1883,
+    },
+    {
+        .key = "mqtt_tls", .section = "mqtt", .type = KVM_VT_BOOL,
+        .title = "Use TLS",
+        .help = "Connect with mqtts. Set the port to 8883 as well.",
+        .def = 0,
+    },
+    {
+        .key = "mqtt_verify", .section = "mqtt", .type = KVM_VT_BOOL,
+        .title = "Verify broker certificate",
+        .help = "With TLS on, check the broker's certificate against the built-in "
+                "CA bundle (public CAs, e.g. Let's Encrypt). Turn off for a broker "
+                "with a self-signed certificate.",
+        .def = 1,
+    },
+    {
+        .key = "mqtt_user", .section = "mqtt", .type = KVM_VT_STR,
+        .title = "Username",
+        .help = "Leave empty for an anonymous broker.",
+        .def_str = "", .max_len = 47,
+    },
+    {
+        .key = "mqtt_pass", .section = "mqtt", .type = KVM_VT_STR,
+        .title = "Password",
+        .help = "Stored on the device; never sent back to the console.",
+        .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET,
+    },
+    {
+        .key = "mqtt_base", .section = "mqtt", .type = KVM_VT_STR,
+        .title = "Base topic",
+        .help = "Topic prefix; the device id is appended, e.g. espkvm/a1b2c3.",
+        .def_str = "espkvm", .max_len = 31,
+    },
+    {
+        .key = "mqtt_disco", .section = "mqtt", .type = KVM_VT_STR,
+        .title = "Discovery prefix",
+        .help = "Home Assistant MQTT discovery prefix. Default suits a stock HA.",
+        .def_str = "homeassistant", .max_len = 31,
+    },
+    {
+        .key = "mqtt_interval", .section = "mqtt", .type = KVM_VT_INT,
+        .title = "Publish interval (s)",
+        .help = "How often telemetry is published.",
+        .min = 5, .max = 3600, .def = 30,
+    },
+
     /* ---- security ------------------------------------------------------- */
     {
         .key = "sec_https", .section = "security", .type = KVM_VT_BOOL,

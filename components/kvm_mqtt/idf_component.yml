@@ -1,0 +1,4 @@
+dependencies:
+  # esp-mqtt left the IDF core in v6.0 and is now a managed component.
+  espressif/mqtt:
+    version: "^1.1.0"
