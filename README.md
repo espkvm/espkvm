@@ -59,6 +59,11 @@ Useful for what it does today, and honest about the rest.
 
 What is coming next is in the [roadmap](ROADMAP.md).
 
+<p align="center">
+  <img src="docs/ha.png" width="300" alt="The ESP-KVM device in Home Assistant, its sensors and diagnostics reported live over MQTT.">
+</p>
+<p align="center"><em>The device in Home Assistant &mdash; every value reported live over MQTT, discovered automatically.</em></p>
+
 **Still: do not put this on the public internet.** There is a login now, and
 TLS, but nothing here has been through a security review, and a device that
 holds a keyboard on someone else's machine is worth more to an attacker than
