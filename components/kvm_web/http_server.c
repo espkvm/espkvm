@@ -34,6 +34,7 @@
 #include "capture.h"
 #include "ethernet.h"
 #include "kvm_atx.h"
+#include "kvm_mqtt.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
@@ -211,15 +212,18 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_eth_link(&net_up, &net_mbps);
     kvm_atx_status_t atx;
     kvm_atx_status(&atx);
+    bool mqtt_on = false, mqtt_conn = false;
+    kvm_mqtt_status(&mqtt_on, &mqtt_conn);
 
-    char body[640];
+    char body[672];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d},"
-                     "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s}}",
+                     "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s},"
+                     "\"mqtt\":{\"enabled\":%s,\"connected\":%s}}",
                      app->project_name, app->version, app->date, app->time, app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false",
                      (unsigned long long)(esp_timer_get_time() / 1000000),
@@ -229,7 +233,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      kvm_thermal_state_name(kvm_thermal_state()),
                      net_up ? "true" : "false", net_mbps,
                      atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
-                     atx.power_on ? "true" : "false");
+                     atx.power_on ? "true" : "false", mqtt_on ? "true" : "false",
+                     mqtt_conn ? "true" : "false");
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }

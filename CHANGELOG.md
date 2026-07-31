@@ -7,6 +7,22 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-31
+
+### Added
+- A connection indicator for the MQTT bridge in the status bar, next to the
+  HDMI/USB/SD/Ethernet icons. It appears only when MQTT is enabled, and hovering
+  it shows whether the device is connected to the broker or still connecting.
+  The firmware reports this in `/api/v1/system/info` as `mqtt.enabled` and
+  `mqtt.connected`.
+
+### Fixed
+- MQTT: turning the bridge off (or changing its settings) now publishes
+  "offline" before disconnecting, so Home Assistant no longer shows the device
+  stuck "online". A clean disconnect does not trigger the last will, so the
+  retained availability had to be updated explicitly; an unexpected drop still
+  falls back to the last will.
+
 ## [0.13.0] - 2026-07-31
 
 ### Added

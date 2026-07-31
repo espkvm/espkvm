@@ -11,6 +11,8 @@
  */
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -33,6 +35,13 @@ esp_err_t kvm_mqtt_apply(void);
  * Assistant learns about it without waiting for the next reconnect.
  */
 void kvm_mqtt_notify(void);
+
+/**
+ * Report the bridge's state for the UI. @p enabled is whether a client is
+ * running at all (MQTT turned on with a broker set); @p connected is whether it
+ * currently has a live session with the broker. Either pointer may be NULL.
+ */
+void kvm_mqtt_status(bool *enabled, bool *connected);
 
 #ifdef __cplusplus
 }

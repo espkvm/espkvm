@@ -294,10 +294,25 @@ esp_err_t kvm_mqtt_apply(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Tear down any existing client first. Swap the pointer to NULL under the
-     * lock so a concurrent publish stops touching it, then stop/destroy outside
-     * the lock (client_stop can wait on the mqtt task, which may itself be inside
-     * a publish waiting for the lock). */
+    /* If we are currently connected, say "offline" before tearing down. A
+     * graceful disconnect does NOT trigger the last will, so without this a
+     * manual disable (or a reconfigure) would leave a stale retained "online"
+     * in Home Assistant. Publish on the old topic, then give it a moment to go
+     * out before the stop. (A reconfigure republishes "online" right after.) */
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    const bool was_connected = s_connected && s_client;
+    if (was_connected) {
+        esp_mqtt_client_publish(s_client, s_avail_topic, "offline", 0, 1, 1);
+    }
+    xSemaphoreGive(s_mtx);
+    if (was_connected) {
+        vTaskDelay(pdMS_TO_TICKS(150));
+    }
+
+    /* Tear down any existing client. Swap the pointer to NULL under the lock so
+     * a concurrent publish stops touching it, then stop/destroy outside the lock
+     * (client_stop can wait on the mqtt task, which may itself be inside a
+     * publish waiting for the lock). */
     esp_timer_stop(s_timer);
     xSemaphoreTake(s_mtx, portMAX_DELAY);
     esp_mqtt_client_handle_t old = s_client;
@@ -398,5 +413,22 @@ void kvm_mqtt_notify(void)
     if (s_connected) {
         publish_discovery();
         publish_state();
+    }
+}
+
+void kvm_mqtt_status(bool *enabled, bool *connected)
+{
+    bool en = false, conn = false;
+    if (s_mtx) {
+        xSemaphoreTake(s_mtx, portMAX_DELAY);
+        en = s_client != NULL; /* a client exists only while enabled with a host */
+        conn = s_connected;
+        xSemaphoreGive(s_mtx);
+    }
+    if (enabled) {
+        *enabled = en;
+    }
+    if (connected) {
+        *connected = conn;
     }
 }
