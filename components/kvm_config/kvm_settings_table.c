@@ -274,25 +274,25 @@ static const kvm_setting_t s_settings[] = {
         .title = "Publish to MQTT",
         .help = "Report status to an MQTT broker and appear in Home Assistant "
                 "(auto-discovered). Off by default; costs nothing when off.",
-        .def = 0,
+        .def = 0, .requires_cap = -1,
     },
     {
         .key = "mqtt_host", .section = "mqtt", .type = KVM_VT_STR,
         .title = "Broker host",
         .help = "Hostname or IP of the MQTT broker, e.g. the Home Assistant host.",
-        .def_str = "", .max_len = 63,
+        .def_str = "", .max_len = 63, .requires_cap = -1,
     },
     {
         .key = "mqtt_port", .section = "mqtt", .type = KVM_VT_INT,
         .title = "Broker port",
         .help = "1883 for plain MQTT, 8883 for MQTT over TLS.",
-        .min = 1, .max = 65535, .def = 1883,
+        .min = 1, .max = 65535, .def = 1883, .requires_cap = -1,
     },
     {
         .key = "mqtt_tls", .section = "mqtt", .type = KVM_VT_BOOL,
         .title = "Use TLS",
         .help = "Connect with mqtts. Set the port to 8883 as well.",
-        .def = 0,
+        .def = 0, .requires_cap = -1,
     },
     {
         .key = "mqtt_verify", .section = "mqtt", .type = KVM_VT_BOOL,
@@ -300,37 +300,37 @@ static const kvm_setting_t s_settings[] = {
         .help = "With TLS on, check the broker's certificate against the built-in "
                 "CA bundle (public CAs, e.g. Let's Encrypt). Turn off for a broker "
                 "with a self-signed certificate.",
-        .def = 1,
+        .def = 1, .requires_cap = -1,
     },
     {
         .key = "mqtt_user", .section = "mqtt", .type = KVM_VT_STR,
         .title = "Username",
         .help = "Leave empty for an anonymous broker.",
-        .def_str = "", .max_len = 47,
+        .def_str = "", .max_len = 47, .requires_cap = -1,
     },
     {
         .key = "mqtt_pass", .section = "mqtt", .type = KVM_VT_STR,
         .title = "Password",
         .help = "Stored on the device; never sent back to the console.",
-        .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET,
+        .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET, .requires_cap = -1,
     },
     {
         .key = "mqtt_base", .section = "mqtt", .type = KVM_VT_STR,
         .title = "Base topic",
         .help = "Topic prefix; the device id is appended, e.g. espkvm/a1b2c3.",
-        .def_str = "espkvm", .max_len = 31,
+        .def_str = "espkvm", .max_len = 31, .requires_cap = -1,
     },
     {
         .key = "mqtt_disco", .section = "mqtt", .type = KVM_VT_STR,
         .title = "Discovery prefix",
         .help = "Home Assistant MQTT discovery prefix. Default suits a stock HA.",
-        .def_str = "homeassistant", .max_len = 31,
+        .def_str = "homeassistant", .max_len = 31, .requires_cap = -1,
     },
     {
         .key = "mqtt_interval", .section = "mqtt", .type = KVM_VT_INT,
         .title = "Publish interval (s)",
         .help = "How often telemetry is published.",
-        .min = 5, .max = 3600, .def = 30,
+        .min = 5, .max = 3600, .def = 30, .requires_cap = -1,
     },
 
     /* ---- security ------------------------------------------------------- */
@@ -349,6 +349,16 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "sec_user", .section = "security", .type = KVM_VT_STR,
         .title = "Username", .def_str = "admin", .max_len = 31, .requires_cap = KVM_CAP_HTTPS,
+    },
+    {
+        .key = "agent_api", .section = "security", .type = KVM_VT_BOOL,
+        .title = "Agent REST API",
+        .help = "Enables the plain-REST snapshot and keyboard/mouse endpoints "
+                "(/api/v1/video/frame.jpg, /api/v1/hid/*) used to drive the target "
+                "from an AI agent or a script. Off by default: it grants the same "
+                "control the console already has, over a simpler interface, so turn "
+                "it on only when you mean to hand that control to a program.",
+        .def = 0, .requires_cap = -1,
     },
 
     /* ---- system --------------------------------------------------------- */

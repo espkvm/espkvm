@@ -827,6 +827,325 @@ static esp_err_t api_storage_rescue_post(httpd_req_t *req)
     return api_storage_images_get(req); /* echo the new state, incl. rescue.hasImage */
 }
 
+/* ---- agent / CUA endpoints: a single JPEG frame and simple HID primitives ---
+ *
+ * These make the device drivable by an AI "computer use" agent (or any script)
+ * without touching the binary WebSocket protocol: fetch a still, then click,
+ * move, press keys or type text over plain REST. Coordinates are the raw HID
+ * range 0..32767 on both axes; the caller maps screen pixels onto that using the
+ * resolution from /api/v1/video/status. Everything here needs a session and a
+ * USB target, exactly like the interactive controls. */
+
+static esp_err_t send_ok(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+}
+
+/* Read a small JSON request body. Caller frees with cJSON_Delete. NULL on any
+ * problem (missing, too large, malformed). */
+static cJSON *read_json_body(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len >= 4096) {
+        return NULL;
+    }
+    char *buf = malloc((size_t)req->content_len + 1u);
+    if (!buf) {
+        return NULL;
+    }
+    int got = 0;
+    while (got < req->content_len) {
+        int n = httpd_req_recv(req, buf + got, (size_t)(req->content_len - got));
+        if (n <= 0) {
+            free(buf);
+            return NULL;
+        }
+        got += n;
+    }
+    buf[got] = '\0';
+    cJSON *j = cJSON_Parse(buf);
+    free(buf);
+    return j;
+}
+
+static uint16_t clamp_abs(double v)
+{
+    if (v < 0) {
+        v = 0;
+    }
+    if (v > 32767) {
+        v = 32767;
+    }
+    return (uint16_t)v;
+}
+
+/* "left" (default) / "right" / "middle", or a raw button mask as a number. */
+static uint8_t parse_button(const cJSON *j)
+{
+    const cJSON *b = cJSON_GetObjectItem(j, "button");
+    if (cJSON_IsString(b)) {
+        if (strcmp(b->valuestring, "right") == 0) {
+            return 0x02;
+        }
+        if (strcmp(b->valuestring, "middle") == 0) {
+            return 0x04;
+        }
+        return 0x01;
+    }
+    if (cJSON_IsNumber(b)) {
+        return (uint8_t)b->valueint;
+    }
+    return 0x01;
+}
+
+/* Map a printable ASCII byte to a US-layout HID usage + whether Shift is held.
+ * False for anything not on a US keyboard; the caller skips those. */
+static bool ascii_to_hid(char c, uint8_t *usage, bool *shift)
+{
+    *shift = false;
+    if (c >= 'a' && c <= 'z') {
+        *usage = (uint8_t)(0x04 + (c - 'a'));
+        return true;
+    }
+    if (c >= 'A' && c <= 'Z') {
+        *usage = (uint8_t)(0x04 + (c - 'A'));
+        *shift = true;
+        return true;
+    }
+    if (c >= '1' && c <= '9') {
+        *usage = (uint8_t)(0x1E + (c - '1'));
+        return true;
+    }
+    switch (c) {
+    case '0': *usage = 0x27; return true;
+    case ' ': *usage = 0x2C; return true;
+    case '\n': *usage = 0x28; return true; /* Enter */
+    case '\t': *usage = 0x2B; return true; /* Tab */
+    case '-': *usage = 0x2D; return true;
+    case '_': *usage = 0x2D; *shift = true; return true;
+    case '=': *usage = 0x2E; return true;
+    case '+': *usage = 0x2E; *shift = true; return true;
+    case '[': *usage = 0x2F; return true;
+    case '{': *usage = 0x2F; *shift = true; return true;
+    case ']': *usage = 0x30; return true;
+    case '}': *usage = 0x30; *shift = true; return true;
+    case '\\': *usage = 0x31; return true;
+    case '|': *usage = 0x31; *shift = true; return true;
+    case ';': *usage = 0x33; return true;
+    case ':': *usage = 0x33; *shift = true; return true;
+    case '\'': *usage = 0x34; return true;
+    case '"': *usage = 0x34; *shift = true; return true;
+    case '`': *usage = 0x35; return true;
+    case '~': *usage = 0x35; *shift = true; return true;
+    case ',': *usage = 0x36; return true;
+    case '<': *usage = 0x36; *shift = true; return true;
+    case '.': *usage = 0x37; return true;
+    case '>': *usage = 0x37; *shift = true; return true;
+    case '/': *usage = 0x38; return true;
+    case '?': *usage = 0x38; *shift = true; return true;
+    case '!': *usage = 0x1E; *shift = true; return true;
+    case '@': *usage = 0x1F; *shift = true; return true;
+    case '#': *usage = 0x20; *shift = true; return true;
+    case '$': *usage = 0x21; *shift = true; return true;
+    case '%': *usage = 0x22; *shift = true; return true;
+    case '^': *usage = 0x23; *shift = true; return true;
+    case '&': *usage = 0x24; *shift = true; return true;
+    case '*': *usage = 0x25; *shift = true; return true;
+    case '(': *usage = 0x26; *shift = true; return true;
+    case ')': *usage = 0x27; *shift = true; return true;
+    default: return false;
+    }
+}
+
+/* Shared gate for the agent endpoints: a valid session AND the agent API turned
+ * on. The toggle is off by default because these hand full keyboard/mouse/screen
+ * control of the target to whatever calls them - the same control the console
+ * has, over a simpler interface. Returns true to proceed; on false it has
+ * already written the response into *out. */
+static bool agent_allowed(httpd_req_t *req, esp_err_t *out)
+{
+    if (!kvm_auth_check(req)) {
+        *out = kvm_auth_challenge(req);
+        return false;
+    }
+    if (!kvm_setting_bool("agent_api")) {
+        *out = send_json_error(req, "403 Forbidden",
+                               "the agent API is off (enable it in Settings > Security)");
+        return false;
+    }
+    return true;
+}
+
+/* GET a single JPEG still. Needs the MJPEG codec (an H.264 frame is not a
+ * standalone image); counts as a viewer briefly so the encoder produces a fresh
+ * frame even when nobody is streaming. */
+static esp_err_t api_video_frame_get(httpd_req_t *req)
+{
+    esp_err_t gate;
+    if (!agent_allowed(req, &gate)) {
+        return gate;
+    }
+    if (video_frame_payload() != VIDEO_PAYLOAD_JPEG) {
+        return send_json_error(req, "409 Conflict",
+                               "snapshot needs the MJPEG codec (set vid_codec to mjpeg)");
+    }
+    video_frame_viewer_enter();
+    const uint32_t seen = video_frame_seq();
+    video_frame_wait_new(seen, 2000);
+    video_frame_ref_t ref;
+    esp_err_t r;
+    if (video_frame_acquire(&ref)) {
+        if (ref.payload == VIDEO_PAYLOAD_JPEG && ref.len > 0) {
+            httpd_resp_set_type(req, "image/jpeg");
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            r = httpd_resp_send(req, (const char *)ref.data, ref.len);
+        } else {
+            r = send_json_error(req, "503 Service Unavailable", "no JPEG frame available");
+        }
+        video_frame_release(&ref);
+    } else {
+        r = send_json_error(req, "503 Service Unavailable", "no frame yet (is there a signal?)");
+    }
+    video_frame_viewer_leave();
+    return r;
+}
+
+static esp_err_t api_hid_move_post(httpd_req_t *req)
+{
+    esp_err_t gate;
+    if (!agent_allowed(req, &gate)) {
+        return gate;
+    }
+    if (!usb_hid_ready()) {
+        return send_json_error(req, "409 Conflict", "no USB target attached");
+    }
+    cJSON *j = read_json_body(req);
+    const cJSON *jx = j ? cJSON_GetObjectItem(j, "x") : NULL;
+    const cJSON *jy = j ? cJSON_GetObjectItem(j, "y") : NULL;
+    if (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy)) {
+        cJSON_Delete(j);
+        return send_json_error(req, "400 Bad Request", "x and y are required (0..32767)");
+    }
+    usb_hid_mouse_abs(0, clamp_abs(jx->valuedouble), clamp_abs(jy->valuedouble), 0, 0);
+    cJSON_Delete(j);
+    return send_ok(req);
+}
+
+static esp_err_t api_hid_click_post(httpd_req_t *req)
+{
+    esp_err_t gate;
+    if (!agent_allowed(req, &gate)) {
+        return gate;
+    }
+    if (!usb_hid_ready()) {
+        return send_json_error(req, "409 Conflict", "no USB target attached");
+    }
+    cJSON *j = read_json_body(req);
+    const cJSON *jx = j ? cJSON_GetObjectItem(j, "x") : NULL;
+    const cJSON *jy = j ? cJSON_GetObjectItem(j, "y") : NULL;
+    if (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy)) {
+        cJSON_Delete(j);
+        return send_json_error(req, "400 Bad Request", "x and y are required (0..32767)");
+    }
+    const uint16_t x = clamp_abs(jx->valuedouble);
+    const uint16_t y = clamp_abs(jy->valuedouble);
+    const uint8_t btn = parse_button(j);
+    cJSON_Delete(j);
+    /* Press then release at the same spot. Button edges are never coalesced, so
+     * the two reports both reach the target as a real click. */
+    usb_hid_mouse_abs(btn, x, y, 0, 0);
+    usb_hid_mouse_abs(0, x, y, 0, 0);
+    return send_ok(req);
+}
+
+/* POST {modifier?, keys:[usage,...], hold_ms?} - press a chord, then release.
+ * Raw HID usage codes; the caller (e.g. an MCP server) owns the names. */
+static esp_err_t api_hid_key_post(httpd_req_t *req)
+{
+    esp_err_t gate;
+    if (!agent_allowed(req, &gate)) {
+        return gate;
+    }
+    if (!usb_hid_ready()) {
+        return send_json_error(req, "409 Conflict", "no USB target attached");
+    }
+    cJSON *j = read_json_body(req);
+    if (!j) {
+        return send_json_error(req, "400 Bad Request", "expected JSON {keys:[...]}");
+    }
+    const cJSON *jm = cJSON_GetObjectItem(j, "modifier");
+    const uint8_t modifier = cJSON_IsNumber(jm) ? (uint8_t)jm->valueint : 0;
+    uint8_t kc[6] = {0};
+    int n = 0;
+    const cJSON *keys = cJSON_GetObjectItem(j, "keys");
+    if (cJSON_IsArray(keys)) {
+        const cJSON *e;
+        cJSON_ArrayForEach(e, keys)
+        {
+            if (n < 6 && cJSON_IsNumber(e)) {
+                kc[n++] = (uint8_t)e->valueint;
+            }
+        }
+    }
+    cJSON_Delete(j);
+    if (n == 0 && modifier == 0) {
+        return send_json_error(req, "400 Bad Request", "no keys or modifier given");
+    }
+    /* Enqueue press then release and return at once; the HID worker paces the
+     * two reports over USB (~one poll apart), which is enough for the target to
+     * register the chord. Never block the server task here - it handles every
+     * request, so a wait stalls the whole interface and piles up TLS
+     * handshakes behind it. */
+    const uint8_t none[6] = {0};
+    usb_hid_keyboard(modifier, kc);
+    usb_hid_keyboard(0, none);
+    return send_ok(req);
+}
+
+/* POST {text} - type a US-ASCII string. Capped to stay well within the HID
+ * worker's queue (the handler enqueues two reports per character and returns);
+ * longer text is sent in several calls. */
+#define HID_TYPE_MAX 80
+static esp_err_t api_hid_type_post(httpd_req_t *req)
+{
+    esp_err_t gate;
+    if (!agent_allowed(req, &gate)) {
+        return gate;
+    }
+    if (!usb_hid_ready()) {
+        return send_json_error(req, "409 Conflict", "no USB target attached");
+    }
+    cJSON *j = read_json_body(req);
+    const cJSON *jt = j ? cJSON_GetObjectItem(j, "text") : NULL;
+    if (!cJSON_IsString(jt)) {
+        cJSON_Delete(j);
+        return send_json_error(req, "400 Bad Request", "text is required");
+    }
+    const char *text = jt->valuestring;
+    size_t len = strlen(text);
+    if (len > HID_TYPE_MAX) {
+        len = HID_TYPE_MAX;
+    }
+    /* Enqueue press/release per character and let the HID worker pace them over
+     * USB (this is exactly what the console's paste does). No vTaskDelay here:
+     * blocking the single server task stalls every other request and backs up
+     * the TLS handshake pool. The length cap keeps the burst within the queue. */
+    const uint8_t none[6] = {0};
+    for (size_t i = 0; i < len; i++) {
+        uint8_t usage;
+        bool shift;
+        if (!ascii_to_hid(text[i], &usage, &shift)) {
+            continue; /* silently skip characters the US layout can't type */
+        }
+        const uint8_t kc[6] = {usage, 0, 0, 0, 0, 0};
+        usb_hid_keyboard(shift ? 0x02 : 0x00, kc); /* press; 0x02 = Left Shift */
+        usb_hid_keyboard(0, none);                 /* release */
+    }
+    cJSON_Delete(j);
+    return send_ok(req);
+}
+
 /* Long MJPEG response must not run on the httpd select() thread; see httpd_req_async_handler_begin(). */
 #define STREAM_WORKER_STACK (12 * 1024)
 #define STREAM_WORKER_PRIO (tskIDLE_PRIORITY + 5)
@@ -1664,8 +1983,10 @@ httpd_handle_t http_server_start(void)
      * registered last, an overflow drops exactly the WebSocket endpoints - which
      * looks like a mysterious 404 on wss (no video, no input) while every REST
      * route still works. Count them when adding a route; keep headroom.
+     * ~33 are registered now (REST + auth + the two WebSockets + the agent
+     * endpoints); 40 leaves room.
      */
-    cfg.max_uri_handlers = 32;
+    cfg.max_uri_handlers = 40;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -1774,6 +2095,12 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/storage/upload", .method = HTTP_POST, .handler = api_storage_upload_post},
         {.uri = "/api/v1/storage/delete", .method = HTTP_POST, .handler = api_storage_delete_post},
         {.uri = "/api/v1/storage/rescue", .method = HTTP_POST, .handler = api_storage_rescue_post},
+        /* Agent / CUA surface: a still frame and HID primitives over plain REST. */
+        {.uri = "/api/v1/video/frame.jpg", .method = HTTP_GET, .handler = api_video_frame_get},
+        {.uri = "/api/v1/hid/move", .method = HTTP_POST, .handler = api_hid_move_post},
+        {.uri = "/api/v1/hid/click", .method = HTTP_POST, .handler = api_hid_click_post},
+        {.uri = "/api/v1/hid/key", .method = HTTP_POST, .handler = api_hid_key_post},
+        {.uri = "/api/v1/hid/type", .method = HTTP_POST, .handler = api_hid_type_post},
     };
     for (size_t i = 0; i < sizeof(api_uris) / sizeof(api_uris[0]); i++) {
         httpd_register_uri_handler(h, &api_uris[i]);

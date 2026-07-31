@@ -7,6 +7,32 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-31
+
+### Added
+- Agent / computer-use REST endpoints, so an AI agent (or any script) can drive
+  the target without the binary WebSocket protocol: `GET /api/v1/video/frame.jpg`
+  for a single JPEG still, and `POST /api/v1/hid/move`, `/hid/click`, `/hid/key`
+  and `/hid/type` for pointer and keyboard input. Coordinates are the raw HID
+  range 0..32767; the caller maps screen pixels using the resolution from
+  `/api/v1/video/status`.
+- An "Agent REST API" setting (Security), off by default, that gates all of the
+  above. These endpoints grant the same keyboard/mouse/screen control the console
+  already has, over a simpler interface, so they exist only when the operator
+  turns them on; each still needs a session and a USB target.
+
+### Fixed
+- The HID endpoints never block the web server. Each only enqueues to the HID
+  worker and returns; the worker paces the reports over USB. Blocking the single
+  server task (an earlier draft used a per-character/hold delay) stalls every
+  other request and backs up the TLS handshake pool, which could hang the whole
+  web server under load - the same reason the upload and MJPEG-stream paths run
+  on their own tasks.
+- Settings that do not depend on hardware - the whole MQTT/Home Assistant
+  section and the agent-API toggle - are no longer hidden on a device without
+  video capture. They had defaulted to requiring the video capability; they now
+  declare themselves always applicable.
+
 ## [0.13.1] - 2026-07-31
 
 ### Added
