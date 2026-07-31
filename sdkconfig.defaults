@@ -61,3 +61,14 @@ CONFIG_ESP_TLS_SERVER_SESSION_TICKETS=y
 # The websocket handler is not called for the upgrade (esp_http_server returns
 # right after the handshake), so the session cookie can only be checked here.
 CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
+
+# WireGuard brings up its tunnel with a raw lwIP netif_add, which stores the
+# WireGuard device in netif->state. By default esp_netif also keeps its own
+# handle in netif->state, and its global lwIP ext-callback then reads the
+# WireGuard pointer as an esp_netif_t and crashes (esp_netif_internal_dhcpc_cb,
+# a Load access fault) the instant the tunnel netif is added. Enabling a
+# "special" lwIP interface flips LWIP_ESP_NETIF_DATA on, moving esp_netif's
+# handle into netif->client_data so it no longer aliases netif->state; the
+# WireGuard netif's client_data is zero, so the callback sees NULL and bails.
+# We do not create a bridge - this is only here for that side effect.
+CONFIG_ESP_NETIF_BRIDGE_EN=y

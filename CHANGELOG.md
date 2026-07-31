@@ -10,6 +10,15 @@ bumps the patch).
 ## [0.14.0] - 2026-07-31
 
 ### Added
+- WireGuard VPN client (Settings -> VPN), off by default. The device reaches a
+  peer over the existing Ethernet link as a split tunnel - only its own tunnel
+  address rides WireGuard, so the console stays reachable on the LAN too. It
+  generates its own X25519 key on first use (via PSA) and reports the public key
+  to add to the peer; the operator supplies the peer key, endpoint and tunnel
+  address. Optional SNTP keeps the handshake timestamp valid across reboots.
+  `/api/v1/system/info` reports the tunnel state (enabled/up/address/publicKey).
+  Bring-up runs on its own worker task, so a slow or failing connect never blocks
+  boot or the web server.
 - Agent / computer-use REST endpoints, so an AI agent (or any script) can drive
   the target without the binary WebSocket protocol: `GET /api/v1/video/frame.jpg`
   for a single JPEG still, and `POST /api/v1/hid/move`, `/hid/click`, `/hid/key`

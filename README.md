@@ -55,6 +55,7 @@ Useful for what it does today, and honest about the rest.
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
+| WireGuard VPN client | works; off by default, split-tunnel over the existing link, generates its own key on the device |
 | HDMI audio | not implemented |
 
 What is coming next is in the [roadmap](ROADMAP.md).
@@ -67,8 +68,9 @@ What is coming next is in the [roadmap](ROADMAP.md).
 **Still: do not put this on the public internet.** There is a login now, and
 TLS, but nothing here has been through a security review, and a device that
 holds a keyboard on someone else's machine is worth more to an attacker than
-most things on a network. Keep it on a network you trust, or behind a VPN such
-as WireGuard or Tailscale.
+most things on a network. Keep it on a network you trust, or reach it over a
+VPN &mdash; it has a built-in WireGuard client (Settings &rarr; VPN), or you can
+put it behind your own WireGuard or Tailscale.
 
 ## Hardware
 
@@ -319,7 +321,7 @@ components/
   kvm_storage/    microSD and on-flash rescue image, virtual media
   kvm_config/     settings registry and capability registry
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
-  kvm_net/        Ethernet, mDNS, Wake-on-LAN
+  kvm_net/        Ethernet, mDNS, Wake-on-LAN, WireGuard tunnel
   kvm_board/      pin map
 web/              the console (Vue 3 + TypeScript + Vite)
 boards/           per-board build overlays (Waveshare, Function EV)

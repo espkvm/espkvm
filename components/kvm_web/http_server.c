@@ -35,6 +35,7 @@
 #include "ethernet.h"
 #include "kvm_atx.h"
 #include "kvm_mqtt.h"
+#include "kvm_wg.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
@@ -214,8 +215,10 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_atx_status(&atx);
     bool mqtt_on = false, mqtt_conn = false;
     kvm_mqtt_status(&mqtt_on, &mqtt_conn);
+    kvm_wg_status_t wg;
+    kvm_wg_status(&wg);
 
-    char body[672];
+    char body[832];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
@@ -223,7 +226,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d},"
                      "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s},"
-                     "\"mqtt\":{\"enabled\":%s,\"connected\":%s}}",
+                     "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
+                     "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"}}",
                      app->project_name, app->version, app->date, app->time, app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false",
                      (unsigned long long)(esp_timer_get_time() / 1000000),
@@ -234,7 +238,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      net_up ? "true" : "false", net_mbps,
                      atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
                      atx.power_on ? "true" : "false", mqtt_on ? "true" : "false",
-                     mqtt_conn ? "true" : "false");
+                     mqtt_conn ? "true" : "false", wg.enabled ? "true" : "false",
+                     wg.up ? "true" : "false", wg.address, wg.public_key);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }

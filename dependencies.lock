@@ -70,6 +70,6 @@ direct_dependencies:
 - espressif/mqtt
 - espressif/tinyusb
 - idf
-manifest_hash: ab6be49f43f3afe3180bf9f4ce829844d60659b478c122e5f2281eafa2da7f8a
+manifest_hash: aad65b339c5ffca045415840721d7025f65d198062e1c18772ec4d8c9a768380
 target: esp32p4
 version: 3.0.0

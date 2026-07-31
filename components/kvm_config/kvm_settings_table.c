@@ -268,6 +268,67 @@ static const kvm_setting_t s_settings[] = {
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
     },
 
+    /* ---- vpn / wireguard ------------------------------------------------- */
+    {
+        .key = "wg_enable", .section = "vpn", .type = KVM_VT_BOOL,
+        .title = "Enable WireGuard",
+        .help = "Bring up a WireGuard tunnel so the device is reachable over the "
+                "VPN. Off by default. Split-tunnel: only this address goes through "
+                "WireGuard, so the console stays reachable on the LAN too.",
+        .def = 0, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_address", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Tunnel address",
+        .help = "The device's own IP on the WireGuard network, e.g. 10.9.0.2.",
+        .def_str = "", .max_len = 31, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_private_key", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Private key",
+        .help = "Base64 WireGuard private key. Leave empty and the device "
+                "generates one on first connect; its public key is shown below.",
+        .def_str = "", .max_len = 47, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_peer_key", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Peer public key",
+        .help = "Base64 public key of the WireGuard peer (the hub/server).",
+        .def_str = "", .max_len = 47, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_endpoint", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Peer endpoint",
+        .help = "host:port of the peer, e.g. vpn.example.com:51820.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_keepalive", .section = "vpn", .type = KVM_VT_INT,
+        .title = "Persistent keepalive (s)",
+        .help = "Keeps a NAT/firewall mapping open. 25 is typical; 0 disables it.",
+        .min = 0, .max = 65535, .def = 25, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_preshared", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Preshared key",
+        .help = "Optional base64 preshared key for an extra symmetric layer.",
+        .def_str = "", .max_len = 47, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_sntp", .section = "vpn", .type = KVM_VT_BOOL,
+        .title = "Sync time over SNTP",
+        .help = "WireGuard handshakes carry a timestamp; without a real clock a "
+                "reboot can make the peer reject them. Turn this on if the device "
+                "can reach an NTP server. Off by default (isolated networks).",
+        .def = 0, .requires_cap = KVM_CAP_WG,
+    },
+    {
+        .key = "wg_sntp_srv", .section = "vpn", .type = KVM_VT_STR,
+        .title = "NTP server",
+        .help = "Used only when SNTP is on.",
+        .def_str = "pool.ntp.org", .max_len = 47, .requires_cap = KVM_CAP_WG,
+    },
+
     /* ---- mqtt / home assistant ------------------------------------------ */
     {
         .key = "mqtt_enable", .section = "mqtt", .type = KVM_VT_BOOL,

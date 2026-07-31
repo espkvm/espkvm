@@ -69,6 +69,7 @@ static const cap_desc_t s_desc[KVM_CAP_COUNT] = {
                        "sec_https"},
     [KVM_CAP_OTA] = {"ota", true, NULL},
     [KVM_CAP_NET_STATIC] = {"net_static", true, NULL},
+    [KVM_CAP_WG] = {"wireguard", true, NULL},
 };
 
 typedef struct {

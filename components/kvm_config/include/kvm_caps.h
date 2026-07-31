@@ -33,6 +33,7 @@ typedef enum {
     KVM_CAP_HTTPS,   /**< TLS + authentication */
     KVM_CAP_OTA,     /**< two OTA slots present in the partition table */
     KVM_CAP_NET_STATIC, /**< static addressing rather than DHCP */
+    KVM_CAP_WG,         /**< WireGuard tunnel configured and connecting */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

@@ -18,6 +18,7 @@
 #include "kvm_caps.h"
 #include "kvm_mqtt.h"
 #include "kvm_storage.h"
+#include "kvm_wg.h"
 #include "kvm_thermal.h"
 #include "kvm_settings.h"
 #include "usb_hid.h"
@@ -58,6 +59,9 @@ static void on_setting_changed(const char *key, void *user)
     }
     if (strncmp(key, "mqtt_", 5) == 0 || strcmp(key, "*") == 0) {
         kvm_mqtt_apply();
+    }
+    if (strncmp(key, "wg_", 3) == 0 || strcmp(key, "*") == 0) {
+        kvm_wg_apply();
     }
     /* ATX or WoL availability changing alters which Home Assistant entities
      * should exist; refresh discovery (kvm_atx_apply above already ran, so the
@@ -154,6 +158,11 @@ static void report_pending_capabilities(void)
     /* Every capability the MQTT bridge gates its Home Assistant entities on is
      * settled now, so connect (if enabled) with the right entity set. */
     kvm_mqtt_apply();
+
+    /* Bring up the WireGuard tunnel if it is configured. The bring-up runs on
+     * the kvm_wg worker task (kvm_wg_apply only signals it), so a slow or failing
+     * connect never blocks boot or the web server. */
+    kvm_wg_apply();
 }
 
 void app_main(void)
@@ -206,6 +215,10 @@ void app_main(void)
      * report_pending_capabilities(), once every capability it advertises to
      * Home Assistant has been settled. */
     ESP_ERROR_CHECK(kvm_mqtt_init());
+
+    /* WireGuard tunnel: prepare state now, connect from
+     * report_pending_capabilities() once the network is up. */
+    ESP_ERROR_CHECK(kvm_wg_init());
 
     /* Before the web server, which reads published frames. */
     video_frame_store_init();
