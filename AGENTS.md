@@ -56,9 +56,10 @@ components/
   kvm_storage/    microSD mount + virtual-media (serves an image read-only)
   kvm_config/     NVS settings, capability registry, thermal guard
   kvm_web/        HTTPS server, REST + WebSocket, auth, self-signed TLS, OTA
-  kvm_net/        Ethernet + mDNS
+  kvm_net/        Ethernet + mDNS + WireGuard tunnel
   kvm_board/      pin map (thin: names the Kconfig CONFIG_ values)
   esp_tinyusb/    VENDORED fork of esp_tinyusb (see gotchas)
+  esp_wireguard/  VENDORED fork of esp_wireguard (IDF6/GCC15 fixes; see gotchas)
 web/              Vue 3 console (git submodule: espkvm/console)
 main/             app_main and start-up order
 docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
@@ -87,6 +88,18 @@ docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
   supply its own `tud_msc_*_cb` serving a file; `CFG_TUD_MSC` is forced on in
   its `tusb_config.h`. Do not re-add the managed `espressif/esp_tinyusb`
   dependency, and do not expect its MSC storage APIs to exist.
+- **esp_wireguard is vendored** at `components/esp_wireguard`, a fork patched to
+  build on IDF 6 / GCC 15 (RNG via `esp_fill_random`, `nonstring` attributes, the
+  x25519 warning flag). Two things it forces, both easy to relearn the hard way:
+  (1) it brings the tunnel up with a raw lwIP `netif_add` that stores its device
+  in `netif->state`, which aliases esp_netif's own handle and crashes esp_netif's
+  global lwIP callback the instant the netif is added - so
+  `CONFIG_ESP_NETIF_BRIDGE_EN=y` is set purely to flip `LWIP_ESP_NETIF_DATA` on,
+  moving esp_netif's handle into `netif->client_data`; (2) `wireguardif_init` was
+  patched to find the underlying interface generically instead of the hardcoded
+  `WIFI_STA_DEF`, so an Ethernet-only device works. The tunnel is also brought up
+  on its own worker task (`kvm_net/kvm_wg.c`), never under a mutex held across the
+  blocking connect, so it cannot wedge the single web-server task.
 - **mbedTLS 4 / PSA crypto.** IDF 6 dropped the legacy pk / ctr_drbg API. Keys
   come from `psa_generate_key` + `mbedtls_pk_copy_from_psa`; the X.509 writer
   takes no RNG callback. PBKDF2 and HMAC are hand-rolled over PSA (not public in
