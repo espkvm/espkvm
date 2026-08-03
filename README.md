@@ -48,6 +48,7 @@ Useful for what it does today, and honest about the rest.
 | Settings, capability reporting, diagnostics | works |
 | Firmware update over the network, with rollback | works |
 | HTTPS with a certificate the device issues itself | works; a downloadable CA you can trust to clear the warning and enable H.264 |
+| Bring your own TLS certificate | works; install your own cert and key (Settings, or `PUT /api/v1/tls/cert`), self-signed by default |
 | Login, and a physical password reset | works |
 | Thermal protection | works |
 | Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |

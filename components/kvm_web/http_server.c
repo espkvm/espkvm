@@ -1470,6 +1470,131 @@ static esp_err_t favicon_get(httpd_req_t *req)
     return httpd_resp_send(req, favicon_ico_start, len);
 }
 
+/* ---- TLS: operator-supplied certificate --------------------------------- */
+
+#define TLS_BODY_MAX 8192
+
+/** Report whether the served certificate is the operator's or the self-signed one. */
+static esp_err_t api_tls_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    const bool byo = kvm_tls_byo_present();
+    char body[96];
+    snprintf(body, sizeof(body), "{\"https\":%s,\"custom\":%s}",
+             kvm_setting_bool("sec_https") ? "true" : "false", byo ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(req, body);
+}
+
+/** The start of the private-key block within a combined PEM, or NULL. */
+static const char *pem_key_start(const char *pem)
+{
+    static const char *const markers[] = {
+        "-----BEGIN PRIVATE KEY-----",
+        "-----BEGIN EC PRIVATE KEY-----",
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+    };
+    const char *best = NULL;
+    for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
+        const char *p = strstr(pem, markers[i]);
+        if (p && (!best || p < best)) {
+            best = p;
+        }
+    }
+    return best;
+}
+
+/*
+ * Install an operator certificate. The body is one PEM blob: the certificate
+ * (leaf first, any intermediates after) followed by the matching private key -
+ * exactly `cat fullchain.pem privkey.pem`. It is validated before it is stored,
+ * and only takes effect on the restart this triggers; if the TLS stack later
+ * rejects it, start-up falls back to the self-signed certificate.
+ */
+static esp_err_t api_tls_cert_put(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (req->content_len <= 0 || req->content_len >= TLS_BODY_MAX) {
+        return send_json_error(req, "413 Payload Too Large", "certificate body too large");
+    }
+    char *body = malloc((size_t)req->content_len + 1u);
+    if (!body) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    int got = 0;
+    while (got < req->content_len) {
+        int n = httpd_req_recv(req, body + got, (size_t)(req->content_len - got));
+        if (n <= 0) {
+            free(body);
+            return send_json_error(req, "400 Bad Request", "truncated body");
+        }
+        got += n;
+    }
+    body[got] = '\0';
+
+    const char *ks = pem_key_start(body);
+    if (!ks) {
+        free(body);
+        return send_json_error(req, "400 Bad Request",
+                               "no private key in the body (send the certificate then the key)");
+    }
+    const size_t cert_len = (size_t)(ks - body);
+    char *cert = malloc(cert_len + 1u);
+    char *key = strdup(ks);
+    if (!cert || !key) {
+        free(cert);
+        free(key);
+        free(body);
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    memcpy(cert, body, cert_len);
+    cert[cert_len] = '\0';
+    free(body);
+
+    char err[128];
+    esp_err_t res = kvm_tls_byo_set(cert, key, err, sizeof(err));
+    free(cert);
+    free(key);
+    if (res != ESP_OK) {
+        const char *status = (res == ESP_ERR_INVALID_SIZE) ? "413 Payload Too Large"
+                                                            : "400 Bad Request";
+        return send_json_error(req, status, err);
+    }
+    ESP_LOGW(TAG, "operator certificate installed; restarting to apply");
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t sent = httpd_resp_sendstr(req, "{\"status\":\"stored\",\"restarting\":true}");
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_restart();
+    return sent;
+}
+
+/** Remove the operator certificate and revert to the self-signed one. */
+static esp_err_t api_tls_cert_delete(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (!kvm_tls_byo_present()) {
+        return send_json_error(req, "404 Not Found", "no operator certificate is installed");
+    }
+    esp_err_t res = kvm_tls_byo_clear();
+    if (res != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", esp_err_to_name(res));
+    }
+    ESP_LOGW(TAG, "operator certificate removed; restarting to apply");
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t sent = httpd_resp_sendstr(req, "{\"status\":\"cleared\",\"restarting\":true}");
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_restart();
+    return sent;
+}
+
 /** Serialises multipart senders; see where it is taken for why. */
 static SemaphoreHandle_t s_xmit_mu;
 
@@ -2010,14 +2135,24 @@ httpd_handle_t http_server_start(void)
      * frames.
      */
     if (kvm_setting_bool("sec_https")) {
-        kvm_tls_identity_t id;
-        esp_err_t cert_err = kvm_tls_identity_get(&id);
-        if (cert_err != ESP_OK) {
-            kvm_cap_report(KVM_CAP_HTTPS, false, "no certificate could be generated (%s)",
-                           esp_err_to_name(cert_err));
-        } else {
+        /*
+         * Try the operator's own certificate first (if one is installed); if the
+         * TLS stack refuses it, fall back to the self-signed identity rather than
+         * leave the console unreachable over a bad upload. At most two attempts:
+         * bring-your-own, then self-signed.
+         */
+        bool allow_byo = true;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            kvm_tls_identity_t id;
+            esp_err_t cert_err = kvm_tls_identity_get(&id, allow_byo);
+            if (cert_err != ESP_OK) {
+                kvm_cap_report(KVM_CAP_HTTPS, false, "no certificate could be generated (%s)",
+                               esp_err_to_name(cert_err));
+                break;
+            }
             /* Keep the CA certificate around so a client can download and trust
-             * it; the leaf and the private key are never offered for download. */
+             * it; the leaf and the private key are never offered for download.
+             * An operator certificate has no CA to import (id.ca_pem is NULL). */
             free(s_cert_pem);
             s_cert_pem = id.ca_pem ? strdup(id.ca_pem) : NULL;
 
@@ -2040,19 +2175,27 @@ httpd_handle_t http_server_start(void)
              */
             ssl.session_tickets = true;
 
+            const bool was_byo = id.byo;
             esp_err_t err = httpd_ssl_start(&h, &ssl);
             /* esp_https_server copies the PEMs into its own configuration. */
             kvm_tls_identity_free(&id);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "httpd_ssl_start: %s", esp_err_to_name(err));
-                h = NULL;
-                kvm_cap_report(KVM_CAP_HTTPS, false, "the TLS server did not start (%s)",
-                               esp_err_to_name(err));
-            } else {
+            if (err == ESP_OK) {
                 kvm_cap_report(KVM_CAP_HTTPS, true, NULL);
                 s_redirect_httpd = start_redirect_server();
-                ESP_LOGI(TAG, "serving on https://, port 80 redirects");
+                ESP_LOGI(TAG, "serving on https://, port 80 redirects%s",
+                         was_byo ? " (operator certificate)" : "");
+                break;
             }
+            ESP_LOGE(TAG, "httpd_ssl_start: %s", esp_err_to_name(err));
+            h = NULL;
+            if (was_byo) {
+                ESP_LOGE(TAG, "the operator certificate was rejected; falling back to self-signed");
+                allow_byo = false;
+                continue; /* retry with the self-signed identity */
+            }
+            kvm_cap_report(KVM_CAP_HTTPS, false, "the TLS server did not start (%s)",
+                           esp_err_to_name(err));
+            break;
         }
     } else {
         kvm_cap_report(KVM_CAP_HTTPS, true, NULL);
@@ -2090,6 +2233,9 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
+        {.uri = "/api/v1/tls", .method = HTTP_GET, .handler = api_tls_get},
+        {.uri = "/api/v1/tls/cert", .method = HTTP_PUT, .handler = api_tls_cert_put},
+        {.uri = "/api/v1/tls/cert", .method = HTTP_DELETE, .handler = api_tls_cert_delete},
         {.uri = "/api/v1/power/wake", .method = HTTP_POST, .handler = api_power_wake_post},
         {.uri = "/api/v1/power/click", .method = HTTP_POST, .handler = api_power_click_post},
         {.uri = "/api/v1/power/hold", .method = HTTP_POST, .handler = api_power_hold_post},

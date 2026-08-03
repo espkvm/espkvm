@@ -18,6 +18,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - Home Assistant integration over MQTT - auto-discovered sensors and power/reset/Wake-on-LAN buttons, with optional TLS
 - WireGuard VPN client - split-tunnel over the existing link, with on-device key generation
 - HTTPS with a self-issued certificate, login, and a physical password reset
+- Bring-your-own TLS certificate - install your own certificate and key in place of the self-signed one
 - Thermal protection
 - Over-the-network updates with automatic rollback
 - A second board build target (Espressif ESP32-P4 Function EV Board)
@@ -34,7 +35,6 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 
 - A screen recorder (save a clip of the target's output)
 - Serial console passthrough
-- Bring-your-own TLS certificate
 - A USB network interface to the target
 
 Have a use case that is not here? Open a discussion.

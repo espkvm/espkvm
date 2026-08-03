@@ -53,6 +53,15 @@
 /** What the stored leaf was issued for (hostname, or "hostname|ip" with a static
  *  address), so a renamed or re-addressed device re-issues it. */
 #define NVS_KEY_NAME "name"
+/** Operator-supplied certificate and key (PEM), used instead of the self-signed
+ *  identity when present. */
+#define NVS_KEY_BYO_CERT "byo_cert"
+#define NVS_KEY_BYO_KEY "byo_key"
+
+/* One NVS string tops out at 4000 bytes; keep each PEM comfortably under that.
+ * A leaf plus a couple of intermediates and a P-256 or RSA-2048 key fit easily -
+ * a longer chain is rejected with a hint rather than silently truncated. */
+#define BYO_PEM_MAX 3900
 
 #define CA_SUBJECT "CN=ESP-KVM Device CA,O=ESP-KVM"
 
@@ -462,12 +471,196 @@ static esp_err_t run_gen(gen_job_t *job)
     return job->result;
 }
 
-esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out)
+/* ---- operator-supplied certificate (bring your own) --------------------- */
+
+/*
+ * Confirm the certificate and key parse and that the key belongs to the
+ * certificate. Parsing wants several kilobytes of stack - more than an HTTP
+ * handler has - so, like generation, it runs on a task of its own.
+ */
+static esp_err_t validate_pair(const char *cert_pem, const char *key_pem, char *err, size_t errlen)
+{
+    mbedtls_x509_crt crt;
+    mbedtls_pk_context key;
+    mbedtls_x509_crt_init(&crt);
+    mbedtls_pk_init(&key);
+    esp_err_t res = ESP_ERR_INVALID_ARG;
+
+    if (mbedtls_x509_crt_parse(&crt, (const unsigned char *)cert_pem, strlen(cert_pem) + 1) != 0) {
+        snprintf(err, errlen, "the certificate could not be parsed (is it PEM?)");
+        goto done;
+    }
+    if (mbedtls_pk_parse_key(&key, (const unsigned char *)key_pem, strlen(key_pem) + 1, NULL, 0) !=
+        0) {
+        snprintf(err, errlen, "the private key could not be parsed (an unencrypted PEM key?)");
+        goto done;
+    }
+    if (mbedtls_pk_check_pair(&crt.pk, &key) != 0) {
+        snprintf(err, errlen, "the private key does not match the certificate");
+        goto done;
+    }
+    res = ESP_OK;
+done:
+    mbedtls_pk_free(&key);
+    mbedtls_x509_crt_free(&crt);
+    return res;
+}
+
+typedef struct {
+    const char *cert;
+    const char *key;
+    char *err;
+    size_t errlen;
+    esp_err_t result;
+    SemaphoreHandle_t done;
+} byo_job_t;
+
+static void byo_validate_task(void *arg)
+{
+    byo_job_t *job = (byo_job_t *)arg;
+    job->result = validate_pair(job->cert, job->key, job->err, job->errlen);
+    xSemaphoreGive(job->done);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t run_validate(const char *cert, const char *key, char *err, size_t errlen)
+{
+    byo_job_t job = {.cert = cert, .key = key, .err = err, .errlen = errlen, .result = ESP_FAIL};
+    job.done = xSemaphoreCreateBinary();
+    if (!job.done) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (xTaskCreate(byo_validate_task, "tls_byo", 12 * 1024, &job, 5, NULL) != pdPASS) {
+        vSemaphoreDelete(job.done);
+        return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreTake(job.done, portMAX_DELAY);
+    vSemaphoreDelete(job.done);
+    return job.result;
+}
+
+static esp_err_t nvs_load_byo(char **cert, char **key)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_get_alloc(h, NVS_KEY_BYO_CERT, cert);
+    if (err == ESP_OK) {
+        err = nvs_get_alloc(h, NVS_KEY_BYO_KEY, key);
+        if (err != ESP_OK) {
+            free(*cert);
+            *cert = NULL;
+        }
+    }
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t kvm_tls_byo_set(const char *cert_pem, const char *key_pem, char *err, size_t errlen)
+{
+    if (err && errlen) {
+        err[0] = '\0';
+    }
+    if (!cert_pem || !key_pem || !cert_pem[0] || !key_pem[0]) {
+        if (err) {
+            snprintf(err, errlen, "both a certificate and a private key are required");
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(cert_pem) >= BYO_PEM_MAX || strlen(key_pem) >= BYO_PEM_MAX) {
+        if (err) {
+            snprintf(err, errlen,
+                     "certificate or key too large; include only the leaf and any intermediates");
+        }
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    char reason[128] = {0};
+    esp_err_t vr = run_validate(cert_pem, key_pem, reason, sizeof(reason));
+    if (vr != ESP_OK) {
+        if (err) {
+            snprintf(err, errlen, "%s", reason[0] ? reason : "the certificate could not be validated");
+        }
+        return vr;
+    }
+
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) {
+        if (err) {
+            snprintf(err, errlen, "storage unavailable (%s)", esp_err_to_name(e));
+        }
+        return e;
+    }
+    e = nvs_set_str(h, NVS_KEY_BYO_CERT, cert_pem);
+    if (e == ESP_OK) {
+        e = nvs_set_str(h, NVS_KEY_BYO_KEY, key_pem);
+    }
+    if (e == ESP_OK) {
+        e = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (e != ESP_OK && err) {
+        snprintf(err, errlen, "could not be stored (%s)", esp_err_to_name(e));
+    }
+    return e;
+}
+
+esp_err_t kvm_tls_byo_clear(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return (err == ESP_ERR_NVS_NOT_FOUND) ? ESP_OK : err;
+    }
+    (void)nvs_erase_key(h, NVS_KEY_BYO_CERT);
+    (void)nvs_erase_key(h, NVS_KEY_BYO_KEY);
+    err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+bool kvm_tls_byo_present(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return false;
+    }
+    size_t len = 0;
+    const bool present = nvs_get_str(h, NVS_KEY_BYO_CERT, NULL, &len) == ESP_OK && len > 1;
+    nvs_close(h);
+    return present;
+}
+
+esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
 {
     if (!out) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
+
+    /*
+     * The operator's own certificate takes precedence when one is installed:
+     * served as-is (it may be a chain), with no CA to import since whatever
+     * issued it is trusted elsewhere. It was validated when uploaded; if the TLS
+     * stack still rejects it at start-up the web server retries with allow_byo
+     * false, so this can never strand the console.
+     */
+    if (allow_byo) {
+        char *byo_cert = NULL;
+        char *byo_key = NULL;
+        if (nvs_load_byo(&byo_cert, &byo_key) == ESP_OK) {
+            out->cert_pem = byo_cert;
+            out->cert_len = strlen(byo_cert) + 1;
+            out->key_pem = byo_key;
+            out->key_len = strlen(byo_key) + 1;
+            out->byo = true;
+            ESP_LOGI(TAG, "serving the operator-supplied certificate");
+            return ESP_OK;
+        }
+    }
 
     char name[40];
     hostname_now(name, sizeof(name));

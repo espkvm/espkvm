@@ -7,6 +7,17 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Added
+- Bring-your-own TLS certificate. An operator can install their own certificate
+  and key (e.g. from an internal CA or a real public one) so the browser trusts
+  the device without importing the device CA. `PUT /api/v1/tls/cert` takes one
+  PEM blob (the certificate chain, leaf first, then the private key - exactly
+  `cat fullchain.pem privkey.pem`); `DELETE` reverts to the self-signed identity;
+  `GET /api/v1/tls` reports which is in use. The pair is validated (both parse
+  and the key matches the certificate) before it is stored, and a bad upload can
+  never strand the console: if the TLS stack rejects the certificate at start-up,
+  the server falls back to the self-signed one.
+
 ## [0.14.0] - 2026-07-31
 
 ### Added
