@@ -18,6 +18,7 @@
 
 #include "kvm_board.h"
 #include "kvm_settings.h"
+#include "kvm_tls.h"
 
 #define TAG "auth"
 
@@ -857,6 +858,14 @@ void kvm_auth_check_reset_button(void)
                  * on this very boot. */
                 if (kvm_setting_set_int("net_dhcp", 1) == ESP_OK) {
                     ESP_LOGW(TAG, "network reverted to DHCP");
+                }
+                /* And drop any operator-supplied TLS certificate: a wrong one
+                 * (expired, or a name that no longer matches) is another way to
+                 * lock oneself out of the console, recovered here the same way.
+                 * The self-signed identity takes over on the next start. */
+                if (kvm_tls_byo_present()) {
+                    (void)kvm_tls_byo_clear();
+                    ESP_LOGW(TAG, "operator TLS certificate cleared");
                 }
                 break;
             }
