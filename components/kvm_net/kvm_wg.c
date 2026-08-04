@@ -217,8 +217,11 @@ static void wg_reconcile(void)
     const char *endp = kvm_setting_str("wg_endpoint");
     if (!addr[0] || !peer[0] || !endp[0]) {
         stop_tunnel();
-        kvm_cap_report(KVM_CAP_WG, false,
-                       "set the tunnel address, peer key and endpoint (Settings -> VPN)");
+        /* Enabled but not fully configured: a state, not a lost capability. Keep
+         * the cap AVAILABLE so the console leaves the wg_* fields editable - gating
+         * them on this cap would disable the very inputs needed to finish the
+         * config. "Not connected" is reported through kvm_wg_status, not here. */
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
         return;
     }
 
@@ -231,7 +234,8 @@ static void wg_reconcile(void)
             ESP_LOGI(TAG, "generated a WireGuard private key");
             priv = kvm_setting_str("wg_private_key");
         } else {
-            kvm_cap_report(KVM_CAP_WG, false, "could not generate a private key");
+            ESP_LOGE(TAG, "could not generate a WireGuard private key");
+            kvm_cap_report(KVM_CAP_WG, true, NULL);
             return;
         }
     }
@@ -257,7 +261,10 @@ static void wg_reconcile(void)
     }
     ip_addr_t endpoint_ip;
     if (!resolve_ipv4(host, &endpoint_ip)) {
-        kvm_cap_report(KVM_CAP_WG, false, "the peer endpoint could not be resolved");
+        /* Runtime/config errors below keep the cap AVAILABLE (fields stay editable
+         * so a wrong value can be corrected); they log and show as "not connected". */
+        ESP_LOGW(TAG, "WireGuard endpoint '%s' could not be resolved", host);
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
         return;
     }
 
@@ -266,7 +273,8 @@ static void wg_reconcile(void)
      * spokes while leaving the LAN (and the console) on the default route. */
     ip_addr_t tun_ip;
     if (!resolve_ipv4(addr, &tun_ip)) {
-        kvm_cap_report(KVM_CAP_WG, false, "the tunnel address is not valid");
+        ESP_LOGW(TAG, "WireGuard tunnel address '%s' is not valid", addr);
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
         return;
     }
 
@@ -277,7 +285,8 @@ static void wg_reconcile(void)
 
     struct netif *netif = calloc(1, sizeof(struct netif));
     if (!netif) {
-        kvm_cap_report(KVM_CAP_WG, false, "out of memory");
+        ESP_LOGE(TAG, "out of memory bringing up the WireGuard interface");
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
         return;
     }
 
@@ -305,7 +314,7 @@ static void wg_reconcile(void)
         wg_unlock();
         ESP_LOGE(TAG, "wireguardif_init: %d", err);
         free(netif);
-        kvm_cap_report(KVM_CAP_WG, false, "the tunnel interface could not start");
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
         return;
     }
     /* /24 tunnel subnet, split route (not the default netif). */
@@ -327,7 +336,7 @@ static void wg_reconcile(void)
     if (err != ERR_OK || idx == WIREGUARDIF_INVALID_INDEX) {
         ESP_LOGE(TAG, "wireguardif peer/connect failed: %d", err);
         stop_tunnel_netif(netif);
-        kvm_cap_report(KVM_CAP_WG, false, "the tunnel could not connect to the peer");
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
         return;
     }
 

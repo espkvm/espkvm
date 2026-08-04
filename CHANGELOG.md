@@ -7,6 +7,21 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-08-04
+
+### Fixed
+- Enabling a VPN (Tailscale or WireGuard) before it was fully configured locked
+  its own settings: an incomplete tunnel reported its capability as unavailable,
+  which disabled the very fields - including the Tailscale auth-key box and the
+  enable toggle - needed to finish setting it up, with no way back without a
+  reflash. The VPN capabilities now track only whether the subsystem is present
+  (always, here), so their settings stay editable; connection state is reported
+  through the status API and the VPN pill instead. Secret settings (VPN keys) are
+  also marked as such in the settings schema, so the console renders them as
+  write-only password fields that keep the stored value when left blank.
+
+## [0.16.0] - 2026-08-04
+
 ### Added
 - Native Tailscale, as a second VPN backend alongside classic WireGuard (enable
   one in Settings -> VPN). The device joins a tailnet directly - no gateway, VPS
@@ -40,6 +55,9 @@ bumps the patch).
   some clients rejected outright. The serial is now always a valid positive
   integer.
 
+## [0.15.0] - 2026-08-03
+
+### Added
 - Bring-your-own TLS certificate. An operator can install their own certificate
   and key (e.g. from an internal CA or a real public one) so the browser trusts
   the device without importing the device CA. `PUT /api/v1/tls/cert` takes one

@@ -132,7 +132,12 @@ static void ts_reconcile(void)
     const char *auth = kvm_setting_str("ts_auth_key");
     if (!auth || !auth[0]) {
         stop_session();
-        kvm_cap_report(KVM_CAP_TS, false, "set a Tailscale auth key (Settings -> VPN)");
+        /* Enabled but no key yet: this is a state, not a lost capability. The cap
+         * stays AVAILABLE so the console keeps the auth-key field (and the enable
+         * toggle) editable - gating them on this cap is what would otherwise wedge
+         * the user, since the very field they need to fix it would be disabled.
+         * "Not connected" is surfaced through kvm_ts_status, not here. */
+        kvm_cap_report(KVM_CAP_TS, true, NULL);
         return;
     }
 
@@ -182,18 +187,20 @@ static void ts_reconcile(void)
         .ctrl_tls = tls,
     };
 
+    /* A failed init/start is a runtime error to log and retry on the next apply,
+     * not a lost capability: keep the cap AVAILABLE so the settings stay editable
+     * (e.g. to correct a bad key). The failure shows up as "not up" in the status. */
     microlink_t *ml = microlink_init(&cfg);
     if (!ml) {
         ESP_LOGE(TAG, "microlink_init failed");
-        kvm_cap_report(KVM_CAP_TS, false, "the Tailscale client could not initialise");
+        kvm_cap_report(KVM_CAP_TS, true, NULL);
         return;
     }
     esp_err_t err = microlink_start(ml);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "microlink_start: %s", esp_err_to_name(err));
         microlink_destroy(ml);
-        kvm_cap_report(KVM_CAP_TS, false, "the Tailscale client could not start (%s)",
-                       esp_err_to_name(err));
+        kvm_cap_report(KVM_CAP_TS, true, NULL);
         return;
     }
 

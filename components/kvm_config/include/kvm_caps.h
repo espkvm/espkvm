@@ -33,8 +33,12 @@ typedef enum {
     KVM_CAP_HTTPS,   /**< TLS + authentication */
     KVM_CAP_OTA,     /**< two OTA slots present in the partition table */
     KVM_CAP_NET_STATIC, /**< static addressing rather than DHCP */
-    KVM_CAP_WG,         /**< classic WireGuard tunnel configured and connecting */
-    KVM_CAP_TS,         /**< native Tailscale (microlink) configured and joining */
+    KVM_CAP_WG,         /**< classic WireGuard subsystem present (config editable; the
+                             live connection state is reported via kvm_wg_status, so a
+                             half-configured tunnel never disables its own fields) */
+    KVM_CAP_TS,         /**< native Tailscale (microlink) subsystem present (config
+                             editable; connection state is reported via kvm_ts_status,
+                             so a missing key never disables the key field) */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

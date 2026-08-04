@@ -373,6 +373,12 @@ char *kvm_settings_schema_json(void)
         if (d->flags & KVM_SF_REBOOT) {
             cJSON_AddBoolToObject(o, "reboot", true);
         }
+        if (d->flags & KVM_SF_SECRET) {
+            /* Write-only: the value is never read back (see kvm_settings_values_json),
+             * so the console renders it as a password field and submits it only when
+             * the operator types a new one. */
+            cJSON_AddBoolToObject(o, "secret", true);
+        }
         cJSON_AddItemToArray(arr, o);
     }
     char *out = cJSON_PrintUnformatted(arr);
