@@ -7,6 +7,14 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-08-04
+
+### Changed
+- The VPN settings tab is a single Off / WireGuard / Tailscale selector that shows
+  only the chosen backend's fields (and nothing when off), instead of listing every
+  WireGuard and Tailscale field at once and making the operator scroll past the one
+  they are not using. The tab is now just "VPN".
+
 ## [0.16.1] - 2026-08-04
 
 ### Fixed
