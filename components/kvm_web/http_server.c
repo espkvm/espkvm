@@ -35,6 +35,7 @@
 #include "ethernet.h"
 #include "kvm_atx.h"
 #include "kvm_mqtt.h"
+#include "kvm_ts.h"
 #include "kvm_wg.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
@@ -215,10 +216,12 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_atx_status(&atx);
     bool mqtt_on = false, mqtt_conn = false;
     kvm_mqtt_status(&mqtt_on, &mqtt_conn);
+    kvm_ts_status_t ts;
+    kvm_ts_status(&ts);
     kvm_wg_status_t wg;
     kvm_wg_status(&wg);
 
-    char body[832];
+    char body[1024];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
@@ -227,7 +230,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"net\":{\"up\":%s,\"mbps\":%d},"
                      "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s},"
                      "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
-                     "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"}}",
+                     "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
+                     "\"ts\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"peers\":%d}}",
                      app->project_name, app->version, app->date, app->time, app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false",
                      (unsigned long long)(esp_timer_get_time() / 1000000),
@@ -239,7 +243,9 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
                      atx.power_on ? "true" : "false", mqtt_on ? "true" : "false",
                      mqtt_conn ? "true" : "false", wg.enabled ? "true" : "false",
-                     wg.up ? "true" : "false", wg.address, wg.public_key);
+                     wg.up ? "true" : "false", wg.address, wg.public_key,
+                     ts.enabled ? "true" : "false", ts.up ? "true" : "false", ts.address,
+                     ts.peers);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }
@@ -1161,6 +1167,15 @@ extern const char index_html_gz_start[] asm("_binary_index_html_gz_start");
 extern const char index_html_gz_end[] asm("_binary_index_html_gz_end");
 extern const char favicon_ico_start[] asm("_binary_favicon_ico_start");
 extern const char favicon_ico_end[] asm("_binary_favicon_ico_end");
+/* PWA assets, so the console installs and runs full-screen from a home screen. */
+extern const char manifest_start[] asm("_binary_manifest_webmanifest_start");
+extern const char manifest_end[] asm("_binary_manifest_webmanifest_end");
+extern const char sw_js_start[] asm("_binary_sw_js_start");
+extern const char sw_js_end[] asm("_binary_sw_js_end");
+extern const char icon_192_start[] asm("_binary_icon_192_png_start");
+extern const char icon_192_end[] asm("_binary_icon_192_png_end");
+extern const char icon_512_start[] asm("_binary_icon_512_png_start");
+extern const char icon_512_end[] asm("_binary_icon_512_png_end");
 
 /*
  * Control channel, version 2. All frames are binary and fixed length.
@@ -1437,9 +1452,32 @@ static esp_err_t ws_input_handler(httpd_req_t *req)
 
 static esp_err_t root_get(httpd_req_t *req)
 {
+    /* The console is embedded in the firmware, so its identity is the firmware's:
+     * version plus a few bytes of the app's ELF hash, which changes on any build.
+     * Serving it "no-cache" with this ETag means a browser (or the PWA's service
+     * worker) always revalidates and can never keep an old console against new
+     * firmware after an OTA - yet an unchanged reload costs only a 304, not a
+     * fresh 57 KB download. */
+    const esp_app_desc_t *app = esp_app_get_description();
+    char etag[96];
+    snprintf(etag, sizeof(etag), "\"%s-%02x%02x%02x%02x\"", app->version,
+             app->app_elf_sha256[0], app->app_elf_sha256[1], app->app_elf_sha256[2],
+             app->app_elf_sha256[3]);
+
+    char inm[96] = {0};
+    if (httpd_req_get_hdr_value_str(req, "If-None-Match", inm, sizeof(inm)) == ESP_OK &&
+        strcmp(inm, etag) == 0) {
+        httpd_resp_set_status(req, "304 Not Modified");
+        httpd_resp_set_hdr(req, "ETag", etag);
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     const size_t len = (size_t)(index_html_gz_end - index_html_gz_start);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "ETag", etag);
     return httpd_resp_send(req, index_html_gz_start, len);
 }
 
@@ -1457,8 +1495,10 @@ static esp_err_t cert_get(httpd_req_t *req)
     if (!s_cert_pem) {
         return send_json_error(req, "404 Not Found", "no certificate (TLS is off)");
     }
-    httpd_resp_set_type(req, "application/x-pem-file");
-    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"espkvm-ca.pem\"");
+    /* Serve it as a CA certificate (not a generic PEM blob) so a phone routes it
+     * to the "install CA certificate" flow and names it by its subject. */
+    httpd_resp_set_type(req, "application/x-x509-ca-cert");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"espkvm-ca.crt\"");
     return httpd_resp_sendstr(req, s_cert_pem);
 }
 
@@ -1468,6 +1508,38 @@ static esp_err_t favicon_get(httpd_req_t *req)
     httpd_resp_set_type(req, "image/x-icon");
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
     return httpd_resp_send(req, favicon_ico_start, len);
+}
+
+/* ---- PWA static assets (manifest, service worker, icons) ----------------- */
+
+static esp_err_t manifest_get(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/manifest+json");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+    return httpd_resp_send(req, manifest_start, (size_t)(manifest_end - manifest_start));
+}
+
+static esp_err_t sw_get(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/javascript");
+    /* The worker must not be cached long or an update never reaches an installed
+     * client; let the browser revalidate it every load. */
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    return httpd_resp_send(req, sw_js_start, (size_t)(sw_js_end - sw_js_start));
+}
+
+static esp_err_t icon192_get(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+    return httpd_resp_send(req, icon_192_start, (size_t)(icon_192_end - icon_192_start));
+}
+
+static esp_err_t icon512_get(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+    return httpd_resp_send(req, icon_512_start, (size_t)(icon_512_end - icon_512_start));
 }
 
 /* ---- TLS: operator-supplied certificate --------------------------------- */
@@ -2222,6 +2294,16 @@ httpd_handle_t http_server_start(void)
     httpd_register_uri_handler(h, &u_favicon);
     httpd_uri_t u_cert = {.uri = "/cert.pem", .method = HTTP_GET, .handler = cert_get};
     httpd_register_uri_handler(h, &u_cert);
+    /* PWA: manifest, service worker and icons (unauthenticated static assets). */
+    httpd_uri_t u_manifest = {
+        .uri = "/manifest.webmanifest", .method = HTTP_GET, .handler = manifest_get};
+    httpd_register_uri_handler(h, &u_manifest);
+    httpd_uri_t u_sw = {.uri = "/sw.js", .method = HTTP_GET, .handler = sw_get};
+    httpd_register_uri_handler(h, &u_sw);
+    httpd_uri_t u_icon192 = {.uri = "/icon-192.png", .method = HTTP_GET, .handler = icon192_get};
+    httpd_register_uri_handler(h, &u_icon192);
+    httpd_uri_t u_icon512 = {.uri = "/icon-512.png", .method = HTTP_GET, .handler = icon512_get};
+    httpd_register_uri_handler(h, &u_icon512);
     httpd_uri_t u_stream = {.uri = "/stream", .method = HTTP_GET, .handler = stream_get};
     httpd_register_uri_handler(h, &u_stream);
     static const httpd_uri_t api_uris[] = {

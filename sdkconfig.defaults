@@ -49,6 +49,13 @@ CONFIG_MBEDTLS_X509_CRT_WRITE_C=y
 # long as the browser keeps it, and a console holds several at once.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
+# microlink (native Tailscale) calls raw lwIP APIs (udp_*, netif_*, wireguardif_*)
+# from its own tasks. Under the default tcpip-thread model that races the TCP/IP
+# thread and corrupts lwIP (crash in tcp_output once the console serves TLS).
+# Core locking lets those calls be made safely from any task by taking the core
+# lock (microlink wraps them via ml_lwip_lock.h). BSD-socket users are unaffected.
+CONFIG_LWIP_TCPIP_CORE_LOCKING=y
+
 # MJPEG pushes large JPEG segments; lwIP defaults (~5.8 KiB) cause backpressure/resets on Ethernet.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
 CONFIG_LWIP_TCP_WND_DEFAULT=65535
@@ -62,13 +69,26 @@ CONFIG_ESP_TLS_SERVER_SESSION_TICKETS=y
 # right after the handshake), so the session cookie can only be checked here.
 CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
 
-# WireGuard brings up its tunnel with a raw lwIP netif_add, which stores the
-# WireGuard device in netif->state. By default esp_netif also keeps its own
-# handle in netif->state, and its global lwIP ext-callback then reads the
-# WireGuard pointer as an esp_netif_t and crashes (esp_netif_internal_dhcpc_cb,
-# a Load access fault) the instant the tunnel netif is added. Enabling a
-# "special" lwIP interface flips LWIP_ESP_NETIF_DATA on, moving esp_netif's
-# handle into netif->client_data so it no longer aliases netif->state; the
-# WireGuard netif's client_data is zero, so the callback sees NULL and bails.
-# We do not create a bridge - this is only here for that side effect.
+# microlink (native Tailscale) brings up its WireGuard data plane with a raw lwIP
+# netif_add, which stores its own device in netif->state. By default esp_netif
+# also keeps its handle in netif->state, and its global lwIP ext-callback then
+# reads the WireGuard pointer as an esp_netif_t and crashes (esp_netif_internal_
+# dhcpc_cb, a Load access fault) the instant the tunnel netif is added. Enabling a
+# "special" lwIP interface flips LWIP_ESP_NETIF_DATA on, moving esp_netif's handle
+# into netif->client_data so it no longer aliases netif->state; the WireGuard
+# netif's client_data is zero, so the callback sees NULL and bails. We do not
+# create a bridge - this is only here for that side effect.
 CONFIG_ESP_NETIF_BRIDGE_EN=y
+
+# Native Tailscale (microlink) wraps its Noise layer in ChaCha20-Poly1305 via the
+# PSA API. On WiFi SoCs the supplicant pulls these primitives in transitively; the
+# P4 has no WiFi radio, so enable them explicitly or PSA_ALG_CHACHA20_POLY1305 is
+# unsupported at runtime and the Tailscale handshake fails.
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+
+# --- TEMPORARY: per-task CPU profiling (remove after tuning microlink) ---
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y

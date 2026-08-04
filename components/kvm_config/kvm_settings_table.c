@@ -272,9 +272,11 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "wg_enable", .section = "vpn", .type = KVM_VT_BOOL,
         .title = "Enable WireGuard",
-        .help = "Bring up a WireGuard tunnel so the device is reachable over the "
-                "VPN. Off by default. Split-tunnel: only this address goes through "
-                "WireGuard, so the console stays reachable on the LAN too.",
+        .help = "Bring up a classic WireGuard tunnel to a hub so the device is "
+                "reachable over the VPN. Off by default. Split-tunnel: only the "
+                "tunnel subnet goes through WireGuard, so the console stays "
+                "reachable on the LAN too. An alternative to Tailscale below, not "
+                "a companion - enable one.",
         .def = 0, .requires_cap = KVM_CAP_WG,
     },
     {
@@ -309,12 +311,6 @@ static const kvm_setting_t s_settings[] = {
         .min = 0, .max = 65535, .def = 25, .requires_cap = KVM_CAP_WG,
     },
     {
-        .key = "wg_preshared", .section = "vpn", .type = KVM_VT_STR,
-        .title = "Preshared key",
-        .help = "Optional base64 preshared key for an extra symmetric layer.",
-        .def_str = "", .max_len = 47, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_WG,
-    },
-    {
         .key = "wg_sntp", .section = "vpn", .type = KVM_VT_BOOL,
         .title = "Sync time over SNTP",
         .help = "WireGuard handshakes carry a timestamp; without a real clock a "
@@ -327,6 +323,41 @@ static const kvm_setting_t s_settings[] = {
         .title = "NTP server",
         .help = "Used only when SNTP is on.",
         .def_str = "pool.ntp.org", .max_len = 47, .requires_cap = KVM_CAP_WG,
+    },
+
+    /* ---- vpn / tailscale ------------------------------------------------- */
+    {
+        .key = "ts_enable", .section = "vpn", .type = KVM_VT_BOOL,
+        .title = "Enable Tailscale",
+        .help = "Join a Tailscale network natively - the device gets a 100.x "
+                "address reachable from anywhere on your tailnet, with NAT "
+                "traversal handled for you and no separate gateway. Off by "
+                "default. An alternative to WireGuard above, not a companion; "
+                "enabling both is unusual.",
+        .def = 0, .requires_cap = KVM_CAP_TS,
+    },
+    {
+        .key = "ts_auth_key", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Auth key",
+        .help = "A Tailscale auth key (tskey-auth-...) that authorises this device "
+                "to join. Generate one in the Tailscale admin console; a reusable "
+                "key survives re-registration across reboots.",
+        .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_TS,
+    },
+    {
+        .key = "ts_hostname", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Tailnet hostname",
+        .help = "The name this device takes on the tailnet. Empty uses the mDNS "
+                "hostname from the Network section.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_TS,
+    },
+    {
+        .key = "ts_ctrl_tls", .section = "vpn", .type = KVM_VT_BOOL,
+        .title = "Control plane over TLS",
+        .help = "Reach the coordination server over HTTPS. Required for the hosted "
+                "Tailscale service (the default). Turn off only for a self-hosted "
+                "Headscale served over plain HTTP.",
+        .def = 1, .requires_cap = KVM_CAP_TS,
     },
 
     /* ---- mqtt / home assistant ------------------------------------------ */

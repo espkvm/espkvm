@@ -15,7 +15,7 @@ repository.
 | Chip | ESP32-P4 **rev v1.3**, 360 MHz dual core |
 | PSRAM / flash | 32 MB @ 200 MHz / **32 MB present**, 16 MB configured |
 | Capture | Geekworm C790, TC358743 HDMI -> MIPI CSI-2, 2 lanes @ 972 Mbit/s |
-| Flashing port | `/dev/ttyACM0`, CH343 bridge. The other USB-C is USB 2.0 OTG HS |
+| USB | one USB-C: the CH343 flashing/console bridge (`/dev/ttyACM0`). The USB 2.0 OTG HS that presents the keyboard/mouse to the target is on the **MX1.25 connector**, not a USB port |
 | Network | NetworkManager profile `espkvm-link` shares `enp0s31f6`; device lands on **10.42.0.151** |
 | Toolchain | ESP-IDF 6.0.1 in `~/esp/esp-idf`; cmake and ninja live in the IDF python env, not the distro |
 

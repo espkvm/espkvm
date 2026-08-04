@@ -8,6 +8,38 @@ bumps the patch).
 ## [Unreleased]
 
 ### Added
+- Native Tailscale, as a second VPN backend alongside classic WireGuard (enable
+  one in Settings -> VPN). The device joins a tailnet directly - no gateway, VPS
+  or port-forward - and is reachable at its 100.x address (or MagicDNS name) from
+  anywhere, with NAT traversal (DERP/DISCO) handled for it. Built on a native
+  ts2021 client (microlink) ported to ESP-IDF 6. Set a Tailscale auth key and,
+  optionally, a tailnet hostname; `/api/v1/system/info` reports the tailnet state
+  (enabled/up/address/peers). The console's TLS certificate is re-issued to name
+  the tailnet address and MagicDNS name, so it is valid when reached over
+  Tailscale. Runs on its own worker task; bring-up never blocks boot.
+- Installable PWA console. The web console ships a manifest, service worker and
+  icons, so a phone can install it to the home screen and run it full-screen and
+  standalone - which also removes the mobile browser chrome that shrank the
+  usable area. Touch control is a proper relative trackpad with acceleration.
+- The generated device CA is now named after the device (e.g. "espkvm ESP-KVM
+  CA") so it is identifiable in a phone's trusted-credentials list, and `/cert.pem`
+  is served as a CA certificate (`application/x-x509-ca-cert`, `.crt`). The
+  console is served `no-cache` with a version ETag so a firmware update always
+  delivers the matching console, and an open tab is offered a reload when the
+  device is updated under it.
+
+### Changed
+- The classic WireGuard client now runs on the same bundled WireGuard stack as
+  Tailscale, instead of a second, separate one. This removes a symbol clash so
+  both can live in one firmware and be chosen at runtime; the WireGuard feature
+  and its settings are unchanged for the operator.
+
+### Fixed
+- The self-signed certificate's serial number could be an invalid ASN.1 integer
+  (a redundant leading zero) roughly one time in 256, producing a certificate
+  some clients rejected outright. The serial is now always a valid positive
+  integer.
+
 - Bring-your-own TLS certificate. An operator can install their own certificate
   and key (e.g. from an internal CA or a real public one) so the browser trusts
   the device without importing the device CA. `PUT /api/v1/tls/cert` takes one

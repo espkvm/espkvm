@@ -28,4 +28,8 @@ idf_component_register(
     EMBED_FILES
         "assets/index.html.gz"
         "assets/favicon.ico"
+        "assets/manifest.webmanifest"
+        "assets/sw.js"
+        "assets/icon-192.png"
+        "assets/icon-512.png"
 )

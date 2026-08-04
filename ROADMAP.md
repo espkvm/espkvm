@@ -16,7 +16,8 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - ATX power control - power and reset buttons, and power-LED sensing, through optocouplers
 - DHCP or static networking, mDNS
 - Home Assistant integration over MQTT - auto-discovered sensors and power/reset/Wake-on-LAN buttons, with optional TLS
-- WireGuard VPN client - split-tunnel over the existing link, with on-device key generation
+- VPN: classic WireGuard or native Tailscale (pick one, one shared WireGuard stack) - WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively, reachable at its 100.x address (or MagicDNS name) from anywhere with no gateway or port-forward, and the console's TLS certificate is valid over the tailnet
+- Installable PWA console - runs full-screen/standalone from a phone home screen; trackpad touch control
 - HTTPS with a self-issued certificate, login, and a physical password reset
 - Bring-your-own TLS certificate - install your own certificate and key in place of the self-signed one
 - Thermal protection

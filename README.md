@@ -56,7 +56,7 @@ Useful for what it does today, and honest about the rest.
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
-| WireGuard VPN client | works; off by default, split-tunnel over the existing link, generates its own key on the device |
+| VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
 | HDMI audio | not implemented |
 
 What is coming next is in the [roadmap](ROADMAP.md).
@@ -70,8 +70,11 @@ What is coming next is in the [roadmap](ROADMAP.md).
 TLS, but nothing here has been through a security review, and a device that
 holds a keyboard on someone else's machine is worth more to an attacker than
 most things on a network. Keep it on a network you trust, or reach it over a
-VPN &mdash; it has a built-in WireGuard client (Settings &rarr; VPN), or you can
-put it behind your own WireGuard or Tailscale.
+VPN &mdash; it has both a built-in WireGuard client and native Tailscale
+(Settings &rarr; VPN; enable one). Tailscale needs no port-forward, gateway or
+VPS: the device joins your tailnet directly and is reachable at its 100.x
+address (or MagicDNS name) from anywhere, with its TLS certificate valid over
+the tailnet.
 
 ## Hardware
 

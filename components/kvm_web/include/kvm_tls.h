@@ -57,6 +57,17 @@ void kvm_tls_identity_free(kvm_tls_identity_t *id);
 esp_err_t kvm_tls_identity_reset(void);
 
 /**
+ * Record the device's Tailscale identity (100.x address and MagicDNS FQDN, either
+ * may be "") so the self-signed leaf certificate names them and is therefore valid
+ * when the console is reached over the tailnet. Persisted, so from the next boot
+ * the leaf carries them without waiting for the tailnet.
+ *
+ * @return true if the stored values changed - the caller should restart so the
+ *         leaf is re-issued and served (the certificate is only applied at boot).
+ */
+bool kvm_tls_set_tailnet(const char *ip, const char *fqdn);
+
+/**
  * Install an operator-supplied certificate and matching private key (both PEM),
  * used in place of the self-signed identity from the next start. The pair is
  * validated (both parse, and the key matches the certificate) before it is

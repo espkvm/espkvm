@@ -18,6 +18,8 @@
 #include "kvm_caps.h"
 #include "kvm_mqtt.h"
 #include "kvm_storage.h"
+#include "kvm_ts.h"
+#include "kvm_tls.h"
 #include "kvm_wg.h"
 #include "kvm_thermal.h"
 #include "kvm_settings.h"
@@ -25,6 +27,55 @@
 #include "video_frame.h"
 
 static const char *TAG = "espkvm";
+
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+/* TEMPORARY: per-task CPU profiling to find what taxes video FPS. Samples the
+ * FreeRTOS run-time counters over a 5 s window and logs each task's share of it
+ * (delta, not cumulative-since-boot, so the boot burst does not skew it). Remove
+ * once microlink is tuned; the enabling Kconfig lives in sdkconfig.defaults. */
+#include "freertos/task.h"
+static void cpu_profile_task(void *arg)
+{
+    (void)arg;
+    const UBaseType_t MAXT = 40;
+    TaskStatus_t *a = malloc(sizeof(TaskStatus_t) * MAXT);
+    TaskStatus_t *b = malloc(sizeof(TaskStatus_t) * MAXT);
+    if (!a || !b) {
+        free(a);
+        free(b);
+        vTaskDelete(NULL);
+        return;
+    }
+    for (;;) {
+        uint32_t t0 = 0, t1 = 0;
+        UBaseType_t na = uxTaskGetSystemState(a, MAXT, &t0);
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        UBaseType_t nb = uxTaskGetSystemState(b, MAXT, &t1);
+        uint32_t total = t1 - t0;
+        if (total == 0) {
+            continue;
+        }
+        ESP_LOGW("cpuprof", "==== per-task CPU over 5s (delta) ====");
+        for (UBaseType_t i = 0; i < nb; i++) {
+            uint32_t prev = 0;
+            for (UBaseType_t j = 0; j < na; j++) {
+                if (a[j].xTaskNumber == b[i].xTaskNumber) {
+                    prev = a[j].ulRunTimeCounter;
+                    break;
+                }
+            }
+            uint32_t d = b[i].ulRunTimeCounter - prev;
+            /* total is the reference timer's wall-clock delta; a task pinned to
+             * one core at 100% accumulates ~total, so this is % of a single core
+             * (0-100 per task, up to 200 summed across the two cores). */
+            unsigned pct = (unsigned)(((uint64_t)d * 100) / total);
+            if (pct >= 1) {
+                ESP_LOGW("cpuprof", "  %-16s %3u%%", b[i].pcTaskName, pct);
+            }
+        }
+    }
+}
+#endif
 
 /*
  * Features that are compiled in but have no implementation yet report
@@ -60,8 +111,18 @@ static void on_setting_changed(const char *key, void *user)
     if (strncmp(key, "mqtt_", 5) == 0 || strcmp(key, "*") == 0) {
         kvm_mqtt_apply();
     }
+    /* WireGuard and Tailscale share one WireGuard stack, so only one may be
+     * active at a time; turning one on turns the other off. */
+    if (strcmp(key, "wg_enable") == 0 && kvm_setting_bool("wg_enable")) {
+        kvm_setting_set_int("ts_enable", 0);
+    } else if (strcmp(key, "ts_enable") == 0 && kvm_setting_bool("ts_enable")) {
+        kvm_setting_set_int("wg_enable", 0);
+    }
     if (strncmp(key, "wg_", 3) == 0 || strcmp(key, "*") == 0) {
         kvm_wg_apply();
+    }
+    if (strncmp(key, "ts_", 3) == 0 || strcmp(key, "*") == 0) {
+        kvm_ts_apply();
     }
     /* ATX or WoL availability changing alters which Home Assistant entities
      * should exist; refresh discovery (kvm_atx_apply above already ran, so the
@@ -159,10 +220,11 @@ static void report_pending_capabilities(void)
      * settled now, so connect (if enabled) with the right entity set. */
     kvm_mqtt_apply();
 
-    /* Bring up the WireGuard tunnel if it is configured. The bring-up runs on
-     * the kvm_wg worker task (kvm_wg_apply only signals it), so a slow or failing
-     * connect never blocks boot or the web server. */
+    /* Bring up whichever VPN backend is enabled. Both run on their own worker
+     * tasks (apply only signals them), so a slow or failing connect never blocks
+     * boot or the web server. */
     kvm_wg_apply();
+    kvm_ts_apply();
 }
 
 void app_main(void)
@@ -216,9 +278,16 @@ void app_main(void)
      * Home Assistant has been settled. */
     ESP_ERROR_CHECK(kvm_mqtt_init());
 
-    /* WireGuard tunnel: prepare state now, connect from
-     * report_pending_capabilities() once the network is up. */
+    /* VPN backends share one WireGuard stack and are selected at runtime (enable
+     * one). Classic WireGuard tunnel: */
     ESP_ERROR_CHECK(kvm_wg_init());
+
+    /* Native Tailscale client: build its worker and start watching for the
+     * network; it joins later, from report_pending_capabilities() / GOT_IP. The
+     * bridge lets it hand its tailnet address/name to the TLS layer (so the
+     * console certificate is valid over Tailscale) without a component cycle. */
+    kvm_ts_set_identity_cb(kvm_tls_set_tailnet);
+    ESP_ERROR_CHECK(kvm_ts_init());
 
     /* Before the web server, which reads published frames. */
     video_frame_store_init();
@@ -249,6 +318,10 @@ void app_main(void)
 
     report_pending_capabilities();
     kvm_caps_log();
+
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    xTaskCreatePinnedToCore(cpu_profile_task, "cpuprof", 4096, NULL, 1, NULL, 0);
+#endif
 
     ESP_LOGI(TAG, "ready");
 }

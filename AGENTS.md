@@ -56,10 +56,12 @@ components/
   kvm_storage/    microSD mount + virtual-media (serves an image read-only)
   kvm_config/     NVS settings, capability registry, thermal guard
   kvm_web/        HTTPS server, REST + WebSocket, auth, self-signed TLS, OTA
-  kvm_net/        Ethernet + mDNS + WireGuard tunnel
+  kvm_net/        Ethernet + mDNS + WireGuard (kvm_wg) + native Tailscale (kvm_ts)
   kvm_board/      pin map (thin: names the Kconfig CONFIG_ values)
   esp_tinyusb/    VENDORED fork of esp_tinyusb (see gotchas)
-  esp_wireguard/  VENDORED fork of esp_wireguard (IDF6/GCC15 fixes; see gotchas)
+third_party/microlink/  git submodule (espkvm/microlink, branch idf6): native
+                  Tailscale client; bundles the wireguard_lwip stack that BOTH
+                  kvm_ts and kvm_wg use (see gotchas)
 web/              Vue 3 console (git submodule: espkvm/console)
 main/             app_main and start-up order
 docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
@@ -88,18 +90,29 @@ docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
   supply its own `tud_msc_*_cb` serving a file; `CFG_TUD_MSC` is forced on in
   its `tusb_config.h`. Do not re-add the managed `espressif/esp_tinyusb`
   dependency, and do not expect its MSC storage APIs to exist.
-- **esp_wireguard is vendored** at `components/esp_wireguard`, a fork patched to
-  build on IDF 6 / GCC 15 (RNG via `esp_fill_random`, `nonstring` attributes, the
-  x25519 warning flag). Two things it forces, both easy to relearn the hard way:
-  (1) it brings the tunnel up with a raw lwIP `netif_add` that stores its device
-  in `netif->state`, which aliases esp_netif's own handle and crashes esp_netif's
-  global lwIP callback the instant the netif is added - so
-  `CONFIG_ESP_NETIF_BRIDGE_EN=y` is set purely to flip `LWIP_ESP_NETIF_DATA` on,
-  moving esp_netif's handle into `netif->client_data`; (2) `wireguardif_init` was
-  patched to find the underlying interface generically instead of the hardcoded
-  `WIFI_STA_DEF`, so an Ethernet-only device works. The tunnel is also brought up
-  on its own worker task (`kvm_net/kvm_wg.c`), never under a mutex held across the
-  blocking connect, so it cannot wedge the single web-server task.
+- **One WireGuard stack for both VPNs.** esp_wireguard is gone; both the classic
+  WireGuard client (`kvm_net/kvm_wg.c`) and native Tailscale (`kvm_net/kvm_ts.c`)
+  run on the `wireguard_lwip` stack bundled in the microlink submodule - two
+  separate WireGuard-lwIP stacks would clash on ~61 shared symbols and fail to
+  link. kvm_wg uses its classic mode (own UDP socket, direct output to the peer);
+  kvm_ts uses microlink's magicsock mode (DERP/DISCO). Consequences to keep in
+  mind: (1) `wireguardif_disable_socket_bind()` is a GLOBAL toggle microlink flips
+  for magicsock, so only ONE backend may be active at a time - `main.c` enforces
+  it (enabling one clears the other), and switching TS->WG at runtime may need a
+  reboot; (2) the raw lwIP `netif_add` still aliases esp_netif's handle in
+  `netif->state`, so `CONFIG_ESP_NETIF_BRIDGE_EN=y` stays (flips
+  `LWIP_ESP_NETIF_DATA` on); (3) microlink calls raw lwIP from its own tasks, so
+  `CONFIG_LWIP_TCPIP_CORE_LOCKING=y` is required and those calls take the core
+  lock (`ml_lwip_lock.h`; kvm_wg wraps its calls in `LOCK_TCPIP_CORE`). Both
+  tunnels are brought up on their own worker tasks, never under a mutex held
+  across the blocking connect.
+- **microlink is a submodule fork on branch `idf6`** (`third_party/microlink`,
+  discovered via `EXTRA_COMPONENT_DIRS` in the top CMakeLists). Edits to microlink
+  go THERE, not `~/projects/microlink`. It was ported to IDF 6 / mbedTLS 4 (RNG is
+  PSA; chachapoly and ssl_conf_rng are gone; `nonstring` for GCC 15) and needs
+  `CONFIG_MBEDTLS_{CHACHA20,POLY1305,CHACHAPOLY}_C=y` (no WiFi supplicant on the P4
+  to pull them in). A P4 rev <3.0 needs `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` +
+  `REV_MIN_100` + `CPU 360 MHz` or it will not boot.
 - **mbedTLS 4 / PSA crypto.** IDF 6 dropped the legacy pk / ctr_drbg API. Keys
   come from `psa_generate_key` + `mbedtls_pk_copy_from_psa`; the X.509 writer
   takes no RNG callback. PBKDF2 and HMAC are hand-rolled over PSA (not public in

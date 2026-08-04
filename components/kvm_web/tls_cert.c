@@ -57,13 +57,33 @@
  *  identity when present. */
 #define NVS_KEY_BYO_CERT "byo_cert"
 #define NVS_KEY_BYO_KEY "byo_key"
+/** Bumped whenever the generated CA's shape changes (subject, extensions, ...),
+ *  so a firmware update quietly re-issues the CA instead of keeping an old one
+ *  that no longer matches - no NVS wipe, no lost settings. */
+#define NVS_KEY_CA_VER "ca_ver"
+#define CA_VERSION 2
+/** Bumped to force every cached leaf to be re-issued (e.g. after a fix to how the
+ *  leaf is built) WITHOUT regenerating the CA, so an imported CA stays valid. */
+#define LEAF_VERSION 2
+/** The hostname baked into the CA's subject when it was generated. The leaf's
+ *  issuer must match the CA subject exactly, and the CA is kept across hostname
+ *  changes, so the original name is remembered rather than rebuilt from the
+ *  current one. */
+#define NVS_KEY_CA_HOST "ca_host"
+/** The device's Tailscale identity (100.x address and MagicDNS FQDN), remembered
+ *  so the leaf certificate names them from the next boot without waiting for the
+ *  tailnet to come up. */
+#define NVS_KEY_TS_IP "ts_ip"
+#define NVS_KEY_TS_NAME "ts_fqdn"
 
 /* One NVS string tops out at 4000 bytes; keep each PEM comfortably under that.
  * A leaf plus a couple of intermediates and a P-256 or RSA-2048 key fit easily -
  * a longer chain is rejected with a hint rather than silently truncated. */
 #define BYO_PEM_MAX 3900
 
-#define CA_SUBJECT "CN=ESP-KVM Device CA,O=ESP-KVM"
+/* The CA subject carries the device hostname so it is identifiable in a phone's
+ * trusted-credentials list (built at generation time from CA_SUBJECT_FMT). */
+#define CA_SUBJECT_FMT "CN=%s ESP-KVM CA,O=ESP-KVM"
 
 /** Comfortably larger than a P-256 key and a small certificate. */
 #define KEY_PEM_MAX 512
@@ -146,12 +166,24 @@ static esp_err_t nvs_get_alloc(nvs_handle_t h, const char *key, char **out)
     return ESP_OK;
 }
 
-static esp_err_t nvs_load_ca(char **cert, char **key)
+static esp_err_t nvs_load_ca(char **cert, char **key, char *host, size_t host_len)
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
     if (err != ESP_OK) {
         return err;
+    }
+    /* An older CA layout (or the unversioned original) is treated as absent so
+     * the caller re-issues one in the current shape - a silent upgrade. */
+    uint8_t ver = 0;
+    if (nvs_get_u8(h, NVS_KEY_CA_VER, &ver) != ESP_OK || ver != CA_VERSION) {
+        nvs_close(h);
+        return ESP_ERR_INVALID_VERSION;
+    }
+    size_t hlen = host_len;
+    if (nvs_get_str(h, NVS_KEY_CA_HOST, host, &hlen) != ESP_OK) {
+        nvs_close(h);
+        return ESP_ERR_INVALID_VERSION; /* incomplete CA record; re-issue */
     }
     err = nvs_get_alloc(h, NVS_KEY_CA_CERT, cert);
     if (err == ESP_OK) {
@@ -172,7 +204,7 @@ static esp_err_t nvs_load_leaf(const char *idkey, char **cert, char **key)
     if (err != ESP_OK) {
         return err;
     }
-    char stored[64] = {0};
+    char stored[220] = {0};
     size_t len = sizeof(stored);
     err = nvs_get_str(h, NVS_KEY_NAME, stored, &len);
     if (err != ESP_OK || strcmp(stored, idkey) != 0) {
@@ -191,7 +223,7 @@ static esp_err_t nvs_load_leaf(const char *idkey, char **cert, char **key)
     return err;
 }
 
-static esp_err_t nvs_store_ca(const char *cert, const char *key)
+static esp_err_t nvs_store_ca(const char *cert, const char *key, const char *host)
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
@@ -201,6 +233,12 @@ static esp_err_t nvs_store_ca(const char *cert, const char *key)
     err = nvs_set_str(h, NVS_KEY_CA_CERT, cert);
     if (err == ESP_OK) {
         err = nvs_set_str(h, NVS_KEY_CA_KEY, key);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, NVS_KEY_CA_HOST, host);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(h, NVS_KEY_CA_VER, CA_VERSION);
     }
     if (err == ESP_OK) {
         err = nvs_commit(h);
@@ -266,7 +304,14 @@ static esp_err_t gen_key(mbedtls_pk_context *key, char *pem, size_t pem_len)
 static void random_serial(unsigned char serial[16])
 {
     esp_fill_random(serial, 16);
-    serial[0] &= 0x7f; /* keep it a positive integer */
+    /* The serial is written as a raw DER INTEGER. The leading byte must be
+     * 0x01..0x7f: clearing the top bit keeps it positive, and forcing it non-zero
+     * avoids a redundant leading 0x00, which parsers reject as "illegal padding"
+     * (a self-inflicted broken certificate roughly 1 serial in 256). */
+    serial[0] &= 0x7f;
+    if (serial[0] == 0x00) {
+        serial[0] = 0x01;
+    }
 }
 
 /** Generate the root CA (self-signed, marked as a CA so it can be a trust anchor). */
@@ -287,14 +332,20 @@ static esp_err_t gen_ca(char **cert_out, char **key_out)
         goto done;
     }
 
+    /* Name the CA after the device so it is recognisable once imported. */
+    char host[40];
+    hostname_now(host, sizeof(host));
+    char ca_subject[96];
+    snprintf(ca_subject, sizeof(ca_subject), CA_SUBJECT_FMT, host);
+
     unsigned char serial[16];
     random_serial(serial);
     mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
     mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
     mbedtls_x509write_crt_set_subject_key(&crt, &key);
     mbedtls_x509write_crt_set_issuer_key(&crt, &key);
-    if (mbedtls_x509write_crt_set_subject_name(&crt, CA_SUBJECT) != 0 ||
-        mbedtls_x509write_crt_set_issuer_name(&crt, CA_SUBJECT) != 0 ||
+    if (mbedtls_x509write_crt_set_subject_name(&crt, ca_subject) != 0 ||
+        mbedtls_x509write_crt_set_issuer_name(&crt, ca_subject) != 0 ||
         mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial)) != 0 ||
         mbedtls_x509write_crt_set_validity(&crt, VALID_FROM, VALID_TO) != 0 ||
         mbedtls_x509write_crt_set_basic_constraints(&crt, 1, 0) != 0 ||
@@ -327,6 +378,7 @@ done:
 /** Generate a server (leaf) certificate signed by the CA, naming @p name and,
  *  if given, @p ip in its SANs. */
 static esp_err_t gen_leaf(const char *ca_key_pem, const char *name, const char *ip,
+                          const char *ca_host, const char *ts_ip, const char *ts_fqdn,
                           char **cert_out, char **key_out)
 {
     esp_err_t res = ESP_FAIL;
@@ -380,6 +432,30 @@ static esp_err_t gen_leaf(const char *ca_key_pem, const char *name, const char *
     };
     mbedtls_x509_san_list *san_head = have_ip ? &san_ip : &san_mdns;
 
+    /* Tailscale identity, so the console's certificate is valid when the device
+     * is reached over the tailnet - by its 100.x address and/or its MagicDNS
+     * name. Both nodes stay in scope until the SAN list is serialised below. */
+    uint8_t ts_ip_bytes[4];
+    const bool have_ts_ip = ts_ip && parse_ip4(ts_ip, ts_ip_bytes);
+    const bool have_ts_name = ts_fqdn && ts_fqdn[0];
+    mbedtls_x509_san_list san_ts_name = {
+        .node = {.type = MBEDTLS_X509_SAN_DNS_NAME,
+                 .san = {.unstructured_name = {.p = (unsigned char *)ts_fqdn,
+                                               .len = have_ts_name ? strlen(ts_fqdn) : 0}}},
+        .next = san_head,
+    };
+    if (have_ts_name) {
+        san_head = &san_ts_name;
+    }
+    mbedtls_x509_san_list san_ts_ip = {
+        .node = {.type = MBEDTLS_X509_SAN_IP_ADDRESS,
+                 .san = {.unstructured_name = {.p = ts_ip_bytes, .len = sizeof(ts_ip_bytes)}}},
+        .next = san_head,
+    };
+    if (have_ts_ip) {
+        san_head = &san_ts_ip;
+    }
+
     /* extendedKeyUsage = serverAuth; Chrome requires it on the leaf when the
      * chain is validated against a privately-imported CA. */
     mbedtls_asn1_sequence eku = {
@@ -395,8 +471,10 @@ static esp_err_t gen_leaf(const char *ca_key_pem, const char *name, const char *
     mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
     mbedtls_x509write_crt_set_subject_key(&crt, &key);
     mbedtls_x509write_crt_set_issuer_key(&crt, &ca_key);
+    char issuer[96];
+    snprintf(issuer, sizeof(issuer), CA_SUBJECT_FMT, ca_host);
     if (mbedtls_x509write_crt_set_subject_name(&crt, subject) != 0 ||
-        mbedtls_x509write_crt_set_issuer_name(&crt, CA_SUBJECT) != 0 ||
+        mbedtls_x509write_crt_set_issuer_name(&crt, issuer) != 0 ||
         mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial)) != 0 ||
         mbedtls_x509write_crt_set_validity(&crt, VALID_FROM, VALID_TO) != 0 ||
         mbedtls_x509write_crt_set_basic_constraints(&crt, 0, -1) != 0 ||
@@ -440,6 +518,9 @@ typedef struct {
     const char *ca_key_pem; /* JOB_LEAF */
     const char *name;       /* JOB_LEAF */
     const char *ip;         /* JOB_LEAF */
+    const char *ca_host;    /* JOB_LEAF: CA's own hostname, for the issuer */
+    const char *ts_ip;      /* JOB_LEAF: Tailscale 100.x address, or "" */
+    const char *ts_fqdn;    /* JOB_LEAF: Tailscale MagicDNS name, or "" */
     char *cert;             /* out */
     char *key;              /* out */
     esp_err_t result;
@@ -451,7 +532,8 @@ static void gen_task(void *arg)
     gen_job_t *job = (gen_job_t *)arg;
     job->result = (job->kind == JOB_CA)
                       ? gen_ca(&job->cert, &job->key)
-                      : gen_leaf(job->ca_key_pem, job->name, job->ip, &job->cert, &job->key);
+                      : gen_leaf(job->ca_key_pem, job->name, job->ip, job->ca_host, job->ts_ip,
+                                 job->ts_fqdn, &job->cert, &job->key);
     xSemaphoreGive(job->done);
     vTaskDelete(NULL);
 }
@@ -634,6 +716,63 @@ bool kvm_tls_byo_present(void)
     return present;
 }
 
+static void nvs_load_tailnet(char *ip, size_t iplen, char *fqdn, size_t fqdnlen)
+{
+    if (ip && iplen) {
+        ip[0] = '\0';
+    }
+    if (fqdn && fqdnlen) {
+        fqdn[0] = '\0';
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    if (ip) {
+        size_t l = iplen;
+        nvs_get_str(h, NVS_KEY_TS_IP, ip, &l);
+    }
+    if (fqdn) {
+        size_t l = fqdnlen;
+        nvs_get_str(h, NVS_KEY_TS_NAME, fqdn, &l);
+    }
+    nvs_close(h);
+}
+
+bool kvm_tls_set_tailnet(const char *ip, const char *fqdn)
+{
+    if (!ip) {
+        ip = "";
+    }
+    if (!fqdn) {
+        fqdn = "";
+    }
+    char cur_ip[24] = {0};
+    char cur_fqdn[128] = {0};
+    nvs_load_tailnet(cur_ip, sizeof(cur_ip), cur_fqdn, sizeof(cur_fqdn));
+    if (strcmp(cur_ip, ip) == 0 && strcmp(cur_fqdn, fqdn) == 0) {
+        return false; /* unchanged - the served leaf already names these */
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_set_str(h, NVS_KEY_TS_IP, ip);
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, NVS_KEY_TS_NAME, fqdn);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (err != ESP_OK) {
+        return false;
+    }
+    ESP_LOGI(TAG, "tailnet identity recorded for the certificate: ip=%s name=%s",
+             ip[0] ? ip : "(none)", fqdn[0] ? fqdn : "(none)");
+    return true;
+}
+
 esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
 {
     if (!out) {
@@ -666,18 +805,23 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
     hostname_now(name, sizeof(name));
     char ip[16];
     cert_ip_now(ip, sizeof(ip));
-    char idkey[64];
-    if (ip[0]) {
-        snprintf(idkey, sizeof(idkey), "%s|%s", name, ip);
-    } else {
-        snprintf(idkey, sizeof(idkey), "%s", name);
-    }
+    /* The device's remembered Tailscale identity, if any, also goes into the leaf
+     * and its id-key so a change re-issues it. */
+    char ts_ip[24] = {0};
+    char ts_fqdn[128] = {0};
+    nvs_load_tailnet(ts_ip, sizeof(ts_ip), ts_fqdn, sizeof(ts_fqdn));
+    char idkey[220];
+    snprintf(idkey, sizeof(idkey), "v%d|%s|%s|%s|%s", LEAF_VERSION, name, ip[0] ? ip : "", ts_ip,
+             ts_fqdn);
 
-    /* The CA: generated once and kept, so importing it is a one-time act. */
+    /* The CA: generated once and kept, so importing it is a one-time act. Its
+     * subject carries the hostname it was born with; remember that so the leaf's
+     * issuer keeps matching even after a later rename. */
     char *ca_cert = NULL;
     char *ca_key = NULL;
+    char ca_host[40] = {0};
     bool fresh_ca = false;
-    if (nvs_load_ca(&ca_cert, &ca_key) != ESP_OK) {
+    if (nvs_load_ca(&ca_cert, &ca_key, ca_host, sizeof(ca_host)) != ESP_OK) {
         const int64_t started = esp_log_timestamp();
         gen_job_t job = {.kind = JOB_CA};
         esp_err_t err = run_gen(&job);
@@ -687,7 +831,9 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
         ca_cert = job.cert;
         ca_key = job.key;
         fresh_ca = true;
-        if (nvs_store_ca(ca_cert, ca_key) != ESP_OK) {
+        /* gen_ca names the CA after the current hostname, so that is its host. */
+        snprintf(ca_host, sizeof(ca_host), "%s", name);
+        if (nvs_store_ca(ca_cert, ca_key, ca_host) != ESP_OK) {
             ESP_LOGW(TAG, "CA not stored; it will be regenerated next boot");
         }
         ESP_LOGI(TAG, "generated a device CA in %lld ms",
@@ -703,7 +849,13 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
     char *leaf_cert = NULL;
     char *leaf_key = NULL;
     if (fresh_ca || nvs_load_leaf(idkey, &leaf_cert, &leaf_key) != ESP_OK) {
-        gen_job_t job = {.kind = JOB_LEAF, .ca_key_pem = ca_key, .name = name, .ip = ip};
+        gen_job_t job = {.kind = JOB_LEAF,
+                         .ca_key_pem = ca_key,
+                         .name = name,
+                         .ip = ip,
+                         .ca_host = ca_host,
+                         .ts_ip = ts_ip,
+                         .ts_fqdn = ts_fqdn};
         esp_err_t err = run_gen(&job);
         if (err != ESP_OK) {
             free(ca_cert);

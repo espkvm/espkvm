@@ -1,3 +1,7 @@
 [submodule "web"]
 	path = web
 	url = https://github.com/espkvm/console.git
+[submodule "third_party/microlink"]
+	path = third_party/microlink
+	url = https://github.com/espkvm/microlink.git
+	branch = idf6

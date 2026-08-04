@@ -1,5 +1,0 @@
-# ESP-KVM vendored copy of espkvm/esp_wireguard (fork of trombik/esp_wireguard
-# 0.9.0) on branch fix/idf6-gcc15-build - patched to build on ESP-IDF 6 / GCC 15.
-# A PR with these fixes is open upstream; once merged and released this reverts
-# to the registry dependency.
-dependencies: {}
