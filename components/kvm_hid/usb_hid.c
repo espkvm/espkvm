@@ -259,7 +259,6 @@ typedef struct {
 
 static QueueHandle_t s_hid_q;
 static TaskHandle_t s_hid_task;
-static volatile bool s_usb_mounted;
 /* Last absolute position sent, so buttons can be released without moving the
  * target's cursor somewhere it never was. */
 static uint16_t s_last_abs_x;
@@ -440,11 +439,9 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
     }
     switch (event->id) {
     case TINYUSB_EVENT_ATTACHED:
-        s_usb_mounted = true;
         ESP_LOGI(TAG, "target attached");
         break;
     case TINYUSB_EVENT_DETACHED:
-        s_usb_mounted = false;
         s_leds = 0;
         s_probe_n = 0; /* next host's enumeration starts a fresh trace */
         ESP_LOGI(TAG, "target detached");
@@ -728,7 +725,14 @@ static void hid_worker(void *arg)
 
 bool usb_hid_ready(void)
 {
-    return s_usb_mounted && tud_mounted();
+    /* tud_mounted() is TinyUSB's own authoritative "the host has enumerated and
+     * configured us" state. An earlier shadow flag set from the mount event could
+     * desync: if the target had already enumerated the device before this task
+     * registered its event handler (a warm reboot with the cable still attached),
+     * the flag stayed false while the device was plainly mounted - so input kept
+     * working (the worker only checks tud_mounted()) but the status indicator and
+     * the REST "no USB target" checks wrongly reported no target until a replug. */
+    return tud_mounted();
 }
 
 uint8_t usb_hid_leds(void)

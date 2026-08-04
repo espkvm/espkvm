@@ -7,6 +7,16 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-08-04
+
+### Fixed
+- The USB status indicator (and the REST "no USB target attached" checks) could
+  report no target after a warm reboot with the cable still attached, even though
+  the keyboard and mouse worked: the readiness flag came from the USB mount event,
+  which is missed if the target enumerated the device before the HID task
+  registered its handler. Readiness now reads TinyUSB's own mount state directly,
+  so the indicator matches reality without needing a replug.
+
 ## [0.16.2] - 2026-08-04
 
 ### Changed
