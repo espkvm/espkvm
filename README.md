@@ -141,8 +141,10 @@ with [esptool](https://github.com/espressif/esptool) - one file, no unpacking:
 esptool --chip esp32p4 -b 921600 write-flash 0x0 espkvm-<version>-<board>-merged.bin
 ```
 
-(The `-full-flash.zip` holds the same image as separate parts for tooling that
-wants them; for a manual flash the single merged image is simpler.)
+Or flash straight from the browser - Chrome or Edge, nothing to install - at
+[espkvm.io/flash](https://espkvm.io/flash/). Full step-by-step instructions,
+including the serial-port and driver notes for Linux, macOS and Windows, are in
+[docs/FLASHING.md](docs/FLASHING.md).
 
 Then connect Ethernet, HDMI from the target, and the USB-C OTG port to the
 target. The device announces itself over mDNS: open **https://espkvm.local/**.
