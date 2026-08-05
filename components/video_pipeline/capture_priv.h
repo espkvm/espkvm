@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "capture_pixfmt.h"
 #include "driver/isp_core.h"
 #include "esp_cam_ctlr.h"
 #include "esp_cam_ctlr_csi.h"
@@ -18,7 +19,22 @@
 
 #define CAPTURE_LOG_TAG "video"
 
+/*
+ * Frame-buffer ring depth. With a synchronous encode the encoder holds one
+ * buffer for the whole encode; two buffers then leave the free-running CSI just
+ * one to fill, so it stalls (drops to the backup buffer) and the encoder has to
+ * wait a full source period for a fresh frame - measured ~24 ms idle per frame
+ * at 1080p. A third buffer keeps the CSI running so a just-completed frame is
+ * always ready the instant the encoder finishes, making the encode time the true
+ * period. The direct-encode board captures the smaller YUV422 frames, so the
+ * third buffer fits; rev < 3.0 (RGB888 + a separate encode task that already
+ * overlaps) keeps two.
+ */
+#if CAPTURE_DIRECT_ENCODE
+#define CAPTURE_FB_COUNT 3
+#else
 #define CAPTURE_FB_COUNT 2
+#endif
 
 /*
  * Frame buffers are allocated once for the largest mode the bridge can deliver;
@@ -28,7 +44,21 @@
  */
 #define CAPTURE_MAX_H_RES 1920u
 #define CAPTURE_MAX_V_RES 1080u
-#define CAPTURE_MAX_FRAME_BYTES ((size_t)CAPTURE_MAX_H_RES * (size_t)CAPTURE_MAX_V_RES * 3u)
+#if CAPTURE_DIRECT_ENCODE
+/* On the direct-encode board the encoder reads the frame at macroblock-aligned
+ * height, so pad the allocation up to the next multiple of 16 rows (1080 -> 1088).
+ * Gated on the same rev macro as the pixel format, so the rev < 3.0 build's buffer
+ * size is byte-for-byte unchanged. See capture_pixfmt.h. */
+#define CAPTURE_MAX_V_ALLOC (((CAPTURE_MAX_V_RES + 15u) / 16u) * 16u)
+/* rev >= 3.0 captures packed YUV422 at 2 bytes/px. */
+#define CAPTURE_MAX_PIXEL_BYTES 2u
+#else
+#define CAPTURE_MAX_V_ALLOC CAPTURE_MAX_V_RES
+/* rev < 3.0 captures RGB888 at 3 bytes/px. */
+#define CAPTURE_MAX_PIXEL_BYTES 3u
+#endif
+#define CAPTURE_MAX_FRAME_BYTES \
+    ((size_t)CAPTURE_MAX_H_RES * (size_t)CAPTURE_MAX_V_ALLOC * (size_t)CAPTURE_MAX_PIXEL_BYTES)
 
 /** Shared CSI / ISP / HDMI state for codec tasks (lives in capture_hw.c). */
 typedef struct {

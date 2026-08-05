@@ -43,8 +43,6 @@
 static esp_cam_ctlr_handle_t s_cam;
 static isp_proc_handle_t s_isp_bypass;
 
-static const uint32_t s_csi_expected_dt = 0x24u;
-
 static capture_ctx_t s_cap;
 
 static void tc358743_resetn_pulse(void)
@@ -141,15 +139,16 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
 
 unsigned capture_csi_bpp(void)
 {
-    return 24u;
+    return capture_pixfmt()->bpp;
 }
 
 void capture_fill_esp_cam_color_types(esp_cam_ctlr_csi_config_t *csi, esp_isp_processor_cfg_t *isp)
 {
-    csi->input_data_color_type = CAM_CTLR_COLOR_RGB888;
-    csi->output_data_color_type = CAM_CTLR_COLOR_RGB888;
-    isp->input_data_color_type = ISP_COLOR_RGB888;
-    isp->output_data_color_type = ISP_COLOR_RGB888;
+    const capture_pixfmt_t *pf = capture_pixfmt();
+    csi->input_data_color_type = (cam_ctlr_color_t)pf->cam_color;
+    csi->output_data_color_type = (cam_ctlr_color_t)pf->cam_color;
+    isp->input_data_color_type = (isp_color_t)pf->isp_color;
+    isp->output_data_color_type = (isp_color_t)pf->isp_color;
 }
 
 static void capture_configure_p4_csi_bridge(uint32_t hres, uint32_t vres)
@@ -158,9 +157,34 @@ static void capture_configure_p4_csi_bridge(uint32_t hres, uint32_t vres)
     MIPI_CSI_BRIDGE.frame_cfg.vadr_num = vres;
     MIPI_CSI_BRIDGE.frame_cfg.has_hsync_e = 0u;
     MIPI_CSI_BRIDGE.frame_cfg.vadr_num_check = 0u;
-    MIPI_CSI_BRIDGE.data_type_cfg.data_type_min = s_csi_expected_dt;
-    MIPI_CSI_BRIDGE.data_type_cfg.data_type_max = s_csi_expected_dt;
+    const uint32_t csi_dt = capture_pixfmt()->csi_dt;
+    MIPI_CSI_BRIDGE.data_type_cfg.data_type_min = csi_dt;
+    MIPI_CSI_BRIDGE.data_type_cfg.data_type_max = csi_dt;
     MIPI_CSI_BRIDGE.int_clr.val = 0x3fu;
+
+#if CAPTURE_DIRECT_ENCODE
+    /*
+     * rev >= 3.0 only: the CSI bridge has a colour-mode block (absent on rev < 3.0)
+     * that sits in the DMA path when the ISP is bypassed. For a UYVY stream the
+     * esp_cam driver leaves it at its reset defaults - input RGB888, YUV422 packing
+     * YVYU, bypass on - because it early-returns once input==output colour type
+     * (esp_cam_ctlr_csi.c). A UYVY stream then gets lane-routed as YVYU/RGB, which
+     * shows as neon/inverted colour with chroma-period vertical banding. Program the
+     * block explicitly for a YUV422 UYVY identity so native UYVY lands in DRAM - the
+     * order both encoders consume. rev < 3.0 has no such block, hence the gate.
+     */
+    if (capture_pixfmt()->csi_dt == 0x1eu) {
+        /* Keep the converter in bypass - passthrough preserves full resolution
+         * (the active YUV422->YUV422 path halves horizontal res). Bypass ignores
+         * the packing hint and this CSI's DMA packs bytes reversed within the
+         * 32-bit word (the same reason RGB888 lands as BGR), so the wire's U Y V Y
+         * arrives as Y V Y U -> acid. An 8-bit (full 32-bit byte) swap turns it
+         * back into native UYVY, which is what both encoders read. */
+        MIPI_CSI_BRIDGE.host_cm_ctrl.csi_host_cm_en = 1;
+        MIPI_CSI_BRIDGE.host_cm_ctrl.csi_host_cm_bypass = 1;
+        MIPI_CSI_BRIDGE.host_cm_ctrl.csi_host_cm_8bit_swap = 1;
+    }
+#endif
 }
 
 static bool IRAM_ATTR cam_on_get_new(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t *trans, void *ud)
@@ -346,6 +370,12 @@ capture_ctx_t *capture_hw_init_start(void)
         return NULL;
     }
 
+    /* Select the bridge's CSI-2 pixel packing to match the active profile. init
+     * leaves it at RGB888; the direct-encode profile wants native UYVY422 (0x1e).
+     * The bridge remembers this and re-applies it after every HDMI recovery. On
+     * the RGB888 profile this is a no-op, so the rev < 3.0 board is unaffected. */
+    tc358743_set_csi_uyvy422(s_cap.tc, capture_pixfmt()->csi_dt == 0x1eu);
+
     s_cap.tc_mu = xSemaphoreCreateMutex();
     if (!s_cap.tc_mu) {
         ESP_LOGE(CAPTURE_LOG_TAG, "TC358743 mutex");
@@ -375,8 +405,9 @@ capture_ctx_t *capture_hw_init_start(void)
     s_cap.csi_dma_done_irqs = 0;
     s_cap.csi_get_new_irqs = 0;
 
-    ESP_LOGI(CAPTURE_LOG_TAG, "CSI 24bpp BGR ring %ux%zu bytes for up to %ux%u (align %zu)",
-             CAPTURE_FB_COUNT, CAPTURE_MAX_FRAME_BYTES, CAPTURE_MAX_H_RES, CAPTURE_MAX_V_RES, align);
+    ESP_LOGI(CAPTURE_LOG_TAG, "CSI %s %ubpp ring %ux%zu bytes for up to %ux%u (align %zu)",
+             capture_pixfmt()->name, capture_pixfmt()->bpp, CAPTURE_FB_COUNT, CAPTURE_MAX_FRAME_BYTES,
+             CAPTURE_MAX_H_RES, CAPTURE_MAX_V_RES, align);
 
     s_cap.csi_done_sem = xSemaphoreCreateCounting(32, 0);
     if (!s_cap.csi_done_sem) {
@@ -410,7 +441,7 @@ capture_ctx_t *capture_hw_init_start(void)
     }
     s_cap.hres = hres;
     s_cap.vres = vres;
-    s_cap.frame_bytes = (size_t)hres * (size_t)vres * 3u;
+    s_cap.frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
     capture_status_set_mode(hres, vres, t.interlaced);
 
     ESP_ERROR_CHECK(esp_cam_ctlr_start(s_cam));
@@ -446,7 +477,7 @@ esp_err_t capture_hw_apply_mode(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     c->csi_get_new_irqs = 0;
     c->hres = hres;
     c->vres = vres;
-    c->frame_bytes = (size_t)hres * (size_t)vres * 3u;
+    c->frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
 
     esp_err_t er = csi_create(c, hres, vres);
     if (er != ESP_OK) {
@@ -514,7 +545,7 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
     c->csi_get_new_irqs = 0;
     c->hres = hres;
     c->vres = vres;
-    c->frame_bytes = (size_t)hres * (size_t)vres * 3u;
+    c->frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
 
     er = csi_create(c, hres, vres);
     if (er != ESP_OK) {

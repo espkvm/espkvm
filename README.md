@@ -121,14 +121,26 @@ used only to identify the hardware. ESP-KVM is not affiliated with Espressif,
 Waveshare or Geekworm. The pin map is in
 `components/kvm_board/include/kvm_board.h`.</sub>
 
+**Also supported - [Espressif ESP32-P4 Function EV Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4x-function-ev-board/user_guide.html) (chip rev v3.2)**
+
+<img src="docs/board-funcev.webp" width="45%" alt="Espressif ESP32-P4 Function EV Board">
+
+Espressif's own ESP32-P4 board. It has its own build target
+(`boards/funcev_p4.defaults`) and the [browser flasher](https://espkvm.io/flash/)
+offers it directly - pick it from the board list. The rev 3.2 silicon captures
+native YUV422 straight into the H.264 and JPEG encoders, so it needs no PPA
+colour-convert pass; that frees ~4 MB of PSRAM for a deeper capture-buffer ring,
+which lifts 1080p to a little over 20 fps.
+
 **The chip revision matters.** Below revision 3.0 several peripherals behave
-differently - the colour conversion the H.264 encoder needs has to go through
-the PPA, for one - and rev <3.0 and >=3.0 are mutually exclusive build targets.
-The default build (`sdkconfig.defaults`) selects the pre-3.0 family, so a v1.x
-part builds and runs as shipped; a rev 3.x board is built from its own overlay
-(see [boards/](boards/README.md)). What was measured on the board in front of
-us, including the documented claims that turned out to be false, is written down
-in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
+differently and rev <3.0 and >=3.0 are mutually exclusive build targets. On rev
+<3.0 the colour conversion the H.264 encoder needs goes through the PPA; on rev
+>=3.0 the encoders take the captured YUV422 (or RGB) directly and the PPA is not
+used. The default build (`sdkconfig.defaults`) selects the pre-3.0 family, so a
+v1.x part builds and runs as shipped; a rev 3.x board is built from its own
+overlay (see [boards/](boards/README.md)). What was measured on the boards in
+front of us, including the documented claims that turned out to be false, is
+written down in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
 ## Quick start
 
@@ -348,7 +360,7 @@ docs/             what the hardware actually does
 - [Open Source For You](https://www.opensourceforu.com/2026/07/microcontroller-enables-remote-device-access/) - *Microcontroller Enables Remote Device Access*
 
 Also picked up and translated internationally - French, Greek, Spanish, Russian,
-Chinese, Japanese and German.
+Chinese, Japanese, Thai and German.
 
 Waveshare, the maker of the capture adapter, links ESP-KVM from its
 [HDMI to CSI adapter wiki](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter).

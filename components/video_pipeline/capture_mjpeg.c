@@ -123,8 +123,8 @@ static esp_err_t mjpeg_encode(capture_ctx_t *c, const void *src, bool force_publ
     }
     jpeg_encode_cfg_t enc = {.width = c->hres,
                              .height = c->vres,
-                             .src_type = JPEG_ENCODE_IN_FORMAT_RGB888,
-                             .sub_sample = JPEG_DOWN_SAMPLING_YUV420,
+                             .src_type = (jpeg_enc_input_format_t)capture_pixfmt()->jpeg_src,
+                             .sub_sample = (jpeg_down_sampling_type_t)capture_pixfmt()->jpeg_subsample,
                              .image_quality = q};
 
     int slot = -1;

@@ -7,7 +7,34 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Changed
+- 1080p H.264 went from ~15 to ~22 fps (+46%) on rev >= 3.0. The synchronous encode
+  holds one frame buffer for its whole ~42 ms, and with only two buffers the
+  free-running CSI had a single buffer to fill, stalled, and left the encoder waiting
+  ~24 ms for a fresh frame every frame (encoder only 62% busy). A third capture buffer
+  - which the smaller YUV422 frames leave room for - keeps a just-completed frame
+  always ready, so the encoder now runs ~92% busy and the ~42 ms hardware encode is the
+  real ceiling. The rev >= 3.0 direct-H.264 path also no longer allocates the PPA
+  client, intermediate YUV buffers or the second encode task it never used (~6 MB
+  PSRAM), which is what makes room for the third buffer.
+- The rev >= 3.0 capture pipeline now captures native YUV422 (UYVY, 2 bytes/px)
+  instead of RGB888 and feeds it straight to both the H.264 and JPEG encoders,
+  dropping the PPA colour-convert pass. This frees the PPA engine and ~4 MB of PSRAM
+  and unifies both codecs on one capture format. The per-board pixel format is now a
+  single `capture_pixfmt` table behind one chip-rev gate rather than scattered
+  `#if`s; the rev < 3.0 board keeps its RGB888 + PPA path byte-for-byte. On rev >= 3.0
+  the CSI bridge's colour-mode block is programmed for a UYVY passthrough with an
+  8-bit word swap (the same byte reversal that lands RGB as BGR). Note: this is a
+  pipeline/PSRAM improvement, not an H.264 speed-up - 1080p H.264 stays
+  encoder-bound at ~16 fps regardless of capture format.
+
 ### Fixed
+- The device CA's subject was named only after the hostname, so two devices left on
+  the default hostname generated CAs with an identical subject name. Importing one
+  device's CA then made the browser reject the other's certificate as
+  `ERR_CERT_AUTHORITY_INVALID`. The CA subject now includes a per-device suffix from
+  the MAC, so each device's CA is distinct; the CA is re-issued automatically on
+  update (no settings lost).
 - Building from a fresh clone failed: `sdkconfig.defaults` did not set the target,
   so `idf.py build` fell back to `esp32` and stopped with an `xtensa-esp32-elf-gcc
   not found` toolchain error. `CONFIG_IDF_TARGET="esp32p4"` is now in the defaults,

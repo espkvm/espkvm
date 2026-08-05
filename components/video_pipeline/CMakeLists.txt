@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "capture.c"
+        "capture_pixfmt.c"
         "capture_hw.c"
         "capture_loop.c"
         "capture_mjpeg.c"
