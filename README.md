@@ -132,14 +132,17 @@ in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
 ## Quick start
 
-Take your board's `espkvm-<version>-<board>-full-flash.zip` (for example
+Download your board's `espkvm-<version>-<board>-merged.bin` (for example
 `-waveshare-`) from the
-[releases](https://github.com/espkvm/espkvm/releases), unpack it, and write it
-with [esptool](https://github.com/espressif/esptool):
+[releases](https://github.com/espkvm/espkvm/releases) and write it at offset 0
+with [esptool](https://github.com/espressif/esptool) - one file, no unpacking:
 
 ```sh
-esptool --chip esp32p4 -b 921600 write-flash @flash_args
+esptool --chip esp32p4 -b 921600 write-flash 0x0 espkvm-<version>-<board>-merged.bin
 ```
+
+(The `-full-flash.zip` holds the same image as separate parts for tooling that
+wants them; for a manual flash the single merged image is simpler.)
 
 Then connect Ethernet, HDMI from the target, and the USB-C OTG port to the
 target. The device announces itself over mDNS: open **https://espkvm.local/**.
