@@ -7,6 +7,8 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.16.4] - 2026-08-05
+
 ### Added
 - Native Tailscale now chooses its home DERP relay region by latency instead of
   always relaying through the built-in default (Dallas). On first connect the
