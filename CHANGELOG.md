@@ -7,6 +7,12 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Fixed
+- Building from a fresh clone failed: `sdkconfig.defaults` did not set the target,
+  so `idf.py build` fell back to `esp32` and stopped with an `xtensa-esp32-elf-gcc
+  not found` toolchain error. `CONFIG_IDF_TARGET="esp32p4"` is now in the defaults,
+  so a clean checkout builds without a separate `idf.py set-target` step.
+
 ## [0.16.5] - 2026-08-05
 
 ### Fixed

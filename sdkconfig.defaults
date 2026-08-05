@@ -1,3 +1,9 @@
+# The chip. A fresh clone picks this up, so `idf.py build` targets the P4 on its
+# own - without it idf.py defaults to esp32 and fails with an "xtensa-esp32-elf-gcc
+# not found" toolchain error (the P4 is RISC-V). An existing build/ keeps its own
+# target; run `idf.py set-target esp32p4` to switch a tree already configured.
+CONFIG_IDF_TARGET="esp32p4"
+
 # This board carries an ESP32-P4 rev v1.3. IDF 6.x defaults to v3.1+, and rev <3.0
 # and >=3.0 are mutually exclusive targets, so the <3.0 family must be selected
 # explicitly or the bootloader refuses to run.
