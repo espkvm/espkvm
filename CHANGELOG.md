@@ -7,6 +7,14 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Fixed
+- At high resolution the free-running CSI capture DMA could overwrite the frame a
+  codec was still reading and tear it: an encode takes longer than one capture
+  period, so the two-buffer ping-pong came back around mid-read. The capture now
+  holds the frame being encoded out of the DMA rotation (and drops intermediate
+  frames to the driver's backup buffer) so the buffer under the encoder is never
+  written.
+
 ## [0.16.4] - 2026-08-05
 
 ### Added

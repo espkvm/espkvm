@@ -39,6 +39,21 @@ typedef struct {
     void *fb[CAPTURE_FB_COUNT];
     void *volatile done_fb;
     volatile int ping_fb_idx;
+    /*
+     * Keep the free-running CSI DMA off the frame being encoded. The receiver
+     * ping-pongs continuously and does not know a codec is still reading a buffer,
+     * so at high resolution (encode >> one frame period) it would overwrite the
+     * frame mid-read and tear it. The producer therefore only ever writes a buffer
+     * that is none of: the one it is already filling, the newest completed one a
+     * consumer may be about to take, or the one a consumer holds. When none is
+     * free it writes the driver's backup buffer and that frame is simply dropped -
+     * exactly the "keep the latest, skip the rest" behaviour we want under load.
+     * fb_lock guards the three indices; it is taken from the DMA ISR and the loop.
+     */
+    portMUX_TYPE fb_lock;
+    volatile int write_fb_idx; /* buffer the DMA is filling now, -1 = backup */
+    volatile int ready_fb_idx; /* newest completed buffer, -1 = none yet */
+    volatile int held_fb_idx;  /* buffer the encode is reading, -1 = none */
     SemaphoreHandle_t csi_done_sem;
     tc358743_t *tc;
     /** Serialises TC358743 I2C between the monitor task and the capture task. */

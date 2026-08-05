@@ -140,9 +140,8 @@ void capture_loop_run(capture_ctx_t *c)
             /* Drop stale completions; done_fb always points at the newest completed frame. */
         }
 
-        void *src = (void *)c->done_fb;
-        if (!src) {
-            continue;
+        if (c->ready_fb_idx < 0) {
+            continue; /* no frame has completed yet */
         }
 
         /*
@@ -192,12 +191,30 @@ void capture_loop_run(capture_ctx_t *c)
             }
             last_encode_us = now_us;
         }
+        /*
+         * Take the newest complete frame and hold it for the whole encode: marking
+         * it held keeps the producer's get_new from ever targeting it, so the
+         * free-running CSI DMA cannot overwrite it mid-read. Released right after.
+         */
+        portENTER_CRITICAL(&c->fb_lock);
+        const int hidx = c->ready_fb_idx;
+        c->held_fb_idx = hidx;
+        portEXIT_CRITICAL(&c->fb_lock);
+        if (hidx < 0) {
+            continue;
+        }
+        void *src = c->fb[hidx];
+
         ESP_ERROR_CHECK(esp_cache_msync(src, c->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C));
 
         esp_err_t ee = codec->encode(c, src, force_publish);
         if (ee == ESP_OK) {
             force_publish = false;
         }
+
+        portENTER_CRITICAL(&c->fb_lock);
+        c->held_fb_idx = -1;
+        portEXIT_CRITICAL(&c->fb_lock);
     }
     vTaskDelete(NULL);
 }

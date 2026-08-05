@@ -169,10 +169,24 @@ static bool IRAM_ATTR cam_on_get_new(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans
     (void)ud;
     capture_ctx_t *c = (capture_ctx_t *)ud;
     (void)__sync_add_and_fetch(&c->csi_get_new_irqs, 1);
-    int i = c->ping_fb_idx % CAPTURE_FB_COUNT;
-    trans->buffer = c->fb[i];
-    trans->buflen = c->frame_bytes;
-    c->ping_fb_idx = (c->ping_fb_idx + 1) % CAPTURE_FB_COUNT;
+    /* Pick a buffer that is not the one we are already filling, not the newest
+     * completed one (a consumer may be about to take it), and not one a consumer
+     * holds. If none qualifies, leave trans->buffer NULL: the driver writes its
+     * backup buffer and drops the frame. See capture_priv.h. */
+    portENTER_CRITICAL_ISR(&c->fb_lock);
+    int pick = -1;
+    for (int k = 0; k < CAPTURE_FB_COUNT; k++) {
+        if (k != c->write_fb_idx && k != c->ready_fb_idx && k != c->held_fb_idx) {
+            pick = k;
+            break;
+        }
+    }
+    c->write_fb_idx = pick;
+    portEXIT_CRITICAL_ISR(&c->fb_lock);
+    if (pick >= 0) {
+        trans->buffer = c->fb[pick];
+        trans->buflen = c->frame_bytes;
+    }
     return false;
 }
 
@@ -181,8 +195,22 @@ static bool IRAM_ATTR cam_on_done(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t 
     (void)h;
     capture_ctx_t *c = (capture_ctx_t *)ud;
     (void)__sync_add_and_fetch(&c->csi_dma_done_irqs, 1);
+    /* on_trans_finished never fires for the backup buffer (the driver guards it),
+     * so trans->buffer is always one of ours: mark it the newest completed frame. */
     if (trans && trans->buffer) {
-        c->done_fb = trans->buffer;
+        int idx = -1;
+        for (int k = 0; k < CAPTURE_FB_COUNT; k++) {
+            if (trans->buffer == c->fb[k]) {
+                idx = k;
+                break;
+            }
+        }
+        if (idx >= 0) {
+            portENTER_CRITICAL_ISR(&c->fb_lock);
+            c->ready_fb_idx = idx;
+            portEXIT_CRITICAL_ISR(&c->fb_lock);
+            c->done_fb = trans->buffer;
+        }
     }
     BaseType_t high_task_woken = pdFALSE;
     if (c->csi_done_sem) {
@@ -208,7 +236,11 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
         .lane_bit_rate_mbps = KVM_BOARD_MIPI_LANE_MBPS,
         .queue_items = CAPTURE_FB_COUNT,
         .byte_swap_en = false,
-        .bk_buffer_dis = true,
+        /* Keep the driver's backup buffer: cam_on_get_new hands back no buffer
+         * when every frame buffer is spoken for (one filling, one just completed,
+         * one held by the encoder), and the DMA then lands the dropped frame here
+         * instead of asserting. */
+        .bk_buffer_dis = false,
     };
     esp_isp_processor_cfg_t isp_cfg = {
         .clk_src = ISP_CLK_SRC_DEFAULT,
@@ -336,6 +368,10 @@ capture_ctx_t *capture_hw_init_start(void)
     }
     s_cap.ping_fb_idx = 0;
     s_cap.done_fb = NULL;
+    s_cap.fb_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+    s_cap.write_fb_idx = -1;
+    s_cap.ready_fb_idx = -1;
+    s_cap.held_fb_idx = -1;
     s_cap.csi_dma_done_irqs = 0;
     s_cap.csi_get_new_irqs = 0;
 
@@ -402,6 +438,10 @@ esp_err_t capture_hw_apply_mode(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     }
     c->ping_fb_idx = 0;
     c->done_fb = NULL;
+    /* CSI is torn down before a reconfigure, so no ISR races these resets. */
+    c->write_fb_idx = -1;
+    c->ready_fb_idx = -1;
+    c->held_fb_idx = -1;
     c->csi_dma_done_irqs = 0;
     c->csi_get_new_irqs = 0;
     c->hres = hres;
@@ -466,6 +506,10 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
 
     c->ping_fb_idx = 0;
     c->done_fb = NULL;
+    /* CSI is torn down before a reconfigure, so no ISR races these resets. */
+    c->write_fb_idx = -1;
+    c->ready_fb_idx = -1;
+    c->held_fb_idx = -1;
     c->csi_dma_done_irqs = 0;
     c->csi_get_new_irqs = 0;
     c->hres = hres;
