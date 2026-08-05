@@ -340,6 +340,19 @@ tools/            toolchain setup, EDID generation, hardware probes
 docs/             what the hardware actually does
 ```
 
+## In the media
+
+- [Hackaday](https://hackaday.com/2026/07/30/a-capable-kvm-built-with-the-esp32/) - *A Capable KVM Built With The ESP32*
+- [CNX Software](https://www.cnx-software.com/2026/07/30/esp-kvm-an-open-source-ip-kvm-solution-based-on-esp32-p4-risc-v-mcu/) - *ESP-KVM - An open-source IP KVM solution based on ESP32-P4 RISC-V MCU*
+- [Circuit Rocks](https://blog.circuit.rocks/esp-kvm-turns-an-esp32-p4-into-a-45-open-source-ip-kvm) - *ESP-KVM Turns an ESP32-P4 Into a $45 Open-Source IP KVM*
+- [Open Source For You](https://www.opensourceforu.com/2026/07/microcontroller-enables-remote-device-access/) - *Microcontroller Enables Remote Device Access*
+
+Also picked up and translated internationally - French, Greek, Spanish, Russian,
+Chinese, Japanese and German.
+
+Waveshare, the maker of the capture adapter, links ESP-KVM from its
+[HDMI to CSI adapter wiki](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter).
+
 ## Credits
 
 This project exists because of **Jonathan Rowny** and his
