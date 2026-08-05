@@ -25,7 +25,9 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -68,6 +70,37 @@ static void stop_tunnel_netif(struct netif *netif);
  * callback), so an unconditional core lock is safe and never re-enters. */
 static inline void wg_lock(void) { LOCK_TCPIP_CORE(); }
 static inline void wg_unlock(void) { UNLOCK_TCPIP_CORE(); }
+
+/* True once the interface has an address. Like kvm_ts, we both catch GOT_IP and
+ * check the live netif, so a config change after boot still sees the network. */
+static volatile bool s_net_up;
+
+static bool net_is_up(void)
+{
+    if (s_net_up) {
+        return true;
+    }
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    esp_netif_ip_info_t ip;
+    if (netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+        s_net_up = true;
+    }
+    return s_net_up;
+}
+
+/* The tunnel bring-up resolves the peer endpoint, which needs DNS/DHCP up. At
+ * cold boot that is not ready yet, so wait for the link and re-nudge the worker
+ * when the IP arrives - otherwise a DNS-name endpoint fails to resolve once and
+ * the tunnel never comes up (a literal-IP endpoint happened to dodge this). */
+static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    s_net_up = true;
+    kvm_wg_apply();
+}
 
 /* See kvm_wg.h. Logged when SNTP sets the clock: a WireGuard reconnect across a
  * reboot needs a real time or the peer rejects a rewound handshake timestamp. */
@@ -175,6 +208,10 @@ esp_err_t kvm_wg_init(void)
     if (!s_mtx || !s_apply_sem) {
         return ESP_ERR_NO_MEM;
     }
+    esp_err_t ev = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL);
+    if (ev != ESP_OK) {
+        ESP_LOGW(TAG, "could not watch for GOT_IP: %s", esp_err_to_name(ev));
+    }
     if (xTaskCreate(wg_task, "kvm_wg", 8192, NULL, 5, &s_task) != pdPASS) {
         s_task = NULL;
         return ESP_ERR_NO_MEM;
@@ -241,10 +278,25 @@ static void wg_reconcile(void)
     }
 
     char pub[48];
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
     if (derive_public_key(priv, pub, sizeof(pub))) {
-        xSemaphoreTake(s_mtx, portMAX_DELAY);
         snprintf(s_pubkey, sizeof(s_pubkey), "%s", pub);
-        xSemaphoreGive(s_mtx);
+    } else {
+        /* Do not leave a stale key reported: it would no longer match the private
+         * key and the operator would register the wrong peer on the hub. */
+        ESP_LOGW(TAG, "could not derive the WireGuard public key");
+        s_pubkey[0] = '\0';
+    }
+    xSemaphoreGive(s_mtx);
+
+    /* Wait for the link before resolving the endpoint. At cold boot DHCP/DNS is
+     * not ready, so a DNS-name endpoint would fail to resolve once and, with the
+     * worker then idle, never retry. on_got_ip() nudges us when the IP lands, and
+     * wg_task also retries periodically. The public key is derived above first, so
+     * it is available to copy onto the hub even before the link is up. */
+    if (!net_is_up()) {
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
+        return;
     }
 
     /* Endpoint "host:port". */
@@ -374,11 +426,26 @@ static void wg_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        /* Block until nudged, or wake every second while up to drive WireGuard's
-         * handshake retries and keepalive (wireguardif_periodic). */
-        const TickType_t wait = s_started ? pdMS_TO_TICKS(1000) : portMAX_DELAY;
+        /*
+         * While up: wake every second to drive WireGuard's handshake retries and
+         * keepalive. While down but enabled: wake every few seconds to retry the
+         * bring-up, so a transient failure (network not up yet, endpoint not yet
+         * resolvable, a failed connect) recovers on its own instead of waiting for
+         * the operator to re-save a setting. While disabled: sleep until nudged.
+         */
+        const bool want = kvm_setting_bool("wg_enable");
+        TickType_t wait;
+        if (s_started) {
+            wait = pdMS_TO_TICKS(1000);
+        } else if (want) {
+            wait = pdMS_TO_TICKS(5000);
+        } else {
+            wait = portMAX_DELAY;
+        }
         if (xSemaphoreTake(s_apply_sem, wait) == pdTRUE) {
-            wg_reconcile();
+            wg_reconcile(); /* nudged by a settings change or GOT_IP */
+        } else if (!s_started && want) {
+            wg_reconcile(); /* periodic retry while it should be up but is not */
         }
         if (s_started && s_netif) {
             wg_lock();

@@ -83,8 +83,16 @@ static void thermal_task(void *arg)
             s_celsius = c;
 
             if (kvm_setting_bool("therm_guard")) {
-                const int warn = kvm_setting_int("therm_warn");
                 const int stop = kvm_setting_int("therm_stop");
+                int warn = kvm_setting_int("therm_warn");
+                /* The two thresholds are validated independently, so nothing stops
+                 * warn >= stop. Left as-is that jumps straight from NORMAL to
+                 * CRITICAL (fps 0) with no HOT warning first - the picture would
+                 * die at a low temperature that looks like a fault. Keep a warn
+                 * band below stop. */
+                if (warn >= stop) {
+                    warn = stop - HYSTERESIS_C;
+                }
                 const kvm_thermal_state_t before = state;
 
                 if (c >= (float)stop) {

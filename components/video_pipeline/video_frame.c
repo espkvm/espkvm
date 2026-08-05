@@ -90,14 +90,20 @@ bool video_frame_quiesce(uint32_t timeout_ms)
     for (;;) {
         bool busy = false;
         if (xSemaphoreTake(s.mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-            s.front = -1;
-            s.payload = VIDEO_PAYLOAD_NONE;
             for (int i = 0; i < VIDEO_SLOT_COUNT; i++) {
                 if (s.ref[i]) {
                     busy = true;
                 }
             }
+            /* Only invalidate once no reader still holds a slot. Zeroing front /
+             * payload on every poll corrupted the store on a timed-out quiesce: a
+             * reader holding a slot past the deadline made this return false, the
+             * caller kept the old codec running, and its next publish restored
+             * `front` but not `payload` - so frames went out tagged NONE and
+             * clients mis-decoded until the next successful switch. */
             if (!busy) {
+                s.front = -1;
+                s.payload = VIDEO_PAYLOAD_NONE;
                 for (int i = 0; i < VIDEO_SLOT_COUNT; i++) {
                     s.buf[i] = NULL;
                     s.len[i] = 0;

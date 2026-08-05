@@ -553,13 +553,36 @@ static bool wait_report_sent(void)
     return ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(80)) > 0;
 }
 
+/*
+ * Submit one report and wait for it to leave the endpoint, retrying once if the
+ * endpoint is still busy with a prior report. Any stale completion left by an
+ * earlier timeout is cleared first so it cannot satisfy this wait early: the
+ * completion callback is not per-instance, but only one report is ever in flight
+ * at a time, so a single shared notification is correct once stale ones are
+ * dropped. Without the retry a report dropped on a busy endpoint - typically the
+ * key-up/button-up after the host stalled an IN transfer past the 80 ms wait -
+ * was never resent, leaving the key or button stuck down on the target.
+ */
+static void hid_emit(uint8_t itf, uint8_t id, const void *data, uint16_t len)
+{
+    (void)ulTaskNotifyTake(pdTRUE, 0); /* drop any stale completion from a prior timeout */
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (tud_hid_n_report(itf, id, data, len)) {
+            (void)wait_report_sent();
+            return;
+        }
+        /* Endpoint busy: wait for the in-flight report to drain, then retry. */
+        if (!wait_report_sent()) {
+            return;
+        }
+    }
+}
+
 static void send_abs(const abs_mouse_report_t *r)
 {
     s_last_abs_x = r->x;
     s_last_abs_y = r->y;
-    if (tud_hid_n_report(ITF_POINTER, RID_ABS_MOUSE, r, sizeof(*r))) {
-        (void)wait_report_sent();
-    }
+    hid_emit(ITF_POINTER, RID_ABS_MOUSE, r, sizeof(*r));
 }
 
 static void send_rel(uint8_t buttons, int32_t dx, int32_t dy, int8_t wheel, int8_t pan)
@@ -581,23 +604,26 @@ static void send_rel(uint8_t buttons, int32_t dx, int32_t dy, int8_t wheel, int8
         .wheel = wheel,
         .pan = pan,
     };
-    if (tud_hid_n_report(ITF_REL_MOUSE, 0, &r, sizeof(r))) {
-        (void)wait_report_sent();
-    }
+    hid_emit(ITF_REL_MOUSE, 0, &r, sizeof(r));
 }
 
 static void send_keyboard(uint8_t modifier, const uint8_t keycode[6])
 {
-    if (tud_hid_n_keyboard_report(ITF_KEYBOARD, 0, modifier, (uint8_t *)keycode)) {
-        (void)wait_report_sent();
+    (void)ulTaskNotifyTake(pdTRUE, 0); /* drop any stale completion from a prior timeout */
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (tud_hid_n_keyboard_report(ITF_KEYBOARD, 0, modifier, (uint8_t *)keycode)) {
+            (void)wait_report_sent();
+            return;
+        }
+        if (!wait_report_sent()) {
+            return;
+        }
     }
 }
 
 static void send_consumer(uint16_t usage)
 {
-    if (tud_hid_n_report(ITF_POINTER, RID_CONSUMER, &usage, sizeof(usage))) {
-        (void)wait_report_sent();
-    }
+    hid_emit(ITF_POINTER, RID_CONSUMER, &usage, sizeof(usage));
 }
 
 static void send_release_all(void)
@@ -797,8 +823,20 @@ void usb_hid_consumer(uint16_t usage)
 
 void usb_hid_release_all(void)
 {
+    if (!s_hid_q) {
+        return;
+    }
     const q_msg_t m = {.type = Q_RELEASE_ALL};
-    enqueue(&m);
+    if (xQueueSend(s_hid_q, &m, 0) != pdTRUE) {
+        /*
+         * The queue is full and this must not be the message that gets dropped:
+         * a key or button left held on the target (the exact thing release-all
+         * exists to prevent, e.g. on a control-session drop) is far worse than
+         * losing queued motion. Clear the backlog and enqueue the release.
+         */
+        xQueueReset(s_hid_q);
+        (void)xQueueSend(s_hid_q, &m, 0);
+    }
 }
 
 esp_err_t usb_hid_init(void)

@@ -10,7 +10,7 @@
  * Blind bring-up: none of this has touched a real optocoupler yet. The two
  * unknowns until it does are the module's trigger polarity (does driving the
  * input high press the button, or release it?) and the LED sense polarity.
- * Both are settings (atx_active_high, atx_led_active_high) so a wrong guess is
+ * Both are settings (atx_active_high, atx_led_ah) so a wrong guess is
  * a checkbox, not a reflash.
  */
 #include "kvm_atx.h"
@@ -183,7 +183,7 @@ esp_err_t kvm_atx_apply(void)
     const int short_ms = (int)kvm_setting_int("atx_short_ms");
     const int long_ms = (int)kvm_setting_int("atx_long_ms");
     const bool active_high = kvm_setting_bool("atx_active_high");
-    const bool led_active_high = kvm_setting_bool("atx_led_active_high");
+    const bool led_active_high = kvm_setting_bool("atx_led_ah");
 
     const bool pins_valid = pwr >= 0 && rst >= 0;
     const bool want_hw = want_enable && pins_valid;

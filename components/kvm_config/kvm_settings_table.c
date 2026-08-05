@@ -14,7 +14,7 @@
 
 static const char *const s_codec_choices[] = {"mjpeg", "h264"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "custom"};
-static const char *const s_mouse_choices[] = {"absolute", "relative", "auto"};
+static const char *const s_mouse_choices[] = {"absolute", "relative"};
 static const char *const s_engage_choices[] = {"click", "hover"};
 /* Only layouts with a verified character table; see web/src/layouts.js. */
 static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
@@ -90,7 +90,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Absolute puts the target's cursor exactly where you click and is "
                 "the right choice almost always. Relative is for software that "
                 "captures the pointer, such as games and 3D viewers.",
-        .min = 0, .max = 2, .def = 0, .choices = s_mouse_choices, .requires_cap = KVM_CAP_HID,
+        .min = 0, .max = 1, .def = 0, .choices = s_mouse_choices, .requires_cap = KVM_CAP_HID,
     },
     {
         .key = "ptr_engage", .section = "input", .type = KVM_VT_ENUM,
@@ -218,7 +218,9 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = KVM_CAP_ATX,
     },
     {
-        .key = "atx_led_active_high", .section = "power", .type = KVM_VT_BOOL,
+        /* Key kept <= 15 chars: NVS rejects longer keys, and "atx_led_active_high"
+         * (19) silently failed to persist, reverting to the default every boot. */
+        .key = "atx_led_ah", .section = "power", .type = KVM_VT_BOOL,
         .title = "Power LED active-high",
         .help = "On if the LED sense reads high when the target is powered. Flip it if "
                 "the reported power state is inverted.",

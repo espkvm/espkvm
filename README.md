@@ -74,7 +74,9 @@ VPN &mdash; it has both a built-in WireGuard client and native Tailscale
 (Settings &rarr; VPN; enable one). Tailscale needs no port-forward, gateway or
 VPS: the device joins your tailnet directly and is reachable at its 100.x
 address (or MagicDNS name) from anywhere, with its TLS certificate valid over
-the tailnet.
+the tailnet, and it relays through the DERP region nearest to it rather than a
+fixed one. WireGuard is a split-tunnel client that generates its own key on the
+device and shows the matching public key in the VPN tab to register on your hub.
 
 ## Hardware
 

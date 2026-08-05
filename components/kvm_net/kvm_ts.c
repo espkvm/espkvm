@@ -258,8 +258,13 @@ static void ts_task(void *arg)
     (void)arg;
     for (;;) {
         /* Wake on a settings change, or every few seconds to catch the tailnet
-         * address/name appearing after the client connects. */
+         * address/name appearing after the client connects. On the periodic wake,
+         * if Tailscale is enabled but not up, re-run the reconcile: a transient
+         * init/start failure (e.g. the control plane briefly unreachable) would
+         * otherwise leave it down until the operator re-saves a setting. */
         if (xSemaphoreTake(s_apply_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
+            ts_reconcile();
+        } else if (kvm_setting_bool("ts_enable") && !s_started) {
             ts_reconcile();
         }
         sync_tailnet_cert();

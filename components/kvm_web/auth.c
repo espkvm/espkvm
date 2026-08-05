@@ -139,6 +139,11 @@ bool kvm_auth_socket_ok(int fd)
     if (!kvm_auth_required()) {
         return true;
     }
+    /* Empty slots hold -1, so a -1 fd (an httpd_req_to_sockfd failure) would
+     * otherwise match one and read as authenticated. Never treat it as valid. */
+    if (fd < 0) {
+        return false;
+    }
     bool ok = false;
     lock();
     for (int i = 0; i < MAX_WS_SOCKETS; i++) {

@@ -139,19 +139,45 @@ jobs:
           path: out
           merge-multiple: true
 
+      - name: Build release notes from the changelog
+        run: |
+          # The tag is v.<version>; pull that version's section out of the
+          # changelog (everything under "## [<version>]" up to the next heading)
+          # to use as the release body. Leading/trailing blank lines are trimmed.
+          # If there is no matching section, the file is left empty and the
+          # publish step falls back to auto-generated notes.
+          version="${GITHUB_REF_NAME#v.}"
+          awk -v ver="$version" '
+            BEGIN { gsub(/\./, "\\.", ver); re = "^## \\[" ver "\\]" }
+            $0 ~ re { f = 1; next }
+            f && /^## \[/ { exit }
+            f { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac > release-notes.md
+          echo "----- release notes -----"; cat release-notes.md
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Prefer the changelog section as the body; fall back to auto-generated
+          # notes only when the changelog has no section for this version.
+          if [ -s release-notes.md ]; then
+            notes=(--notes-file release-notes.md)
+          else
+            notes=(--generate-notes)
+          fi
           # Idempotent, so re-running a tag's workflow does not fail on a
           # release that already exists: create it if it is new, otherwise
-          # replace its files in place.
+          # replace its files in place and refresh the notes.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" out/* --clobber
+            if [ -s release-notes.md ]; then
+              gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
+            fi
           else
             gh release create "$GITHUB_REF_NAME" out/* \
               --title "$GITHUB_REF_NAME" \
-              --generate-notes
+              "${notes[@]}"
           fi
 
   pages:

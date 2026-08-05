@@ -7,6 +7,50 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Added
+- Native Tailscale now chooses its home DERP relay region by latency instead of
+  always relaying through the built-in default (Dallas). On first connect the
+  device probes every region in the tailnet's DERP map and relays through the
+  nearest, falling back to Frankfurt and then the default if none answer - a large
+  latency win for tailnets reached from outside North America (microlink #19).
+- The WireGuard settings show the device's own public key with a Copy button when
+  WireGuard is selected, so it can be registered as a peer on the hub without
+  digging it out of the raw `/api/v1/system/info`.
+
+### Changed
+- The pointer-mode setting dropped its "auto" choice, which did nothing (it
+  behaved as "absolute"); it is now just Absolute / Relative.
+- A tagged release's GitHub notes are taken from the matching CHANGELOG section
+  rather than auto-generated commit summaries.
+
+### Fixed
+- WireGuard did not come up after a cold boot when its endpoint was a DNS name:
+  the address was resolved before the network was ready and never retried. It now
+  waits for the link (as Tailscale already did) and retries, so the tunnel
+  establishes on its own.
+- A key or mouse button could stay stuck down on the target when a USB report was
+  dropped while the endpoint was momentarily busy (e.g. the host stalled the
+  transfer): reports are retried, the release-all safety path can no longer be the
+  one dropped, and a stale completion no longer makes the next report skip its wait.
+- In an installed PWA the bottom action bar (and the top status bar) could sit
+  under the phone's home indicator or notch and look missing - most visibly in
+  dark theme. The bars now respect the safe-area insets.
+- Repeated H.264 keyframe requests (one per reconnecting viewer) walked the GOP
+  length down toward 2 over time, turning almost every frame into a keyframe and
+  wrecking the bitrate. The keyframe toggle now stays around the configured GOP.
+- Switching the video codec while a slow client still held a frame could leave
+  later frames tagged with no payload type, so clients mis-decoded them until the
+  next switch.
+- The "Power LED active-high" setting never persisted: its NVS key exceeded the
+  15-character limit, so it reverted to the default every reboot and could leave
+  the reported power state inverted.
+- The thermal guard could jump straight to stopping video if the warn and stop
+  thresholds were set out of order; the warn threshold is now kept below stop.
+- A virtual-media image of 2 GB or larger uploaded as an empty "success" (the
+  length was truncated to a signed 32-bit int); large uploads now transfer fully.
+- Hardened the control WebSocket against a zero-length frame and tightened a few
+  internal bounds and authentication checks.
+
 ## [0.16.3] - 2026-08-04
 
 ### Fixed

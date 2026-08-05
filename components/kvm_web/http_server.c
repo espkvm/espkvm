@@ -265,6 +265,9 @@ static esp_err_t api_system_usbprobe_get(httpd_req_t *req)
     char body[600];
     int n = snprintf(body, sizeof(body), "{\"os\":\"%s\",\"trace\":\"%s\"}",
                      usb_hid_target_os(), trace);
+    if (n < 0 || n >= (int)sizeof(body)) {
+        n = (int)sizeof(body) - 1; /* truncated: send only what actually fits */
+    }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, body, n);
@@ -616,7 +619,7 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
 typedef struct {
     httpd_req_t *req;
     char name[IMAGE_NAME_MAX + 1];
-    int content_len;
+    size_t content_len;
 } upload_ctx_t;
 
 static void upload_finish(httpd_req_t *req)
@@ -647,36 +650,36 @@ static void upload_worker_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    ESP_LOGW(TAG, "image upload: %d bytes -> %s", ctx->content_len, path);
+    ESP_LOGW(TAG, "image upload: %zu bytes -> %s", ctx->content_len, path);
 
     char *chunk = malloc(4096);
     bool ok = chunk != NULL;
-    int received = 0;
+    size_t received = 0;
     int idle = 0;
     while (ok && received < ctx->content_len) {
-        const int want =
-            4096 < (ctx->content_len - received) ? 4096 : (ctx->content_len - received);
-        const int n = httpd_req_recv(req, chunk, (size_t)want);
+        const size_t want =
+            4096u < (ctx->content_len - received) ? 4096u : (ctx->content_len - received);
+        const int n = httpd_req_recv(req, chunk, want);
         if (n == HTTPD_SOCK_ERR_TIMEOUT) {
             if (++idle >= UPLOAD_MAX_IDLE) {
-                ESP_LOGE(TAG, "upload stalled after %d of %d bytes", received, ctx->content_len);
+                ESP_LOGE(TAG, "upload stalled after %zu of %zu bytes", received, ctx->content_len);
                 ok = false;
             }
             continue;
         }
         idle = 0;
         if (n <= 0) {
-            ESP_LOGE(TAG, "upload cut short after %d of %d bytes", received, ctx->content_len);
+            ESP_LOGE(TAG, "upload cut short after %zu of %zu bytes", received, ctx->content_len);
             ok = false;
             break;
         }
         if (fwrite(chunk, 1, (size_t)n, f) != (size_t)n) {
             /* Almost always the card filled up. */
-            ESP_LOGE(TAG, "write failed after %d bytes: %s", received, strerror(errno));
+            ESP_LOGE(TAG, "write failed after %zu bytes: %s", received, strerror(errno));
             ok = false;
             break;
         }
-        received += n;
+        received += (size_t)n;
     }
     free(chunk);
     fclose(f);
@@ -685,10 +688,10 @@ static void upload_worker_task(void *arg)
         remove(path); /* a half-written image is worse than none */
         send_json_error(req, "500 Internal Server Error", "upload failed; the card may be full");
     } else {
-        ESP_LOGW(TAG, "image '%s' written, %d bytes", ctx->name, received);
+        ESP_LOGW(TAG, "image '%s' written, %zu bytes", ctx->name, received);
         char body[128];
         int bn = snprintf(body, sizeof(body),
-                          "{\"status\":\"written\",\"name\":\"%s\",\"size\":%d}", ctx->name,
+                          "{\"status\":\"written\",\"name\":\"%s\",\"size\":%zu}", ctx->name,
                           received);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, body, bn);
@@ -1402,7 +1405,11 @@ static esp_err_t ws_input_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    switch (buf[0]) {
+    /* Dispatch on `op` (0 for a zero-length frame), never a raw read of buf[0]:
+     * the buffer is only initialised when pkt.len > 0, so switching on buf[0]
+     * would act on uninitialised stack for an empty frame - and the unguarded
+     * cases below (release-all, ping, takeover) would then fire on garbage. */
+    switch (op) {
     case WS_C2D_MOUSE_ABS:
         if (pkt.len >= 8) {
             /* Coordinates are 0..32767 on both axes, so the client never has to

@@ -340,9 +340,20 @@ static void force_idr(void)
     if (!s_param) {
         return;
     }
-    const uint8_t alt = (s_gop > 2u) ? (uint8_t)(s_gop - 1u) : (uint8_t)(s_gop + 1u);
-    if (esp_h264_enc_set_gop(&s_param->base, alt) == ESP_H264_ERR_OK) {
-        s_gop = alt;
+    /*
+     * Toggle between the wanted GOP length and one adjacent to it. Any change of
+     * the configured length starts a new GOP, so this forces an IDR while the
+     * effective length stays at (or one off) the intended value. Deriving the
+     * pair from wanted_gop() every time - rather than stepping s_gop itself - is
+     * deliberate: the old code did s_gop-- on each request, so after enough
+     * keyframe requests (every reconnecting viewer sends one) the GOP walked down
+     * to ~2 and nearly every frame became an IDR, wrecking the bitrate.
+     */
+    const uint8_t base = wanted_gop();
+    const uint8_t alt = (base > 2u) ? (uint8_t)(base - 1u) : (uint8_t)(base + 1u);
+    const uint8_t next = (s_gop == base) ? alt : base;
+    if (esp_h264_enc_set_gop(&s_param->base, next) == ESP_H264_ERR_OK) {
+        s_gop = next;
     }
 }
 
