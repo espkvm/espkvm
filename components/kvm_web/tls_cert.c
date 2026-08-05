@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -61,7 +62,9 @@
  *  so a firmware update quietly re-issues the CA instead of keeping an old one
  *  that no longer matches - no NVS wipe, no lost settings. */
 #define NVS_KEY_CA_VER "ca_ver"
-#define CA_VERSION 2
+/* v3: CA subject now carries a per-device MAC suffix (ca_hostname) so two devices
+ * on the default hostname no longer share an identical CA subject. */
+#define CA_VERSION 3
 /** Bumped to force every cached leaf to be re-issued (e.g. after a fix to how the
  *  leaf is built) WITHOUT regenerating the CA, so an imported CA stays valid. */
 #define LEAF_VERSION 2
@@ -103,6 +106,23 @@ static void hostname_now(char *out, size_t len)
         h = "espkvm";
     }
     snprintf(out, len, "%s", h);
+}
+
+/*
+ * The name baked into the CA subject: the hostname plus a short per-device suffix
+ * from the factory MAC. Two devices left on the default hostname ("espkvm") would
+ * otherwise generate CAs with an IDENTICAL subject CN; a browser or OS trust store
+ * keys trust by name, so one device's imported CA then rejects the other's leaf as
+ * ERR_CERT_AUTHORITY_INVALID. The suffix makes each device's CA distinct. Both the
+ * CA subject and the stored ca_host use this, so the leaf issuer keeps matching.
+ */
+static void ca_hostname(char *out, size_t len)
+{
+    char host[40];
+    hostname_now(host, sizeof(host));
+    uint8_t mac[6] = {0};
+    (void)esp_efuse_mac_get_default(mac); /* factory base MAC, stable per device */
+    snprintf(out, len, "%s-%02x%02x", host, mac[4], mac[5]);
 }
 
 /** Parse "a.b.c.d" into four bytes. False (and out untouched) if it is not one. */
@@ -332,9 +352,10 @@ static esp_err_t gen_ca(char **cert_out, char **key_out)
         goto done;
     }
 
-    /* Name the CA after the device so it is recognisable once imported. */
+    /* Name the CA after the device (hostname + MAC suffix) so it is recognisable
+     * once imported and unique across devices. */
     char host[40];
-    hostname_now(host, sizeof(host));
+    ca_hostname(host, sizeof(host));
     char ca_subject[96];
     snprintf(ca_subject, sizeof(ca_subject), CA_SUBJECT_FMT, host);
 
@@ -831,8 +852,9 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
         ca_cert = job.cert;
         ca_key = job.key;
         fresh_ca = true;
-        /* gen_ca names the CA after the current hostname, so that is its host. */
-        snprintf(ca_host, sizeof(ca_host), "%s", name);
+        /* gen_ca names the CA with ca_hostname() (hostname + MAC suffix); store the
+         * same value so the leaf's issuer keeps matching the CA subject exactly. */
+        ca_hostname(ca_host, sizeof(ca_host));
         if (nvs_store_ca(ca_cert, ca_key, ca_host) != ESP_OK) {
             ESP_LOGW(TAG, "CA not stored; it will be regenerated next boot");
         }
