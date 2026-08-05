@@ -7,6 +7,8 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.16.5] - 2026-08-05
+
 ### Fixed
 - At high resolution the free-running CSI capture DMA could overwrite the frame a
   codec was still reading and tear it: an encode takes longer than one capture
