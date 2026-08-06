@@ -25,17 +25,24 @@ __attribute__((unused)) static const char *TAG = "wifi";
 #include "esp_hosted.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+
+#include "lwip/sockets.h"
 
 #include "ethernet.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
 #include "kvm_storage.h"
 
+/* The rescue hotspot's own address (the default softAP gateway/DHCP server). */
+#define KVM_AP_IP_STR "192.168.4.1"
+
 static esp_netif_t *s_netif;
+static esp_netif_t *s_ap_netif; /* the rescue hotspot's netif in APSTA mode */
 static volatile bool s_up;
 static volatile int s_rssi;
 static kvm_net_mode_t s_mode = KVM_NET_ETHERNET;
@@ -81,6 +88,111 @@ int __wrap_esp_hosted_init(void)
     return __real_esp_hosted_init();
 }
 
+/*
+ * Captive-portal DNS: a minimal responder on UDP :53 that answers every A query
+ * with the hotspot's own address. When a phone or laptop joins the rescue AP its
+ * OS quietly fetches a "connectivity check" URL (captive.apple.com,
+ * connectivitycheck.gstatic.com, msftconnecttest.com, ...); pointing those names
+ * here makes the probe land on our port-80 server, which serves the portal page
+ * instead of the expected reply, so the OS pops its "sign in to network" sheet.
+ * Only started in AP / APSTA mode; harmless to leave running for the device's life.
+ */
+static void dns_hijack_task(void *arg)
+{
+    (void)arg;
+    const int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGW(TAG, "captive DNS: socket failed");
+        vTaskDelete(NULL);
+        return;
+    }
+    struct sockaddr_in bind_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(53),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+    if (bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
+        ESP_LOGW(TAG, "captive DNS: bind :53 failed");
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    uint32_t ap_ip;
+    inet_pton(AF_INET, KVM_AP_IP_STR, &ap_ip); /* network byte order, for the answer's RDATA */
+
+    static uint8_t buf[512];
+    for (;;) {
+        struct sockaddr_in from;
+        socklen_t fromlen = sizeof(from);
+        const int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fromlen);
+        /* Need the 12-byte header plus at least one question, and it must be a
+         * standard query (QR bit clear) with exactly one question. */
+        if (n < 12 + 5) {
+            continue;
+        }
+        if (buf[2] & 0x80) {
+            continue; /* already a response */
+        }
+        const uint16_t qdcount = (uint16_t)((buf[4] << 8) | buf[5]);
+        if (qdcount != 1) {
+            continue;
+        }
+        /* Walk past the QNAME (length-prefixed labels, zero terminator) to the
+         * 4-byte QTYPE/QCLASS, so the reply echoes the question verbatim. */
+        int p = 12;
+        while (p < n && buf[p] != 0) {
+            p += buf[p] + 1;
+            if (p >= n) {
+                break;
+            }
+        }
+        p += 1 + 4; /* zero label + QTYPE + QCLASS */
+        if (p > n) {
+            continue;
+        }
+        const int qlen = p; /* bytes of header+question to keep */
+
+        buf[2] = 0x81; /* QR=1, Opcode=0, AA=0, TC=0, RD=1 */
+        buf[3] = 0x80; /* RA=1, RCODE=0 */
+        buf[6] = 0x00;
+        buf[7] = 0x01; /* ANCOUNT = 1 */
+        buf[8] = buf[9] = buf[10] = buf[11] = 0x00; /* NS/AR counts */
+
+        uint8_t *a = buf + qlen;
+        if (qlen + 16 > (int)sizeof(buf)) {
+            continue;
+        }
+        *a++ = 0xC0;
+        *a++ = 0x0C;             /* name: pointer to the question at offset 12 */
+        *a++ = 0x00;
+        *a++ = 0x01;             /* TYPE = A */
+        *a++ = 0x00;
+        *a++ = 0x01;             /* CLASS = IN */
+        *a++ = 0x00;
+        *a++ = 0x00;
+        *a++ = 0x00;
+        *a++ = 0x1E;             /* TTL = 30s */
+        *a++ = 0x00;
+        *a++ = 0x04;             /* RDLENGTH = 4 */
+        memcpy(a, &ap_ip, 4);    /* RDATA = 192.168.4.1 */
+        a += 4;
+
+        (void)sendto(sock, buf, a - buf, 0, (struct sockaddr *)&from, fromlen);
+    }
+}
+
+static void start_captive_dns(void)
+{
+    static bool started;
+    if (started) {
+        return;
+    }
+    if (xTaskCreate(dns_hijack_task, "captive_dns", 3072, NULL, tskIDLE_PRIORITY + 3, NULL) == pdPASS) {
+        started = true;
+    }
+}
+
 void kvm_wifi_announce(void)
 {
     /* The radio hardware is present on this board; being connected is a runtime
@@ -105,21 +217,71 @@ static void derive_ap_ssid(char *out, size_t len)
     snprintf(out, len, "ESP-KVM-%02x%02x", mac[4], mac[5]);
 }
 
+/* Fill an access-point config (name ESP-KVM-<mac>, WPA2 if ap_pass is long
+ * enough else open). Shared by AP mode and the APSTA rescue hotspot. */
+static void fill_ap_config(wifi_config_t *ap)
+{
+    char apssid[33];
+    derive_ap_ssid(apssid, sizeof(apssid));
+    strlcpy((char *)ap->ap.ssid, apssid, sizeof(ap->ap.ssid));
+    ap->ap.ssid_len = (uint8_t)strlen(apssid);
+    ap->ap.channel = 1;
+    ap->ap.max_connection = 4;
+    const char *pass = kvm_setting_str("ap_pass");
+    if (pass && strlen(pass) >= 8) {
+        strlcpy((char *)ap->ap.password, pass, sizeof(ap->ap.password));
+        ap->ap.authmode = WIFI_AUTH_WPA2_PSK;
+    } else {
+        ap->ap.authmode = WIFI_AUTH_OPEN; /* a too-short password would be rejected */
+    }
+}
+
+/*
+ * Reconnect on a paced timer rather than immediately. Each connect attempt does a
+ * full-channel scan, and on a single-radio APSTA that pulls the rescue hotspot off
+ * its channel; hammering it every couple of seconds makes the hotspot unusable. A
+ * ~15 s gap keeps the radio on the AP channel the vast majority of the time while
+ * still rejoining the station network within seconds of it coming back.
+ */
+#define WIFI_RECONNECT_DELAY_US (15 * 1000 * 1000)
+static esp_timer_handle_t s_reconnect_timer;
+
+static void reconnect_cb(void *arg)
+{
+    (void)arg;
+    esp_wifi_connect();
+}
+
+static void schedule_reconnect(void)
+{
+    if (!s_reconnect_timer) {
+        const esp_timer_create_args_t a = {.callback = reconnect_cb, .name = "wifi_reconn"};
+        if (esp_timer_create(&a, &s_reconnect_timer) != ESP_OK) {
+            esp_wifi_connect(); /* fall back to an immediate retry if the timer fails */
+            return;
+        }
+    }
+    (void)esp_timer_stop(s_reconnect_timer);
+    (void)esp_timer_start_once(s_reconnect_timer, WIFI_RECONNECT_DELAY_US);
+}
+
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     (void)base;
     (void)data;
     if (id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (s_ssid[0]) {
+            esp_wifi_connect(); /* nothing to join without an SSID (rescue-hotspot-only) */
+        }
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         s_up = false;
         s_rssi = 0;
-        if ((s_retries++ % 20u) == 0u) {
+        if ((s_retries++ % 8u) == 0u) {
             wifi_event_sta_disconnected_t *e = (wifi_event_sta_disconnected_t *)data;
-            ESP_LOGW(TAG, "WiFi disconnected (reason %d), reconnecting", e ? e->reason : -1);
+            ESP_LOGW(TAG, "WiFi disconnected (reason %d), retrying in 15s", e ? e->reason : -1);
         }
-        esp_wifi_connect();
+        schedule_reconnect();
     }
 }
 
@@ -145,6 +307,10 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 
 static esp_err_t wifi_start_sta(void)
 {
+    /* net_fallback=hotspot: run a rescue softAP alongside the station (APSTA) so the
+     * device stays reachable if the configured network is out of range or down. */
+    const bool hotspot = (kvm_setting_int("net_fallback") == 1);
+
     s_netif = esp_netif_create_default_wifi_sta();
     if (!s_netif) {
         kvm_cap_report(KVM_CAP_WIFI, false, "WiFi station netif creation failed");
@@ -169,15 +335,41 @@ static esp_err_t wifi_start_sta(void)
      * accepts anything from an open network up. */
     wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
 
-    ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK, ESP_FAIL, TAG, "sta mode");
-    (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
-    kvm_cap_report(KVM_CAP_WIFI, true, NULL);
-    if (!s_ssid[0]) {
-        ESP_LOGW(TAG, "WiFi mode but no SSID set");
-        return ESP_OK; /* nothing to join, but the driver is up for a scan */
+    if (hotspot) {
+        /* Run the station and a rescue access point at the same time (APSTA): the
+         * station keeps trying to join the configured network - recovering on its
+         * own when the network returns, which is what a device you cannot reach
+         * physically needs - while the always-on hotspot lets you reach the device
+         * on-site to fix its settings. */
+        s_ap_netif = esp_netif_create_default_wifi_ap();
+        wifi_config_t ap = {0};
+        fill_ap_config(&ap);
+        ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK, ESP_FAIL, TAG, "apsta");
+        (void)esp_wifi_set_config(WIFI_IF_AP, &ap);
+        (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
+    } else {
+        ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK, ESP_FAIL, TAG, "sta mode");
+        (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
     }
-    ESP_RETURN_ON_FALSE(esp_wifi_start() == ESP_OK, ESP_FAIL, TAG, "sta start");
-    ESP_LOGI(TAG, "WiFi joining \"%s\"", s_ssid);
+    kvm_cap_report(KVM_CAP_WIFI, true, NULL);
+
+    /* Start the driver even with no SSID: a scan needs it, and the rescue hotspot
+     * (if enabled) must come up regardless so an unconfigured device stays
+     * reachable. The station associates from the STA_START event, only if an SSID
+     * is set. */
+    ESP_RETURN_ON_FALSE(esp_wifi_start() == ESP_OK, ESP_FAIL, TAG, "wifi start");
+    if (hotspot) {
+        char apssid[33];
+        derive_ap_ssid(apssid, sizeof(apssid));
+        kvm_net_advertise(wifi_hostname()); /* reachable over the hotspot at 192.168.4.1 */
+        start_captive_dns();                /* pop the OS "sign in" sheet on join */
+        ESP_LOGI(TAG, "WiFi station \"%s\" + rescue hotspot \"%s\" (http://192.168.4.1/)",
+                 s_ssid[0] ? s_ssid : "(no SSID)", apssid);
+    } else if (s_ssid[0]) {
+        ESP_LOGI(TAG, "WiFi joining \"%s\"", s_ssid);
+    } else {
+        ESP_LOGW(TAG, "WiFi mode but no SSID set");
+    }
     return ESP_OK;
 }
 
@@ -188,20 +380,9 @@ static esp_err_t wifi_start_ap(void)
         kvm_cap_report(KVM_CAP_WIFI, false, "WiFi AP netif creation failed");
         return ESP_FAIL;
     }
-    derive_ap_ssid(s_ssid, sizeof(s_ssid));
-
     wifi_config_t ap = {0};
-    strlcpy((char *)ap.ap.ssid, s_ssid, sizeof(ap.ap.ssid));
-    ap.ap.ssid_len = (uint8_t)strlen(s_ssid);
-    ap.ap.channel = 1;
-    ap.ap.max_connection = 4;
-    const char *pass = kvm_setting_str("ap_pass");
-    if (pass && strlen(pass) >= 8) {
-        strlcpy((char *)ap.ap.password, pass, sizeof(ap.ap.password));
-        ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    } else {
-        ap.ap.authmode = WIFI_AUTH_OPEN; /* a too-short password would be rejected */
-    }
+    fill_ap_config(&ap);
+    strlcpy(s_ssid, (const char *)ap.ap.ssid, sizeof(s_ssid)); /* the AP name, for status */
 
     ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_AP) == ESP_OK, ESP_FAIL, TAG, "ap mode");
     (void)esp_wifi_set_config(WIFI_IF_AP, &ap);
@@ -210,6 +391,7 @@ static esp_err_t wifi_start_ap(void)
     kvm_cap_report(KVM_CAP_WIFI, true, NULL);
     /* The default AP netif runs a DHCP server; the device is at 192.168.4.1. */
     kvm_net_advertise(wifi_hostname());
+    start_captive_dns(); /* pop the OS "sign in" sheet on join */
     ESP_LOGI(TAG, "WiFi hotspot \"%s\" up (%s) - connect and open http://192.168.4.1/", s_ssid,
              ap.ap.authmode == WIFI_AUTH_OPEN ? "open" : "WPA2");
     return ESP_OK;

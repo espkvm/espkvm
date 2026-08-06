@@ -19,6 +19,7 @@
 #include "kvm_board.h"
 #include "kvm_settings.h"
 #include "kvm_tls.h"
+#include "wifi.h" /* kvm_net_mode_t: AP mode serves the console plain */
 
 #define TAG "auth"
 
@@ -587,8 +588,11 @@ static void set_session_cookie(httpd_req_t *req, char *buf, size_t len, const ch
 {
     /* Secure only under TLS: a cookie marked Secure is simply not sent back
      * over plain HTTP, which would lock out a device deliberately run without
-     * it. HttpOnly and SameSite apply either way. */
-    const bool tls = kvm_setting_bool("sec_https");
+     * it. HttpOnly and SameSite apply either way. AP (setup hotspot) mode serves
+     * the console plain even when sec_https is on (the captive browser can't clear
+     * the self-signed cert), so it must not mark the cookie Secure either. */
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    const bool tls = kvm_setting_bool("sec_https") && !ap_mode;
     snprintf(buf, len, COOKIE_NAME "=%s; Path=/; HttpOnly; SameSite=Strict%s; %s",
              clear ? "" : token, tls ? "; Secure" : "",
              clear ? "Max-Age=0" : "Max-Age=43200");

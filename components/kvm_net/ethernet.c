@@ -17,6 +17,7 @@
 #include "sdkconfig.h"
 
 #include "kvm_settings.h"
+#include "wifi.h" /* kvm_net_mode_t (net_mode enum) */
 
 static const char *TAG = "net";
 
@@ -127,7 +128,11 @@ void kvm_net_advertise(const char *hostname)
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS instance: %s", esp_err_to_name(mdns_err));
     }
-    const bool tls = kvm_setting_bool("sec_https");
+    /* AP (setup hotspot) mode serves the console in the clear regardless of the
+     * TLS setting (the captive-portal browser can't clear the self-signed cert),
+     * so advertise the port that actually answers there. */
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    const bool tls = kvm_setting_bool("sec_https") && !ap_mode;
     mdns_txt_item_t http_txt[] = {
         {"path", "/"},
     };

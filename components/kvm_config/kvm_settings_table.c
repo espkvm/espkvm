@@ -24,6 +24,7 @@ static const char *const s_side_choices[] = {"left", "right"};
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap"};
+static const char *const s_fallback_choices[] = {"keep_trying", "hotspot"};
 
 /* clang-format off */
 static const kvm_setting_t s_settings[] = {
@@ -300,11 +301,24 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ap_pass", .section = "network", .type = KVM_VT_STR,
         .title = "Hotspot password",
-        .help = "Password for the device's own hotspot in \"ap\" mode. At least 8 "
-                "characters, or blank for an open hotspot. The network name is "
-                "ESP-KVM-xxxx (the device's MAC). Stored write-only.",
+        .help = "Password for the device's own hotspot (\"ap\" mode, or the rescue "
+                "hotspot below). At least 8 characters, or blank for an open "
+                "hotspot. The network name is ESP-KVM-xxxx (the device's MAC). "
+                "Stored write-only.",
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
+    },
+    {
+        .key = "net_fallback", .section = "network", .type = KVM_VT_ENUM,
+        .title = "If WiFi can't connect",
+        .help = "keep_trying: keep retrying the network - it reconnects on its own "
+                "when the network comes back (best for a device you cannot reach "
+                "physically). hotspot: ALSO run a rescue hotspot (ESP-KVM-xxxx) the "
+                "whole time WiFi is trying, so you can always reach the device "
+                "on-site to fix its settings - set a Hotspot password first. Only "
+                "applies in WiFi (station) mode.",
+        .min = 0, .max = 1, .def = 0, .choices = s_fallback_choices,
+        .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
 
     /* ---- vpn / wireguard ------------------------------------------------- */

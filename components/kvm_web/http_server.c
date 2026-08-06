@@ -29,6 +29,8 @@
 
 #include "esp_https_server.h"
 
+#include "lwip/sockets.h"
+
 #include "cJSON.h"
 
 #include "capture.h"
@@ -2131,6 +2133,95 @@ static esp_err_t stream_get(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* True when this request arrived on the rescue hotspot's interface: the softAP is
+ * always the device's own 192.168.4.1, so a connection whose local address is that
+ * came in over the AP, not the station/Ethernet link. Used to tell captive-portal
+ * clients apart from ordinary ones on the shared port-80 server. */
+static bool req_on_ap_iface(httpd_req_t *req)
+{
+    const int fd = httpd_req_to_sockfd(req);
+    if (fd < 0) {
+        return false;
+    }
+    struct sockaddr_storage ss;
+    socklen_t sl = sizeof(ss);
+    if (getsockname(fd, (struct sockaddr *)&ss, &sl) != 0) {
+        return false;
+    }
+    char ip[INET6_ADDRSTRLEN] = {0};
+    if (ss.ss_family == AF_INET) {
+        inet_ntop(AF_INET, &((struct sockaddr_in *)&ss)->sin_addr, ip, sizeof(ip));
+    } else {
+        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&ss)->sin6_addr, ip, sizeof(ip));
+    }
+    /* Matches both "192.168.4.1" and the IPv4-mapped "::ffff:192.168.4.1". The
+     * device's AP address is always .1, so this never collides with a client. */
+    return strstr(ip, "192.168.4.1") != NULL;
+}
+
+/* The hotel-style landing page the OS "sign in to network" sheet shows when a
+ * device joins the hotspot. Served in the clear (the captive mini-browser chokes
+ * on the self-signed TLS cert). Its button opens the console: in AP mode the
+ * console is served plain over this same origin, so the button is a same-origin
+ * link that works right inside the captive sheet; in a TLS setup it points at the
+ * https console, which the full browser handles. */
+static esp_err_t captive_landing(httpd_req_t *req)
+{
+    const char *hn = kvm_setting_str("net_hostname");
+    if (!hn || !hn[0]) {
+        hn = CONFIG_KVM_MDNS_HOSTNAME;
+    }
+    /* In AP mode the console is plain HTTP on this port (below); otherwise it is
+     * only reachable over TLS and the button must use https + the cert-matching
+     * hostname. */
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    const bool plain = ap_mode || !kvm_setting_bool("sec_https");
+    char console_url[64];
+    if (plain) {
+        /* Same origin. The captive sheet's address is a hijacked probe host, but
+         * every name resolves to us, so "/" lands on the console here. */
+        snprintf(console_url, sizeof(console_url), "/");
+    } else {
+        snprintf(console_url, sizeof(console_url), "https://%s.local/", hn);
+    }
+    char body[1000];
+    int n = snprintf(
+        body, sizeof(body),
+        "<!doctype html><meta charset=utf-8>"
+        "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+        "<title>ESP-KVM</title>"
+        "<style>body{margin:0;min-height:100vh;display:flex;align-items:center;"
+        "justify-content:center;background:#0b1020;color:#e8ecf5;"
+        "font:16px/1.5 system-ui,sans-serif}.c{text-align:center;padding:24px}"
+        "h1{font-size:22px;margin:.2em 0}p{color:#9aa4bf;margin:.4em 0}"
+        "a.b{display:inline-block;margin-top:18px;padding:12px 22px;border-radius:10px;"
+        "background:#3b82f6;color:#fff;text-decoration:none;font-weight:600}"
+        "a.s{display:block;margin-top:14px;color:#6b7699;font-size:13px}</style>"
+        "<div class=c><div style=font-size:40px>&#128421;</div>"
+        "<h1>ESP-KVM</h1><p>Setup hotspot active.</p>"
+        "<a class=b href=\"%s\">Open console &rarr;</a>"
+        "<a class=s href=\"/cert.pem\">Download CA certificate</a></div>",
+        console_url);
+    if (n <= 0 || n >= (int)sizeof(body)) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal");
+    }
+    /* 200 with unexpected content is what makes iOS/Android/Windows treat the
+     * network as captive and pop the sheet showing this page. */
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, body, n);
+}
+
+/* 404 handler for AP mode: the console is served plain on this port, so any path
+ * the OS connectivity check probes (which does not match a real route) gets the
+ * captive landing, popping the "sign in" sheet. Real routes (/, /api, ...) are
+ * registered and never reach here. */
+static esp_err_t captive_404(httpd_req_t *req, httpd_err_code_t err)
+{
+    (void)err;
+    return captive_landing(req);
+}
+
 /*
  * Everything that arrives on port 80 while TLS is on is answered with a
  * redirect and nothing else. No URI handler is registered on that server, so
@@ -2140,6 +2231,11 @@ static esp_err_t stream_get(httpd_req_t *req)
 static esp_err_t redirect_to_https(httpd_req_t *req, httpd_err_code_t err)
 {
     (void)err;
+    /* On the rescue hotspot, don't bounce to HTTPS (the captive sheet can't clear
+     * the self-signed cert warning) - show the landing page instead. */
+    if (req_on_ap_iface(req)) {
+        return captive_landing(req);
+    }
     char host[80] = {0};
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK || !host[0]) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no Host header");
@@ -2168,7 +2264,12 @@ static httpd_handle_t start_redirect_server(void)
     cfg.server_port = 80;
     cfg.ctrl_port = 32769; /* the TLS server owns the default */
     cfg.max_uri_handlers = 2;
-    cfg.max_open_sockets = 3;
+    /* This server also serves the captive-portal landing page, and a phone doing
+     * captive detection opens several short connections at once; too few sockets
+     * makes accept() fail, which makes the OS keep retrying. Purging reclaims the
+     * short-lived ones. (Budget: 7 TLS + 6 here + listeners stays within
+     * LWIP_MAX_ACTIVE_TCP=16.) */
+    cfg.max_open_sockets = 6;
     cfg.lru_purge_enable = true;
     cfg.stack_size = 4096;
     cfg.max_req_hdr_len = 1024;
@@ -2243,13 +2344,22 @@ httpd_handle_t http_server_start(void)
 
     httpd_handle_t h = NULL;
     /*
+     * In AP (setup hotspot) mode the console is served in the clear, even if TLS
+     * is otherwise enabled: a phone's captive-portal browser cannot get past the
+     * self-signed certificate, so a plain console on 192.168.4.1 is the only thing
+     * that actually works there - the same tradeoff every router's setup page
+     * makes. H.264 (which needs a secure context) is unavailable over the hotspot;
+     * MJPEG and all of settings still work, which is what a rescue/setup link is for.
+     */
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    /*
      * TLS is the default because this device is a way into another machine, and
      * because the console needs a secure page for WebCodecs - without it the
      * H.264 decoder does not exist in any browser. It can be switched off for a
      * trusted network, where the memory a TLS session costs is better spent on
      * frames.
      */
-    if (kvm_setting_bool("sec_https")) {
+    if (kvm_setting_bool("sec_https") && !ap_mode) {
         /*
          * Try the operator's own certificate first (if one is installed); if the
          * TLS stack refuses it, fall back to the self-signed identity rather than
@@ -2407,5 +2517,12 @@ httpd_handle_t http_server_start(void)
         .ws_pre_handshake_cb = ws_pre_handshake,
     };
     httpd_register_uri_handler(h, &u_ws);
+
+    /* AP mode: turn unmatched requests (the OS connectivity probe) into the
+     * captive landing so the "sign in to network" sheet pops on join. The console
+     * itself is on registered routes and is untouched. */
+    if (ap_mode) {
+        httpd_register_err_handler(h, HTTPD_404_NOT_FOUND, captive_404);
+    }
     return h;
 }
