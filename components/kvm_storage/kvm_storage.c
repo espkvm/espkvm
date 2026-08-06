@@ -548,3 +548,34 @@ esp_err_t kvm_storage_init(void)
              (unsigned long long)(st.free_bytes / (1024 * 1024)));
     return ESP_OK;
 }
+
+esp_err_t kvm_storage_bus_suspend(bool *was_mounted)
+{
+    if (was_mounted) {
+        *was_mounted = false;
+    }
+    if (!s_card) {
+        return ESP_OK; /* nothing mounted - the SD host controller is already free */
+    }
+    /* Pull any image the target is reading before the filesystem goes away. */
+    kvm_storage_media_eject();
+    esp_err_t err = esp_vfs_fat_sdcard_unmount(MOUNT_POINT, s_card);
+    s_card = NULL;
+    if (was_mounted) {
+        *was_mounted = true;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "bus suspend unmount: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "microSD unmounted - SD host controller handed over");
+    }
+    return err;
+}
+
+esp_err_t kvm_storage_bus_resume(void)
+{
+    /* Re-mount from scratch: kvm_storage_init re-claims the slot and mounts,
+     * retrying the intermittent slot the same way it does at boot. */
+    ESP_LOGI(TAG, "reacquiring the SD host controller for the microSD");
+    return kvm_storage_init();
+}

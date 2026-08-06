@@ -251,18 +251,26 @@ void app_main(void)
      * is ready before the web server can accept a power command. */
     ESP_ERROR_CHECK(kvm_atx_init());
 
+    /* The active link, read early because it decides whether the microSD may mount
+     * (below) - the WiFi co-processor and the card share one SD host controller. */
+    kvm_wifi_announce(); /* show the Connection switcher/settings in every mode */
+    const int32_t net_mode = kvm_setting_int("net_mode");
+
     /* The microSD card, if any. A KVM without one is still a KVM, so a missing
      * or unreadable card never holds up start-up.
      *
      * On a board with a WiFi co-processor the P4's single SD host controller is
-     * shared between the C6's SDIO link and the microSD slot. esp-hosted grabs it
-     * at boot; in Ethernet mode WiFi is unused, so release it here so the card can
-     * mount. In a WiFi mode the link keeps it and the microSD is unavailable. */
-    if (kvm_setting_int("net_mode") == KVM_NET_ETHERNET) {
-        kvm_wifi_release_sdio();
+     * shared between the C6's SDIO link and the microSD slot, so only one may hold
+     * it. In a WiFi mode the C6 needs it - mounting the card here would claim the
+     * controller and the co-processor's SDIO init would then assert - so skip the
+     * microSD entirely. Ethernet mode mounts it normally. (esp-hosted's own eager
+     * constructor init is blocked so it never races for the bus; see wifi.c.) */
+    if (net_mode == KVM_NET_ETHERNET) {
+        ESP_LOGI(TAG, "boot: storage");
+        ESP_ERROR_CHECK(kvm_storage_init());
+    } else {
+        ESP_LOGI(TAG, "boot: storage skipped (WiFi mode; the co-processor holds the SD bus)");
     }
-    ESP_LOGI(TAG, "boot: storage");
-    ESP_ERROR_CHECK(kvm_storage_init());
 
     /*
      * Before the network: the button shares its pin with the Ethernet
@@ -287,8 +295,6 @@ void app_main(void)
      * actually chosen. If WiFi cannot be reached, the reset button clears the
      * setting back to Ethernet.
      */
-    kvm_wifi_announce(); /* show the Connection switcher/settings in every mode */
-    const int32_t net_mode = kvm_setting_int("net_mode");
     if (net_mode == KVM_NET_ETHERNET) {
         ESP_LOGI(TAG, "boot: ethernet");
         ESP_ERROR_CHECK(ethernet_init());

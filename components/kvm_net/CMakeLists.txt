@@ -15,6 +15,7 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_REQUIRES
         kvm_config
+        kvm_storage
         esp_eth
         esp_netif
         esp_event
@@ -25,3 +26,11 @@ idf_component_register(
         lwip
         ${wifi_reqs}
 )
+
+if(CONFIG_KVM_WIFI)
+    # Block esp-hosted's constructor from eagerly bringing the C6 SDIO transport up
+    # at boot (it claims the P4's single SD host controller, which the microSD also
+    # needs, and cannot be safely torn down). wifi.c provides __wrap_esp_hosted_init
+    # and brings the co-processor up itself only in a WiFi mode. See wifi.c.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_hosted_init")
+endif()

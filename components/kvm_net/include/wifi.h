@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "esp_err.h"
 
@@ -35,15 +36,6 @@ esp_err_t kvm_wifi_init(void);
  */
 void kvm_wifi_announce(void);
 
-/**
- * Release the WiFi co-processor's SDIO transport, which esp-hosted claims at boot
- * (a constructor) for the C6 link. On the ESP32-P4 there is a single SD host
- * controller shared by the C6's SDIO and the microSD slot, so in Ethernet mode -
- * where WiFi is unused - this must be called before the microSD mounts to hand
- * the controller back to the card. A no-op stub without a C6, and harmless when
- * the transport is not up. Do NOT call it in a WiFi mode: the link needs it.
- */
-void kvm_wifi_release_sdio(void);
 
 /** Live WiFi state for the console's network indicator. */
 typedef struct {
@@ -56,3 +48,18 @@ typedef struct {
 
 /** Fill @p out with the current WiFi state. Safe to call at any time. */
 void kvm_wifi_status(kvm_wifi_status_t *out);
+
+/**
+ * Start an asynchronous scan for nearby WiFi networks. Non-blocking: it runs on
+ * a worker that, in Ethernet mode, briefly borrows the shared SD bus to bring
+ * the co-processor up for the scan (the microSD blips out for a few seconds).
+ * Returns ESP_ERR_INVALID_STATE if a scan is already running. Poll
+ * kvm_wifi_scan_json() for the result. A no-op without a co-processor.
+ */
+esp_err_t kvm_wifi_scan_start(void);
+
+/**
+ * Write the scan status and results as JSON into @p buf:
+ * {"status":"idle|scanning|done|error","aps":[{"ssid":"..","rssi":-50,"auth":3},..]}
+ */
+void kvm_wifi_scan_json(char *buf, size_t len);

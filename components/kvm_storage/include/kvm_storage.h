@@ -41,6 +41,18 @@ typedef struct {
  */
 esp_err_t kvm_storage_init(void);
 
+/**
+ * Hand the SD host controller back so something else can use the shared SDMMC
+ * bus (on the ESP32-P4 the microSD and a WiFi co-processor's SDIO share one
+ * controller). Ejects any exposed image and unmounts the card. @p was_mounted,
+ * if not NULL, is set to whether a card was actually mounted, so the caller
+ * knows whether to call kvm_storage_bus_resume() afterwards.
+ */
+esp_err_t kvm_storage_bus_suspend(bool *was_mounted);
+
+/** Re-mount the microSD after a kvm_storage_bus_suspend(). */
+esp_err_t kvm_storage_bus_resume(void);
+
 void kvm_storage_status(kvm_storage_status_t *out);
 
 /** Where the card is mounted, e.g. "/sd". Valid whether or not one is present. */

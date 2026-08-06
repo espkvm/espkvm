@@ -262,6 +262,34 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     return httpd_resp_send(req, body, n);
 }
 
+/* Start a WiFi scan (async - it can take several seconds and borrow the SD bus,
+ * so it runs on a worker and the client polls the GET below). */
+static esp_err_t api_wifi_scan_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    esp_err_t err = kvm_wifi_scan_start();
+    /* ESP_ERR_INVALID_STATE just means one is already running - report scanning. */
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict", "WiFi scan unavailable on this device");
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"scanning\"}");
+}
+
+/* Poll the WiFi scan status and results. */
+static esp_err_t api_wifi_scan_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    char body[1600]; /* up to 24 APs, ~60 bytes each */
+    kvm_wifi_scan_json(body, sizeof(body));
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, body);
+}
+
 /* The current host's USB enumeration trace, for target-OS fingerprinting. */
 static esp_err_t api_system_usbprobe_get(httpd_req_t *req)
 {
@@ -2203,7 +2231,7 @@ httpd_handle_t http_server_start(void)
      * ~33 are registered now (REST + auth + the two WebSockets + the agent
      * endpoints); 40 leaves room.
      */
-    cfg.max_uri_handlers = 40;
+    cfg.max_uri_handlers = 42;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -2327,6 +2355,8 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/video/status", .method = HTTP_GET, .handler = api_video_status_get},
         {.uri = "/api/v1/system/info", .method = HTTP_GET, .handler = api_system_info_get},
         {.uri = "/api/v1/system/usbprobe", .method = HTTP_GET, .handler = api_system_usbprobe_get},
+        {.uri = "/api/v1/wifi/scan", .method = HTTP_POST, .handler = api_wifi_scan_post},
+        {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = api_wifi_scan_get},
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},

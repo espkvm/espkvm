@@ -9,6 +9,8 @@
  */
 #include "wifi.h"
 
+#include <stdio.h>
+
 #include "esp_log.h"
 #include "sdkconfig.h"
 
@@ -24,10 +26,14 @@ __attribute__((unused)) static const char *TAG = "wifi";
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "ethernet.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
+#include "kvm_storage.h"
 
 static esp_netif_t *s_netif;
 static volatile bool s_up;
@@ -35,6 +41,45 @@ static volatile int s_rssi;
 static kvm_net_mode_t s_mode = KVM_NET_ETHERNET;
 static char s_ssid[33];
 static unsigned s_retries;
+/* True once esp_wifi is up (a WiFi mode is running), so a scan can reuse it
+ * instead of borrowing the SD bus to bring the co-processor up. */
+static bool s_wifi_running;
+
+/* ---- network scan (async, so the single web-server task never blocks) ---- */
+typedef enum { SCAN_IDLE, SCAN_RUNNING, SCAN_DONE, SCAN_ERROR } scan_state_t;
+#define SCAN_MAX_APS 24
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    uint8_t auth; /* wifi_auth_mode_t: 0 = open */
+} scan_ap_t;
+static scan_state_t s_scan_state = SCAN_IDLE;
+static scan_ap_t s_scan_aps[SCAN_MAX_APS];
+static int s_scan_count;
+static SemaphoreHandle_t s_scan_mu;
+
+/*
+ * esp-hosted auto-initialises its SDIO transport from a C constructor that runs
+ * before app_main, which immediately claims the P4's single SD host controller.
+ * On this board that controller is shared with the microSD, so in Ethernet mode
+ * (where WiFi is unused) the eager init makes the card unmountable - and it
+ * cannot be undone afterwards, because esp_hosted_deinit() races the co-processor's
+ * async bring-up and asserts, boot-looping the device.
+ *
+ * So block the constructor's init with a linker wrap (-Wl,--wrap=esp_hosted_init,
+ * set in CMakeLists) and bring the co-processor up ourselves, once, only when a
+ * WiFi mode actually needs it. In Ethernet mode it never starts and the microSD
+ * has the bus to itself.
+ */
+int __real_esp_hosted_init(void);
+static bool s_hosted_allowed;
+int __wrap_esp_hosted_init(void)
+{
+    if (!s_hosted_allowed) {
+        return 0; /* ESP_OK: swallow the constructor's eager init */
+    }
+    return __real_esp_hosted_init();
+}
 
 void kvm_wifi_announce(void)
 {
@@ -43,21 +88,6 @@ void kvm_wifi_announce(void)
      * Connection switcher and WiFi settings in every mode. The C6 itself is only
      * initialised when a WiFi mode is chosen (kvm_wifi_init). */
     kvm_cap_report(KVM_CAP_WIFI, true, NULL);
-}
-
-void kvm_wifi_release_sdio(void)
-{
-    /* esp-hosted's constructor ran before app_main and claimed the P4's single SD
-     * host controller for the C6's SDIO link. In Ethernet mode the C6 is unused,
-     * so hand the controller back (esp_hosted_deinit tears the SDIO transport down
-     * and calls sdmmc_host_deinit) before the microSD tries to claim it. */
-    esp_err_t err = esp_hosted_deinit();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "esp_hosted_deinit: %s (microSD may be unavailable)",
-                 esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "released the C6 SDIO transport for the microSD (Ethernet mode)");
-    }
 }
 
 static const char *wifi_hostname(void)
@@ -86,7 +116,8 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         s_up = false;
         s_rssi = 0;
         if ((s_retries++ % 20u) == 0u) {
-            ESP_LOGW(TAG, "WiFi disconnected, reconnecting");
+            wifi_event_sta_disconnected_t *e = (wifi_event_sta_disconnected_t *)data;
+            ESP_LOGW(TAG, "WiFi disconnected (reason %d), reconnecting", e ? e->reason : -1);
         }
         esp_wifi_connect();
     }
@@ -189,6 +220,16 @@ esp_err_t kvm_wifi_init(void)
     const int32_t m = kvm_setting_int("net_mode");
     s_mode = (m == KVM_NET_WIFI_AP) ? KVM_NET_WIFI_AP : KVM_NET_WIFI_STA;
 
+    /* The co-processor's constructor init was blocked so Ethernet mode could keep
+     * the SD bus; bring it up now, which is the point a WiFi mode needs it. */
+    s_hosted_allowed = true;
+    int herr = esp_hosted_init();
+    if (herr != 0) {
+        ESP_LOGW(TAG, "esp_hosted_init failed (%d) - is the C6 present?", herr);
+        kvm_cap_report(KVM_CAP_WIFI, false, "WiFi co-processor did not start");
+        return ESP_OK;
+    }
+
     /* esp_netif and the default event loop are not up yet in WiFi mode (Ethernet,
      * which normally creates them, is not started); create them here. Harmless if
      * already present. */
@@ -207,6 +248,7 @@ esp_err_t kvm_wifi_init(void)
                        esp_err_to_name(err));
         return ESP_OK;
     }
+    s_wifi_running = true; /* esp_wifi is up; a scan can reuse it, no bus borrow */
 
     err = (s_mode == KVM_NET_WIFI_AP) ? wifi_start_ap() : wifi_start_sta();
     if (err != ESP_OK) {
@@ -233,6 +275,128 @@ void kvm_wifi_status(kvm_wifi_status_t *out)
     }
 }
 
+static esp_err_t scan_collect(void)
+{
+    wifi_scan_config_t cfg = {0};
+    esp_err_t err = esp_wifi_scan_start(&cfg, true); /* blocking, on the worker task */
+    if (err != ESP_OK) {
+        return err;
+    }
+    uint16_t n = SCAN_MAX_APS;
+    static wifi_ap_record_t recs[SCAN_MAX_APS]; /* static: too big for the task stack */
+    err = esp_wifi_scan_get_ap_records(&n, recs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    xSemaphoreTake(s_scan_mu, portMAX_DELAY);
+    s_scan_count = (n > SCAN_MAX_APS) ? SCAN_MAX_APS : n;
+    for (int i = 0; i < s_scan_count; i++) {
+        strlcpy(s_scan_aps[i].ssid, (const char *)recs[i].ssid, sizeof(s_scan_aps[i].ssid));
+        s_scan_aps[i].rssi = recs[i].rssi;
+        s_scan_aps[i].auth = (uint8_t)recs[i].authmode;
+    }
+    xSemaphoreGive(s_scan_mu);
+    return ESP_OK;
+}
+
+static void wifi_scan_task(void *arg)
+{
+    (void)arg;
+    esp_err_t err;
+    if (s_wifi_running && s_mode == KVM_NET_WIFI_STA) {
+        /* A WiFi station is already up - scan on it (harmless if it is
+         * associated; the scan briefly hops channels). No co-processor bring-up
+         * and no teardown, so nothing to race. */
+        (void)esp_wifi_start();
+        err = scan_collect();
+    } else {
+        /*
+         * Not scannable here. In Ethernet mode the co-processor is down and the
+         * microSD holds the shared SD bus; borrowing it would mean bringing the C6
+         * up and tearing it back down, but esp_hosted_deinit() cannot be called
+         * safely (it races the async transport init and asserts). In AP mode the
+         * radio is a hotspot, not a scanner. Either way, switch to WiFi (station)
+         * to scan.
+         */
+        err = ESP_ERR_NOT_SUPPORTED;
+    }
+    xSemaphoreTake(s_scan_mu, portMAX_DELAY);
+    s_scan_state = (err == ESP_OK) ? SCAN_DONE : SCAN_ERROR;
+    const int found = s_scan_count;
+    xSemaphoreGive(s_scan_mu);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "WiFi scan finished: %d networks", found);
+    }
+    vTaskDelete(NULL);
+}
+
+esp_err_t kvm_wifi_scan_start(void)
+{
+    if (!s_scan_mu) {
+        s_scan_mu = xSemaphoreCreateMutex();
+        if (!s_scan_mu) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    xSemaphoreTake(s_scan_mu, portMAX_DELAY);
+    if (s_scan_state == SCAN_RUNNING) {
+        xSemaphoreGive(s_scan_mu);
+        return ESP_ERR_INVALID_STATE; /* one at a time */
+    }
+    s_scan_state = SCAN_RUNNING;
+    s_scan_count = 0;
+    xSemaphoreGive(s_scan_mu);
+
+    /* A worker, not this caller: the scan takes several seconds (a bus borrow and
+     * a co-processor bring-up), and the web server runs on one task. */
+    if (xTaskCreate(wifi_scan_task, "wifiscan", 6144, NULL, 5, NULL) != pdPASS) {
+        s_scan_state = SCAN_ERROR;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+void kvm_wifi_scan_json(char *buf, size_t len)
+{
+    if (!buf || len < 32) {
+        return;
+    }
+    const char *st = "idle";
+    if (s_scan_mu) {
+        xSemaphoreTake(s_scan_mu, portMAX_DELAY);
+    }
+    switch (s_scan_state) {
+    case SCAN_RUNNING: st = "scanning"; break;
+    case SCAN_DONE: st = "done"; break;
+    case SCAN_ERROR: st = "error"; break;
+    default: st = "idle"; break;
+    }
+    int o = snprintf(buf, len, "{\"status\":\"%s\",\"aps\":[", st);
+    for (int i = 0; i < s_scan_count && o > 0 && o < (int)len - 80; i++) {
+        /* Escape the two characters that would break the JSON string; SSIDs are
+         * otherwise printable. */
+        char esc[65];
+        int e = 0;
+        for (const char *p = s_scan_aps[i].ssid; *p && e < (int)sizeof(esc) - 2; p++) {
+            if (*p == '"' || *p == '\\') {
+                esc[e++] = '\\';
+            }
+            esc[e++] = *p;
+        }
+        esc[e] = '\0';
+        o += snprintf(buf + o, len - o, "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%u}", i ? "," : "",
+                      esc, s_scan_aps[i].rssi, s_scan_aps[i].auth);
+    }
+    if (o > 0 && o < (int)len - 3) {
+        snprintf(buf + o, len - o, "]}");
+    }
+    if (s_scan_mu) {
+        xSemaphoreGive(s_scan_mu);
+    }
+}
+
 #else /* !CONFIG_KVM_WIFI */
 
 esp_err_t kvm_wifi_init(void)
@@ -244,8 +408,16 @@ void kvm_wifi_announce(void)
 {
 }
 
-void kvm_wifi_release_sdio(void)
+esp_err_t kvm_wifi_scan_start(void)
 {
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+void kvm_wifi_scan_json(char *buf, size_t len)
+{
+    if (buf && len >= 28) {
+        snprintf(buf, len, "{\"status\":\"idle\",\"aps\":[]}");
+    }
 }
 
 void kvm_wifi_status(kvm_wifi_status_t *out)
