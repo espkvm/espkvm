@@ -23,13 +23,12 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - Thermal protection
 - Over-the-network updates with automatic rollback
 - A second board build target (Espressif ESP32-P4 Function EV Board)
+- WiFi on boards with an ESP32-C6 (station or the device's own access point) - one link at a time, with a rescue hotspot and captive portal so a device whose network is out of range is still set up from a phone
+- Faster H.264 on rev 3.x silicon - native YUV422 capture fed straight to the encoder; 1080p went from ~15 to ~22 fps
 
 ## Planned
 
 - **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser
-- **WiFi** on boards that carry a wireless co-processor (e.g. the ESP32-C6)
-- **Faster H.264 on rev 3.x silicon** - feed the encoder directly, without the
-  colour-conversion detour that limits frame rate on the older revision
 - **More supported boards**
 
 ## Under consideration

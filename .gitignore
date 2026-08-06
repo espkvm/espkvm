@@ -96,3 +96,7 @@ Desktop.ini
 # CI writes this from the tag so the firmware reports its version;
 # locally the version comes from git describe.
 version.txt
+
+# Device CA certificates downloaded from a running unit (e.g. via /cert.pem) -
+# a per-device trust anchor, never part of the source tree.
+*-ca.pem

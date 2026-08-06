@@ -33,8 +33,11 @@ idf.py -B build.funcev -p /dev/ttyACM0 flash
 
 Config deltas (in `boards/funcev_p4.defaults`): chip target rev >=3.0
 (`REV_MIN_300`, which unlocks the esp_h264 RGB-direct path), 16 MB flash with
-`partitions_funcev.csv` (`storage` is 3.875 MB), and the microSD power-gate
-disabled. The I2C, microSD and Ethernet management pins (IP101: MDC/MDIO/refclk/
+`partitions_funcev.csv` (`storage` is 3.875 MB), the microSD power-gate
+disabled, and `CONFIG_KVM_WIFI=y` - this board carries an onboard ESP32-C6, so
+WiFi (station, access point, and the rescue hotspot) is compiled in via
+esp_wifi_remote + esp-hosted over SDIO. The Waveshare board has no radio and
+leaves it off. The I2C, microSD and Ethernet management pins (IP101: MDC/MDIO/refclk/
 reset/addr) match the Waveshare reference and are inherited. The RMII data pins
 and the BOOT button GPIO should be taken from the board schematic and set in the
 overlay if a given board differs.

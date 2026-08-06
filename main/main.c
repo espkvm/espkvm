@@ -29,55 +29,6 @@
 
 static const char *TAG = "espkvm";
 
-#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
-/* TEMPORARY: per-task CPU profiling to find what taxes video FPS. Samples the
- * FreeRTOS run-time counters over a 5 s window and logs each task's share of it
- * (delta, not cumulative-since-boot, so the boot burst does not skew it). Remove
- * once microlink is tuned; the enabling Kconfig lives in sdkconfig.defaults. */
-#include "freertos/task.h"
-static void cpu_profile_task(void *arg)
-{
-    (void)arg;
-    const UBaseType_t MAXT = 40;
-    TaskStatus_t *a = malloc(sizeof(TaskStatus_t) * MAXT);
-    TaskStatus_t *b = malloc(sizeof(TaskStatus_t) * MAXT);
-    if (!a || !b) {
-        free(a);
-        free(b);
-        vTaskDelete(NULL);
-        return;
-    }
-    for (;;) {
-        uint32_t t0 = 0, t1 = 0;
-        UBaseType_t na = uxTaskGetSystemState(a, MAXT, &t0);
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        UBaseType_t nb = uxTaskGetSystemState(b, MAXT, &t1);
-        uint32_t total = t1 - t0;
-        if (total == 0) {
-            continue;
-        }
-        ESP_LOGW("cpuprof", "==== per-task CPU over 5s (delta) ====");
-        for (UBaseType_t i = 0; i < nb; i++) {
-            uint32_t prev = 0;
-            for (UBaseType_t j = 0; j < na; j++) {
-                if (a[j].xTaskNumber == b[i].xTaskNumber) {
-                    prev = a[j].ulRunTimeCounter;
-                    break;
-                }
-            }
-            uint32_t d = b[i].ulRunTimeCounter - prev;
-            /* total is the reference timer's wall-clock delta; a task pinned to
-             * one core at 100% accumulates ~total, so this is % of a single core
-             * (0-100 per task, up to 200 summed across the two cores). */
-            unsigned pct = (unsigned)(((uint64_t)d * 100) / total);
-            if (pct >= 1) {
-                ESP_LOGW("cpuprof", "  %-16s %3u%%", b[i].pcTaskName, pct);
-            }
-        }
-    }
-}
-#endif
-
 /*
  * Features that are compiled in but have no implementation yet report
  * themselves unavailable, so the web UI shows a disabled control with a reason
@@ -349,10 +300,6 @@ void app_main(void)
 
     report_pending_capabilities();
     kvm_caps_log();
-
-#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
-    xTaskCreatePinnedToCore(cpu_profile_task, "cpuprof", 4096, NULL, 1, NULL, 0);
-#endif
 
     ESP_LOGI(TAG, "ready");
 }

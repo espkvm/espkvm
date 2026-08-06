@@ -7,6 +7,8 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-06
+
 ### Added
 - WiFi on boards that carry an ESP32-C6 co-processor (e.g. the ESP32-P4 Function
   EV board). The ESP32-P4 has no radio of its own, so this runs through the C6 over
@@ -20,6 +22,19 @@ bumps the patch).
   slot, so the two are mutually exclusive: in Ethernet mode the microSD works
   (esp-hosted is released before it mounts); in a WiFi mode the radio holds the
   controller and virtual media is unavailable.
+- A rescue hotspot for WiFi station mode. A new "If WiFi can't connect" setting adds
+  a "hotspot" option that runs a rescue access point (`ESP-KVM-xxxx`) alongside the
+  station the whole time WiFi is trying to join (APSTA). A device whose network is out
+  of range or misconfigured stays reachable on-site through the hotspot while the
+  station keeps retrying and reconnects on its own once the network returns - the
+  reachability a device you cannot physically get to needs.
+- A captive portal on the access-point / rescue hotspot, so joining it works like a
+  hotel WiFi: the phone's "sign in to network" sheet pops up on connect and opens the
+  console. Because a captive-portal browser cannot clear a self-signed certificate, the
+  console is served over plain HTTP while in access-point mode (H.264, which needs a
+  secure context, is unavailable there; MJPEG and every setting still work) - Ethernet
+  and WiFi-station modes keep full HTTPS and H.264. A built-in DNS responder points
+  every name at the device so the sheet appears reliably across iOS, Android and Windows.
 
 ### Changed
 - 1080p H.264 went from ~15 to ~22 fps (+46%) on rev >= 3.0. The synchronous encode
@@ -49,6 +64,11 @@ bumps the patch).
   `ERR_CERT_AUTHORITY_INVALID`. The CA subject now includes a per-device suffix from
   the MAC, so each device's CA is distinct; the CA is re-issued automatically on
   update (no settings lost).
+- The rescue hotspot was unusable while the station could not find its network: each
+  reconnect attempt scans every channel, and on the ESP32-P4's single radio that
+  dragged the softAP off its channel, so clients could not associate. The station now
+  paces its reconnect attempts, keeping the hotspot on a stable channel while still
+  rejoining within seconds of the network returning.
 - Building from a fresh clone failed: `sdkconfig.defaults` did not set the target,
   so `idf.py build` fell back to `esp32` and stopped with an `xtensa-esp32-elf-gcc
   not found` toolchain error. `CONFIG_IDF_TARGET="esp32p4"` is now in the defaults,
