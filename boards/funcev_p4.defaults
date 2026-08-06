@@ -19,10 +19,10 @@ CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
 CONFIG_ESP32P4_REV_MIN_300=y
 
 # --- flash / partitions -----------------------------------------------------
-# 16 MB here vs 32 MB on Waveshare: the 32 MB partitions.csv does not fit, so
-# use the 16 MB table.
+# 16 MB here vs 32 MB on the P4-ETH: the 32 MB table does not fit, so use the
+# shared 16 MB table (same app/OTA slots, smaller data tail).
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_funcev.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
 
 # --- updates ----------------------------------------------------------------
 # This board has its own build, hence its own manifest. Without this, the funcev

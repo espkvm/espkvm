@@ -129,6 +129,40 @@ overlay (see [boards/](boards/README.md)). What was measured on the boards in
 front of us, including the documented claims that turned out to be false, is
 written down in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
+### Also configured, not yet tested
+
+These boards have a build target configured from their datasheets - they carry an
+ESP32-P4, a MIPI-CSI connector, USB OTG-HS, IP101 Ethernet and an onboard ESP32-C6,
+so in theory they should work - but **nobody has run ESP-KVM on one yet.** A few
+pins (RMII data, microSD, BOOT button, chip revision) still need confirming on
+hardware; the overlays note them. If you have one, a report is very welcome.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/board-nano.jpg" alt="Waveshare ESP32-P4-NANO board"></td>
+<td width="50%"><img src="docs/board-guition.webp" alt="Guition ESP32-P4-M3-Dev (JC-ESP32P4-M3) board"></td>
+</tr>
+<tr>
+<td valign="top">
+
+**[Waveshare ESP32-P4-NANO](https://www.waveshare.com/esp32-p4-nano.htm)** &mdash; *configured, untested*
+
+Same IP101 Ethernet and onboard ESP32-C6 as the boards above; 32 MB PSRAM, 16 MB
+flash. Build overlay: `boards/nano_p4.defaults`.
+
+</td>
+<td valign="top">
+
+**Guition ESP32-P4-M3-Dev (JC-ESP32P4-M3)** &mdash; *configured, untested*
+
+A display board (4.3&Prime; MIPI-DSI touch, unused by the KVM) that also carries
+Ethernet and an ESP32-C6; 32 MB PSRAM, 16 MB flash. It has two USB-C ports - the
+target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`.
+
+</td>
+</tr>
+</table>
+
 ### Companion boards
 
 <table>
@@ -170,7 +204,7 @@ Waveshare or Geekworm. The pin map is in
 ## Quick start
 
 Download your board's `espkvm-<version>-<board>-merged.bin` (for example
-`-waveshare-`) from the
+`-p4-eth-` for the Waveshare ESP32-P4-ETH, `-funcev-` for the Function EV) from the
 [releases](https://github.com/espkvm/espkvm/releases) and write it at offset 0
 with [esptool](https://github.com/espressif/esptool) - one file, no unpacking:
 
@@ -384,6 +418,7 @@ docs/             what the hardware actually does
 - [CNX Software](https://www.cnx-software.com/2026/07/30/esp-kvm-an-open-source-ip-kvm-solution-based-on-esp32-p4-risc-v-mcu/) - *ESP-KVM - An open-source IP KVM solution based on ESP32-P4 RISC-V MCU*
 - [Circuit Rocks](https://blog.circuit.rocks/esp-kvm-turns-an-esp32-p4-into-a-45-open-source-ip-kvm) - *ESP-KVM Turns an ESP32-P4 Into a $45 Open-Source IP KVM*
 - [Open Source For You](https://www.opensourceforu.com/2026/07/microcontroller-enables-remote-device-access/) - *Microcontroller Enables Remote Device Access*
+- [Solid State Bytes](https://ssbytes.org/p/a-raspberry-pi-that-boots-straight-into-ai-an-esp32-p4-kvm-and-more) - *A Raspberry Pi That Boots Straight Into AI, an ESP32-P4 KVM, and More*
 
 Also picked up and translated internationally - French, Greek, Spanish, Russian,
 Chinese, Japanese, Thai and German.

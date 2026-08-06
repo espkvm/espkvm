@@ -13,9 +13,11 @@ CONFIG_ESP32P4_REV_MIN_100=y
 # Waveshare ESP32-P4-ETH carries 32 MB; the default 2 MB leaves no room for OTA.
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 
-# Two app slots so a bad update can be rolled back - see partitions.csv.
+# Two app slots so a bad update can be rolled back - see partitions_32mb.csv.
+# The app/OTA slots are identical to the 16 MB table (partitions_16mb.csv); only
+# the tail data partitions differ, so the same firmware image fits either.
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_32mb.csv"
 
 # Roll back automatically if a freshly flashed image never reports itself
 # healthy: on a KVM, an update that cannot reach the network has also removed

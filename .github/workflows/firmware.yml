@@ -13,8 +13,9 @@
 # >=3.0 are mutually exclusive build targets, so there is no single universal
 # image. Each board gets its own release assets and its own Pages manifests
 # under firmware/<board>/ and flash/<board>/. The root firmware/ and flash/
-# manifests mirror the Waveshare board, so devices and flasher pages that
-# predate the per-board layout keep working.
+# manifests mirror the default board (p4-eth, the Waveshare ESP32-P4-ETH), which
+# is also what every P4-ETH device polls, so those and flasher pages that predate
+# the per-board layout keep working.
 name: firmware
 
 on:
@@ -35,7 +36,7 @@ jobs:
       matrix:
         board:
           # Default build - Waveshare ESP32-P4-ETH (chip rev v1.3, 32 MB).
-          - id: waveshare
+          - id: p4-eth
             build_dir: build
             sdkconfig_defaults: sdkconfig.defaults
           # Espressif ESP32-P4 Function EV Board (chip rev v3.2, 16 MB) - an
@@ -43,6 +44,15 @@ jobs:
           - id: funcev
             build_dir: build.funcev
             sdkconfig_defaults: sdkconfig.defaults;boards/funcev_p4.defaults
+          # Configured from datasheets, NOT yet verified on hardware (a few pins
+          # still need confirming - see the overlays). Built and published so people
+          # with the board can try them; in theory they should work.
+          - id: p4-nano
+            build_dir: build.nano
+            sdkconfig_defaults: sdkconfig.defaults;boards/nano_p4.defaults
+          - id: p4-guition
+            build_dir: build.guition
+            sdkconfig_defaults: sdkconfig.defaults;boards/guition_p4.defaults
     steps:
       - uses: actions/checkout@v4
         with:
@@ -210,7 +220,7 @@ jobs:
           version="${GITHUB_REF_NAME}"
           released="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           mkdir -p site
-          for board in waveshare funcev; do
+          for board in p4-eth funcev p4-nano p4-guition; do
             bin="$(cd out && ls espkvm-*-"${board}".bin | grep -v -- '-merged')"
             merged="$(cd out && ls espkvm-*-"${board}"-merged.bin)"
 
@@ -247,19 +257,21 @@ jobs:
 
           # Back-compat: devices and flasher pages that predate the per-board
           # layout fetch firmware/manifest.json and flash/manifest.json at the
-          # root. Mirror the Waveshare board there (its .bin filename inside the
-          # manifest is relative, so the copied bin resolves alongside it).
-          cp site/firmware/waveshare/. site/firmware/ -r
-          cp site/flash/waveshare/. site/flash/ -r
+          # root (this is also what every P4-ETH device polls by default). Mirror
+          # the P4-ETH board there (its .bin filename inside the manifest is
+          # relative, so the copied bin resolves alongside it).
+          cp site/firmware/p4-eth/. site/firmware/ -r
+          cp site/flash/p4-eth/. site/flash/ -r
 
           cat > site/index.html <<'EOF'
           <!doctype html><meta charset="utf-8"><title>ESP-KVM firmware</title>
           <p>Artefacts for the ESP-KVM console and the browser flasher, per board:
           <code>firmware/&lt;board&gt;/manifest.json</code> is the update check,
           <code>flash/&lt;board&gt;/manifest.json</code> is esp-web-tools.
-          Boards: <code>waveshare</code>, <code>funcev</code>. The root
-          <code>firmware/</code> and <code>flash/</code> mirror
-          <code>waveshare</code> for older clients.</p>
+          Boards: <code>p4-eth</code>, <code>funcev</code>, <code>p4-nano</code>,
+          <code>p4-guition</code> (the last two configured from datasheets, not yet
+          verified on hardware). The root <code>firmware/</code> and <code>flash/</code>
+          mirror <code>p4-eth</code> for older clients.</p>
           EOF
           find site -name manifest.json -print -exec cat {} \;
 

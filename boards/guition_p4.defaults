@@ -1,0 +1,82 @@
+# Guition ESP32-P4-M3-Dev / JC-ESP32P4-M3 (32 MB PSRAM, 16 MB flash, IP101
+# Ethernet, onboard ESP32-C6-MINI for WiFi, plus a MIPI-DSI touch panel the KVM
+# does not use). DRAFT overlay - see the "confirm on hardware" notes.
+#
+# This is an OVERLAY applied on top of sdkconfig.defaults - it carries only the
+# deltas from the Waveshare ESP32-P4-ETH build. Build it with:
+#
+#   idf.py -B build.guition \
+#     -D SDKCONFIG=build.guition/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/guition_p4.defaults" \
+#     build
+#
+# (Plain `idf.py build` still builds the Waveshare v1.3 image, unchanged.)
+#
+# The C6 SDIO pins and the IP101 Ethernet management pins are documented and match
+# the Function EV / Waveshare reference (below). This is Guition's own board,
+# though - not a Waveshare design - so the UNDOCUMENTED data pins (RMII data,
+# microSD, BOOT) are less likely to match the reference than on the NANO; treat the
+# CONFIRM items as needing the schematic or a check on real hardware.
+#
+# It has TWO USB-C ports: an OTG 2.0 HS and a USB 1.1 FS. The target must be wired
+# to the HS port (that is the keyboard/mouse the target sees).
+
+# --- chip revision ----------------------------------------------------------
+# CONFIRM: the chip revision is not documented. This is a 2025 board, so it is very
+# likely rev v3.x - keep the two lines below if so (they also compile esp_h264's
+# faster RGB/YUV422-direct path). If it is actually a rev <3.0 part, DELETE both
+# lines so it builds against the pre-3.0 family like Waveshare.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- flash / partitions -----------------------------------------------------
+# 16 MB; use the shared 16 MB table (same app/OTA slots as the 32 MB one, smaller
+# data tail).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- updates ----------------------------------------------------------------
+# Its own binary (rev + flash size), so its own OTA manifest. Release CI must
+# publish firmware/p4-guition/manifest.json for this to resolve.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-guition/manifest.json"
+
+# --- WiFi (via the onboard ESP32-C6-MINI) -----------------------------------
+# CONFIRMED from the datasheet/ESPHome: the C6 SDIO pins are the same as the
+# Function EV board (CLK 18, CMD 19, D0-3 14/15/16/17, slave-reset 54), so the same
+# esp-hosted board symbol wires them for us. Ethernet stays primary; WiFi is the
+# fallback.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+
+# --- board pins -------------------------------------------------------------
+# CONFIRMED documented (match the Waveshare/reference defaults, so inherited):
+#   Ethernet IP101  MDC 31  MDIO 52  REFCLK 50 (EXT_IN)  PHY_reset 51  PHY_addr 1
+#
+# CONFIRM on hardware - not documented, and this is not a Waveshare board, so the
+# reference defaults below are only a starting guess. Set from the schematic:
+#   RMII data  TX_EN 49  TXD0 34  TXD1 35  CRS_DV 28  RXD0 29  RXD1 30
+#   microSD    CLK 43  CMD 44  D0-D3 39/40/41/42
+# If Ethernet does not come up, the RMII data pins are the first suspect:
+# CONFIG_KVM_ETH_RMII_TX_EN_GPIO=49
+# CONFIG_KVM_ETH_RMII_TXD0_GPIO=34
+# CONFIG_KVM_ETH_RMII_TXD1_GPIO=35
+# CONFIG_KVM_ETH_RMII_CRS_DV_GPIO=28
+# CONFIG_KVM_ETH_RMII_RXD0_GPIO=29
+# CONFIG_KVM_ETH_RMII_RXD1_GPIO=30
+# If the microSD never mounts, set its pins from the schematic:
+# CONFIG_KVM_SD_CLK_GPIO=43
+# CONFIG_KVM_SD_CMD_GPIO=44
+# CONFIG_KVM_SD_D0_GPIO=39
+# CONFIG_KVM_SD_D1_GPIO=40
+# CONFIG_KVM_SD_D2_GPIO=41
+# CONFIG_KVM_SD_D3_GPIO=42
+
+# CONFIRM: does the microSD slot have a power-gate MOSFET, or is it always powered?
+# If the card never mounts, try -1 so the firmware leaves the pin alone:
+# CONFIG_KVM_SD_PWR_GPIO=-1
+
+# CONFIRM: the BOOT button GPIO (used for the physical password reset). Set the
+# board's button GPIO, or -1 if there is no reachable button:
+# CONFIG_KVM_BUTTON_GPIO=35

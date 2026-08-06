@@ -1,0 +1,73 @@
+# Waveshare ESP32-P4-NANO (32 MB PSRAM, 16 MB flash, IP101 Ethernet, onboard
+# ESP32-C6-MINI for WiFi). DRAFT overlay - see the "confirm on hardware" notes.
+#
+# This is an OVERLAY applied on top of sdkconfig.defaults - it carries only the
+# deltas from the Waveshare ESP32-P4-ETH build. Build it with:
+#
+#   idf.py -B build.nano \
+#     -D SDKCONFIG=build.nano/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/nano_p4.defaults" \
+#     build
+#
+# (Plain `idf.py build` still builds the Waveshare v1.3 image, unchanged.)
+#
+# The NANO is close to the Espressif Function EV board: same onboard ESP32-C6 on
+# the same SDIO pins, and the same IP101 Ethernet as the Waveshare ESP32-P4-ETH.
+# Pinout confirmed from the Waveshare wiki / ESPHome; the items marked CONFIRM
+# still need the board schematic or a check on real hardware.
+
+# --- chip revision ----------------------------------------------------------
+# CONFIRM: the NANO's ESP32-P4 revision is not stated on the wiki. Recent P4
+# boards ship rev v3.x; if this board is one, keep the two lines below (they also
+# compile esp_h264's faster RGB/YUV422-direct path). If it is actually a rev <3.0
+# part, DELETE both lines so it builds against the pre-3.0 family like Waveshare.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- flash / partitions -----------------------------------------------------
+# 16 MB; use the shared 16 MB table (same app/OTA slots as the 32 MB one, smaller
+# data tail).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- updates ----------------------------------------------------------------
+# Its own binary (rev + flash size), so its own OTA manifest. Release CI must
+# publish firmware/p4-nano/manifest.json for this to resolve.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-nano/manifest.json"
+
+# --- WiFi (via the onboard ESP32-C6-MINI) -----------------------------------
+# CONFIRMED from the wiki: the C6 SDIO pins are identical to the Function EV
+# board (CLK 18, CMD 19, D0-3 14/15/16/17, slave-reset 54), so the same esp-hosted
+# board symbol wires them for us. Ethernet stays primary; WiFi is the fallback.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+
+# --- board pins -------------------------------------------------------------
+# CONFIRMED inherited (match the Waveshare defaults, per the wiki):
+#   Ethernet IP101  MDC 31  MDIO 52  REFCLK 50 (EXT_IN)  PHY_reset 51  PHY_addr 1
+#
+# CONFIRM on hardware - the wiki does not list these, but as another Waveshare
+# IP101 board the NANO very likely reuses the Waveshare ESP32-P4-ETH values, which
+# are the inherited defaults:
+#   microSD    CLK 43  CMD 44  D0-D3 39/40/41/42
+#   RMII data  TX_EN 49  TXD0 34  TXD1 35  CRS_DV 28  RXD0 29  RXD1 30
+# If Ethernet does not come up, the RMII data pins are the first suspect - set
+# them here from the schematic:
+# CONFIG_KVM_ETH_RMII_TX_EN_GPIO=49
+# CONFIG_KVM_ETH_RMII_TXD0_GPIO=34
+# CONFIG_KVM_ETH_RMII_TXD1_GPIO=35
+# CONFIG_KVM_ETH_RMII_CRS_DV_GPIO=28
+# CONFIG_KVM_ETH_RMII_RXD0_GPIO=29
+# CONFIG_KVM_ETH_RMII_RXD1_GPIO=30
+
+# CONFIRM: does the microSD slot have a power-gate MOSFET (Waveshare P4-ETH) or is
+# it always powered (Function EV)? If the card never mounts, it is likely the
+# gate - set it to -1 so the firmware leaves the pin alone:
+# CONFIG_KVM_SD_PWR_GPIO=-1
+
+# CONFIRM: the BOOT button GPIO (used for the physical password reset). The base
+# default is probed; if the reset never triggers, set the board's button GPIO, or
+# -1 if there is no reachable button:
+# CONFIG_KVM_BUTTON_GPIO=35

@@ -7,72 +7,56 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-06
+
+### Added
+- Draft build targets for two more boards: the Waveshare ESP32-P4-NANO and the
+  Guition ESP32-P4-M3-Dev. Both are configured from their datasheets and haven't
+  been run on hardware yet - in theory they should work, but a few pins still need
+  confirming. They show up in the browser flasher labelled "configured, untested".
+
+### Changed
+- Clearer firmware download names: the Waveshare ESP32-P4-ETH build is now
+  `p4-eth` (was `waveshare`), since more boards are on the way. Devices already in
+  the field keep updating as before.
+
 ## [0.17.0] - 2026-08-06
 
 ### Added
-- WiFi on boards that carry an ESP32-C6 co-processor (e.g. the ESP32-P4 Function
-  EV board). The ESP32-P4 has no radio of its own, so this runs through the C6 over
-  SDIO (esp-hosted + esp_wifi_remote), compiled in only where a board has one
-  (`CONFIG_KVM_WIFI`); the Waveshare ESP32-P4-ETH is unaffected. A new "Connection"
-  setting picks one link at a time - Ethernet, WiFi station, or the device's own
-  access point - and the console gains a network switcher in the status bar (the
-  pill shows the active link and a click swaps modes). The device advertises its
-  hostname over mDNS and DHCP on whichever link is active. On the ESP32-P4 the
-  single SD host controller is shared between the C6's SDIO link and the microSD
-  slot, so the two are mutually exclusive: in Ethernet mode the microSD works
-  (esp-hosted is released before it mounts); in a WiFi mode the radio holds the
-  controller and virtual media is unavailable.
-- A rescue hotspot for WiFi station mode. A new "If WiFi can't connect" setting adds
-  a "hotspot" option that runs a rescue access point (`ESP-KVM-xxxx`) alongside the
-  station the whole time WiFi is trying to join (APSTA). A device whose network is out
-  of range or misconfigured stays reachable on-site through the hotspot while the
-  station keeps retrying and reconnects on its own once the network returns - the
-  reachability a device you cannot physically get to needs.
-- A captive portal on the access-point / rescue hotspot, so joining it works like a
-  hotel WiFi: the phone's "sign in to network" sheet pops up on connect and opens the
-  console. Because a captive-portal browser cannot clear a self-signed certificate, the
-  console is served over plain HTTP while in access-point mode (H.264, which needs a
-  secure context, is unavailable there; MJPEG and every setting still work) - Ethernet
-  and WiFi-station modes keep full HTTPS and H.264. A built-in DNS responder points
-  every name at the device so the sheet appears reliably across iOS, Android and Windows.
+- **WiFi**, on boards with an ESP32-C6 (like the ESP32-P4 Function EV). The P4 has
+  no radio of its own, so it talks WiFi through the C6; the Waveshare board is
+  unaffected. Pick your link in the new "Connection" setting - Ethernet, WiFi, or the
+  device's own access point - and swap it any time from the network pill in the status
+  bar. One P4 caveat: the microSD and the C6 share a bus, so virtual media only works
+  in Ethernet mode.
+- **Rescue hotspot for WiFi.** If the device can't reach its network, it can also put
+  up its own hotspot (`ESP-KVM-xxxx`) so you can still get to it and fix things -
+  meanwhile it keeps trying the network and reconnects on its own once it's back.
+  Turn it on with the new "If WiFi can't connect" setting.
+- **Captive portal on the hotspot.** Join the device's access point and your phone
+  opens the console on its own, like hotel WiFi. Over the hotspot the console runs on
+  plain HTTP (a captive browser won't accept the self-signed cert), so H.264 is off
+  there but MJPEG and settings work; Ethernet and WiFi keep full HTTPS.
 
 ### Changed
-- 1080p H.264 went from ~15 to ~22 fps (+46%) on rev >= 3.0. The synchronous encode
-  holds one frame buffer for its whole ~42 ms, and with only two buffers the
-  free-running CSI had a single buffer to fill, stalled, and left the encoder waiting
-  ~24 ms for a fresh frame every frame (encoder only 62% busy). A third capture buffer
-  - which the smaller YUV422 frames leave room for - keeps a just-completed frame
-  always ready, so the encoder now runs ~92% busy and the ~42 ms hardware encode is the
-  real ceiling. The rev >= 3.0 direct-H.264 path also no longer allocates the PPA
-  client, intermediate YUV buffers or the second encode task it never used (~6 MB
-  PSRAM), which is what makes room for the third buffer.
-- The rev >= 3.0 capture pipeline now captures native YUV422 (UYVY, 2 bytes/px)
-  instead of RGB888 and feeds it straight to both the H.264 and JPEG encoders,
-  dropping the PPA colour-convert pass. This frees the PPA engine and ~4 MB of PSRAM
-  and unifies both codecs on one capture format. The per-board pixel format is now a
-  single `capture_pixfmt` table behind one chip-rev gate rather than scattered
-  `#if`s; the rev < 3.0 board keeps its RGB888 + PPA path byte-for-byte. On rev >= 3.0
-  the CSI bridge's colour-mode block is programmed for a UYVY passthrough with an
-  8-bit word swap (the same byte reversal that lands RGB as BGR). Note: this is a
-  pipeline/PSRAM improvement, not an H.264 speed-up - 1080p H.264 stays
-  encoder-bound at ~16 fps regardless of capture format.
+- **1080p H.264 is faster on rev 3.0+ silicon** - roughly 15 -> 22 fps. A third
+  capture buffer keeps the encoder fed instead of waiting on the camera, and dropping
+  some buffers the direct path never used freed the memory for it.
+- **rev 3.0+ now captures YUV422 straight into both encoders**, skipping the
+  colour-convert pass. Frees ~4 MB of PSRAM and puts H.264 and JPEG on one format; the
+  older rev <3.0 path is untouched.
 
 ### Fixed
-- The device CA's subject was named only after the hostname, so two devices left on
-  the default hostname generated CAs with an identical subject name. Importing one
-  device's CA then made the browser reject the other's certificate as
-  `ERR_CERT_AUTHORITY_INVALID`. The CA subject now includes a per-device suffix from
-  the MAC, so each device's CA is distinct; the CA is re-issued automatically on
-  update (no settings lost).
-- The rescue hotspot was unusable while the station could not find its network: each
-  reconnect attempt scans every channel, and on the ESP32-P4's single radio that
-  dragged the softAP off its channel, so clients could not associate. The station now
-  paces its reconnect attempts, keeping the hotspot on a stable channel while still
-  rejoining within seconds of the network returning.
-- Building from a fresh clone failed: `sdkconfig.defaults` did not set the target,
-  so `idf.py build` fell back to `esp32` and stopped with an `xtensa-esp32-elf-gcc
-  not found` toolchain error. `CONFIG_IDF_TARGET="esp32p4"` is now in the defaults,
-  so a clean checkout builds without a separate `idf.py set-target` step.
+- **Two devices on the default hostname could clash on certificates** - their
+  self-issued CAs had the same name, so trusting one made the browser reject the other
+  (`ERR_CERT_AUTHORITY_INVALID`). Each CA now carries a per-device suffix and is
+  re-issued automatically, nothing lost.
+- **The rescue hotspot was hard to join while WiFi was hunting for its network** - the
+  constant channel scanning kept knocking the hotspot off its channel. It now paces the
+  retries so the hotspot stays put.
+- **A fresh clone didn't build** - `sdkconfig.defaults` didn't set the chip, so the
+  build fell back to `esp32` and failed on a missing toolchain. It now targets
+  `esp32p4` out of the box.
 
 ## [0.16.5] - 2026-08-05
 
