@@ -12,6 +12,7 @@
 
 #include "capture.h"
 #include "ethernet.h"
+#include "wifi.h"
 #include "http_server.h"
 #include "kvm_atx.h"
 #include "kvm_auth.h"
@@ -251,7 +252,15 @@ void app_main(void)
     ESP_ERROR_CHECK(kvm_atx_init());
 
     /* The microSD card, if any. A KVM without one is still a KVM, so a missing
-     * or unreadable card never holds up start-up. */
+     * or unreadable card never holds up start-up.
+     *
+     * On a board with a WiFi co-processor the P4's single SD host controller is
+     * shared between the C6's SDIO link and the microSD slot. esp-hosted grabs it
+     * at boot; in Ethernet mode WiFi is unused, so release it here so the card can
+     * mount. In a WiFi mode the link keeps it and the microSD is unavailable. */
+    if (kvm_setting_int("net_mode") == KVM_NET_ETHERNET) {
+        kvm_wifi_release_sdio();
+    }
     ESP_LOGI(TAG, "boot: storage");
     ESP_ERROR_CHECK(kvm_storage_init());
 
@@ -270,8 +279,24 @@ void app_main(void)
      * came up reachable but was rolled back anyway because a later peripheral,
      * left in a bad state by the warm restart, never finished starting.
      */
-    ESP_LOGI(TAG, "boot: ethernet");
-    ESP_ERROR_CHECK(ethernet_init());
+    /*
+     * One link at a time (net_mode): Ethernet, WiFi station, or WiFi AP. Ethernet
+     * is the default and the only mode on a board without a co-processor. WiFi's
+     * capability is compiled-available so its settings appear even on Ethernet;
+     * the C6 is only spun up (which costs a few seconds) when a WiFi mode is
+     * actually chosen. If WiFi cannot be reached, the reset button clears the
+     * setting back to Ethernet.
+     */
+    kvm_wifi_announce(); /* show the Connection switcher/settings in every mode */
+    const int32_t net_mode = kvm_setting_int("net_mode");
+    if (net_mode == KVM_NET_ETHERNET) {
+        ESP_LOGI(TAG, "boot: ethernet");
+        ESP_ERROR_CHECK(ethernet_init());
+    } else {
+        ESP_LOGI(TAG, "boot: wifi %s (Ethernet left down)",
+                 net_mode == KVM_NET_WIFI_AP ? "AP" : "station");
+        ESP_ERROR_CHECK(kvm_wifi_init());
+    }
 
     /* MQTT bridge: build its timer/state now; it connects later, from
      * report_pending_capabilities(), once every capability it advertises to

@@ -1,3 +1,14 @@
 dependencies:
   espressif/mdns:
     version: "^1.8.0"
+  # WiFi via an onboard ESP32-C6 (esp-hosted slave over SDIO). Pulled in ONLY when
+  # CONFIG_KVM_WIFI is set (the funcev board overlay), so the Waveshare build - which
+  # has no C6 - never fetches or links these. See espkvm-wifi-plan / boards/README.
+  espressif/esp_wifi_remote:
+    version: "*"
+    rules:
+      - if: "$CONFIG{KVM_WIFI} == True"
+  espressif/esp_hosted:
+    version: "*"
+    rules:
+      - if: "$CONFIG{KVM_WIFI} == True"

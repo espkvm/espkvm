@@ -33,6 +33,7 @@
 
 #include "capture.h"
 #include "ethernet.h"
+#include "wifi.h"
 #include "kvm_atx.h"
 #include "kvm_mqtt.h"
 #include "kvm_ts.h"
@@ -212,6 +213,11 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     bool net_up = false;
     int net_mbps = 0;
     kvm_eth_link(&net_up, &net_mbps);
+    kvm_wifi_status_t wifi;
+    kvm_wifi_status(&wifi);
+    const char *net_mode = wifi.mode == KVM_NET_WIFI_AP     ? "ap"
+                           : wifi.mode == KVM_NET_WIFI_STA ? "wifi"
+                                                           : "ethernet";
     kvm_atx_status_t atx;
     kvm_atx_status(&atx);
     bool mqtt_on = false, mqtt_conn = false;
@@ -221,13 +227,14 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_wg_status_t wg;
     kvm_wg_status(&wg);
 
-    char body[1024];
+    char body[1200];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
-                     "\"net\":{\"up\":%s,\"mbps\":%d},"
+                     "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"wifiUp\":%s,"
+                     "\"rssi\":%d,\"ssid\":\"%s\",\"apClients\":%d},"
                      "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s},"
                      "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
                      "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
@@ -239,7 +246,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
                      kvm_thermal_state_name(kvm_thermal_state()),
-                     net_up ? "true" : "false", net_mbps,
+                     net_up ? "true" : "false", net_mbps, net_mode,
+                     wifi.up ? "true" : "false", wifi.rssi, wifi.ssid, wifi.ap_clients,
                      atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
                      atx.power_on ? "true" : "false", mqtt_on ? "true" : "false",
                      mqtt_conn ? "true" : "false", wg.enabled ? "true" : "false",

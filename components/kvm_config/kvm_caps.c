@@ -60,6 +60,13 @@ static const cap_desc_t s_desc[KVM_CAP_COUNT] = {
                        false,
 #endif
                        "aud_enable"},
+    [KVM_CAP_WIFI] = {"wifi",
+#if CONFIG_KVM_WIFI
+                      true,
+#else
+                      false,
+#endif
+                      NULL},
     [KVM_CAP_HTTPS] = {"https",
 #if CONFIG_KVM_ENABLE_HTTPS
                        true,

@@ -23,6 +23,7 @@ static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
 static const char *const s_side_choices[] = {"left", "right"};
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
+static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap"};
 
 /* clang-format off */
 static const kvm_setting_t s_settings[] = {
@@ -268,6 +269,42 @@ static const kvm_setting_t s_settings[] = {
         .key = "net_dns", .section = "network", .type = KVM_VT_STR,
         .title = "DNS server", .def_str = "", .max_len = 15,
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
+    },
+
+    /* ---- wifi (boards with an ESP32-C6 co-processor only) ---------------- */
+    {
+        .key = "net_mode", .section = "network", .type = KVM_VT_ENUM,
+        .title = "Connection",
+        .help = "The device uses one link at a time. \"ethernet\": the wired port. "
+                "\"wifi\": join the network below (Ethernet is left down). \"ap\": the "
+                "device makes its own WiFi hotspot for setup where there is no "
+                "network to join. If WiFi is unreachable, hold the reset button to "
+                "return to Ethernet.",
+        .min = 0, .max = 2, .def = 0, .choices = s_netmode_choices,
+        .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
+    },
+    {
+        .key = "wifi_ssid", .section = "network", .type = KVM_VT_STR,
+        .title = "WiFi network (SSID)",
+        .help = "The name of the network to join in \"wifi\" mode.",
+        .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_REBOOT,
+    },
+    {
+        .key = "wifi_pass", .section = "network", .type = KVM_VT_STR,
+        .title = "WiFi password",
+        .help = "Left blank for an open network. Stored write-only.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
+    },
+    {
+        .key = "ap_pass", .section = "network", .type = KVM_VT_STR,
+        .title = "Hotspot password",
+        .help = "Password for the device's own hotspot in \"ap\" mode. At least 8 "
+                "characters, or blank for an open hotspot. The network name is "
+                "ESP-KVM-xxxx (the device's MAC). Stored write-only.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },
 
     /* ---- vpn / wireguard ------------------------------------------------- */

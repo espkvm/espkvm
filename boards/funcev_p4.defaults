@@ -30,6 +30,20 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_funcev.csv"
 # image, which will not boot on this rev v3.2 chip.
 CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/funcev/manifest.json"
 
+# --- WiFi (via the onboard ESP32-C6) ----------------------------------------
+# The P4 has no radio; this board carries an ESP32-C6-MINI-1 reached over SDIO,
+# running Espressif's esp-hosted slave firmware (ships pre-flashed, v0.0.6). WiFi
+# then works through esp_wifi_remote (the drop-in esp_wifi API). CONFIG_KVM_WIFI
+# pulls in esp_wifi_remote + esp_hosted (gated in kvm_net/idf_component.yml) and
+# compiles kvm_net/wifi.c; the board symbol wires the documented SDIO pins
+# (CLK 18, CMD 19, D0-3 14/15/16/17, slave-reset 54). The Waveshare board has no
+# C6, so it leaves CONFIG_KVM_WIFI=n and never fetches these. Ethernet stays the
+# primary link; WiFi is the fallback.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+
 # --- board pins -------------------------------------------------------------
 # This board's microSD slot is always powered (no power-gate GPIO).
 CONFIG_KVM_SD_PWR_GPIO=-1

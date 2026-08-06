@@ -227,6 +227,18 @@ menu "ESP-KVM"
             default 51 if IDF_TARGET_ESP32P4
             default 5
             depends on KVM_ETH_ENABLE
+
+        config KVM_WIFI
+            bool "Enable WiFi (via an ESP32-C6 co-processor, esp-hosted/SDIO)"
+            default n
+            help
+                The ESP32-P4 has no radio: WiFi comes from an onboard ESP32-C6
+                running the esp-hosted slave firmware, reached over SDIO through
+                esp_wifi_remote. Only boards that carry a C6 - e.g. the Espressif
+                ESP32-P4 Function EV board - can use it; the Waveshare ESP32-P4-ETH
+                has none, so this stays off by default and is set in a board
+                overlay. Ethernet remains the primary link; WiFi is the fallback.
+                Enabling it pulls in the esp_wifi_remote and esp_hosted components.
     endmenu
 
     menu "Updates"

@@ -7,6 +7,20 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Added
+- WiFi on boards that carry an ESP32-C6 co-processor (e.g. the ESP32-P4 Function
+  EV board). The ESP32-P4 has no radio of its own, so this runs through the C6 over
+  SDIO (esp-hosted + esp_wifi_remote), compiled in only where a board has one
+  (`CONFIG_KVM_WIFI`); the Waveshare ESP32-P4-ETH is unaffected. A new "Connection"
+  setting picks one link at a time - Ethernet, WiFi station, or the device's own
+  access point - and the console gains a network switcher in the status bar (the
+  pill shows the active link and a click swaps modes). The device advertises its
+  hostname over mDNS and DHCP on whichever link is active. On the ESP32-P4 the
+  single SD host controller is shared between the C6's SDIO link and the microSD
+  slot, so the two are mutually exclusive: in Ethernet mode the microSD works
+  (esp-hosted is released before it mounts); in a WiFi mode the radio holds the
+  controller and virtual media is unavailable.
+
 ### Changed
 - 1080p H.264 went from ~15 to ~22 fps (+46%) on rev >= 3.0. The synchronous encode
   holds one frame buffer for its whole ~42 ms, and with only two buffers the

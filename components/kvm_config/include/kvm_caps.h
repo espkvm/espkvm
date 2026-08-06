@@ -39,6 +39,9 @@ typedef enum {
     KVM_CAP_TS,         /**< native Tailscale (microlink) subsystem present (config
                              editable; connection state is reported via kvm_ts_status,
                              so a missing key never disables the key field) */
+    KVM_CAP_WIFI,       /**< WiFi via an onboard ESP32-C6 co-processor (esp-hosted over
+                             SDIO). Compiled only where a board carries a C6; reported
+                             available at runtime once the co-processor answers */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

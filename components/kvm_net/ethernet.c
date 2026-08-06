@@ -110,6 +110,39 @@ void kvm_eth_link(bool *up, int *mbps)
         *mbps = s_eth_mbps;
     }
 }
+#endif /* CONFIG_KVM_ETH_ENABLE */
+
+void kvm_net_advertise(const char *hostname)
+{
+    esp_err_t mdns_err = mdns_init();
+    if (mdns_err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS init failed: %s", esp_err_to_name(mdns_err));
+        return;
+    }
+    mdns_err = mdns_hostname_set(hostname);
+    if (mdns_err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS hostname: %s", esp_err_to_name(mdns_err));
+    }
+    mdns_err = mdns_instance_name_set("ESP-KVM");
+    if (mdns_err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS instance: %s", esp_err_to_name(mdns_err));
+    }
+    const bool tls = kvm_setting_bool("sec_https");
+    mdns_txt_item_t http_txt[] = {
+        {"path", "/"},
+    };
+    /* Advertised under the service the device really answers, so a browser or a
+     * discovery tool lands on the working port. */
+    mdns_err = mdns_service_add("ESP-KVM", tls ? "_https" : "_http", "_tcp", tls ? 443 : 80,
+                                http_txt, 1);
+    if (mdns_err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS service: %s", esp_err_to_name(mdns_err));
+    } else {
+        ESP_LOGI(TAG, "mDNS: %s://%s.local/", tls ? "https" : "http", hostname);
+    }
+}
+
+#if CONFIG_KVM_ETH_ENABLE
 
 esp_err_t ethernet_init(void)
 {
@@ -202,32 +235,7 @@ esp_err_t ethernet_init(void)
 
     ESP_RETURN_ON_ERROR(esp_eth_start(s_eth_handle), TAG, "eth start");
 
-    esp_err_t mdns_err = mdns_init();
-    if (mdns_err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS init failed: %s", esp_err_to_name(mdns_err));
-    } else {
-        mdns_err = mdns_hostname_set(hostname);
-        if (mdns_err != ESP_OK) {
-            ESP_LOGW(TAG, "mDNS hostname: %s", esp_err_to_name(mdns_err));
-        }
-        mdns_err = mdns_instance_name_set("ESP-KVM");
-        if (mdns_err != ESP_OK) {
-            ESP_LOGW(TAG, "mDNS instance: %s", esp_err_to_name(mdns_err));
-        }
-        const bool tls = kvm_setting_bool("sec_https");
-        mdns_txt_item_t http_txt[] = {
-            {"path", "/"},
-        };
-        /* Advertised under the service the device really answers, so a browser
-         * or a discovery tool lands on the working port. */
-        mdns_err = mdns_service_add("ESP-KVM", tls ? "_https" : "_http", "_tcp", tls ? 443 : 80,
-                                    http_txt, 1);
-        if (mdns_err != ESP_OK) {
-            ESP_LOGW(TAG, "mDNS service: %s", esp_err_to_name(mdns_err));
-        } else {
-            ESP_LOGI(TAG, "mDNS: %s://%s.local/", tls ? "https" : "http", hostname);
-        }
-    }
+    kvm_net_advertise(hostname);
     return ESP_OK;
 }
 #else

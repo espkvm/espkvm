@@ -11,6 +11,13 @@
 esp_err_t ethernet_init(void);
 
 /**
+ * Advertise the console over mDNS as <hostname>.local, under the service the
+ * device actually serves (_https or _http). Called by whichever interface
+ * becomes the active link - Ethernet or WiFi.
+ */
+void kvm_net_advertise(const char *hostname);
+
+/**
  * Current Ethernet link state. @p up is set to whether the cable is up, @p mbps
  * to the negotiated speed (10 or 100, 0 when down). Either pointer may be NULL.
  */
