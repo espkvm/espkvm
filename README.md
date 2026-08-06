@@ -81,33 +81,78 @@ device and shows the matching public key in the VPN tab to register on your hub.
 
 ## Hardware
 
-Two boards joined by a CSI ribbon: an ESP32-P4 that does the work, and a
-TC358743 bridge that turns the target's HDMI into a stream it can read.
+An ESP32-P4 board does the work, a TC358743 bridge turns the target's HDMI into a
+stream it can read, and a 15-pin CSI ribbon joins the two. An optocoupler module
+is an optional add-on for ATX power control.
+
+### The device — pick one ESP32-P4 board
 
 <table>
 <tr>
 <td width="50%"><img src="docs/board-p4.webp" alt="Waveshare ESP32-P4-ETH board"></td>
-<td width="50%"><img src="docs/board-c790.webp" alt="Geekworm C790 TC358743 HDMI-to-CSI capture board"></td>
+<td width="50%"><img src="docs/esp32-p4x-function-ev-board-isometric_v1.6.png" alt="Espressif ESP32-P4 Function EV Board"></td>
 </tr>
 <tr>
 <td valign="top">
 
-**The device - [Waveshare ESP32-P4-ETH](https://www.waveshare.com/esp32-p4-eth.htm)**
+**[Waveshare ESP32-P4-ETH](https://www.waveshare.com/esp32-p4-eth.htm)** &mdash; chip rev v1.3, the default
 
 ESP32-P4 with 32 MB PSRAM, 32 MB flash, 100M Ethernet, a Raspberry-Pi-compatible
-CSI connector, USB 2.0 OTG HS and a microSD slot. Another ESP32-P4 board with
-Ethernet and the same CSI connector can run it too - the pins are set in
-[menuconfig](docs/PORTING.md), not in the code. The Espressif ESP32-P4 Function
-EV Board (chip rev v3.2) has its own build target; see [boards/](boards/README.md).
+CSI connector, USB 2.0 OTG HS and a microSD slot. Built by plain `idf.py build`.
 
 </td>
 <td valign="top">
 
-**The capture - [Geekworm C790](https://wiki.geekworm.com/C790)**
+**[Espressif ESP32-P4 Function EV Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4x-function-ev-board/user_guide.html)** &mdash; chip rev v3.2
+
+Espressif's own board, with an onboard ESP32-C6 &mdash; so it also does WiFi
+(station, access point, and the rescue hotspot). Its own build target
+(`boards/funcev_p4.defaults`), and the [browser flasher](https://espkvm.io/flash/)
+offers it directly. The rev 3.2 silicon feeds native YUV422 straight into the
+H.264 and JPEG encoders (no PPA colour-convert pass), which frees ~4 MB of PSRAM
+for a deeper capture ring and lifts 1080p to a little over 20 fps.
+
+</td>
+</tr>
+</table>
+
+Any other ESP32-P4 board with Ethernet and the same CSI connector can run it too
+&mdash; the pins are set in [menuconfig](docs/PORTING.md), not in the code.
+
+**The chip revision matters.** Below revision 3.0 several peripherals behave
+differently and rev <3.0 and >=3.0 are mutually exclusive build targets. On rev
+<3.0 the colour conversion the H.264 encoder needs goes through the PPA; on rev
+>=3.0 the encoders take the captured YUV422 (or RGB) directly and the PPA is not
+used. The default build (`sdkconfig.defaults`) selects the pre-3.0 family, so a
+v1.x part builds and runs as shipped; a rev 3.x board is built from its own
+overlay (see [boards/](boards/README.md)). What was measured on the boards in
+front of us, including the documented claims that turned out to be false, is
+written down in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
+
+### Companion boards
+
+<table>
+<tr>
+<td width="50%"><img src="docs/board-c790.webp" alt="Geekworm C790 TC358743 HDMI-to-CSI capture board"></td>
+<td width="50%" align="center" valign="middle"><em>any two-channel<br>optocoupler module</em></td>
+</tr>
+<tr>
+<td valign="top">
+
+**The capture — [Geekworm C790](https://wiki.geekworm.com/C790)** (required)
 
 A TC358743 HDMI -> MIPI CSI-2 bridge that turns the target's HDMI output into a
 camera stream the ESP32-P4 can read. Any other TC358743 capture board should do
 just as well.
+
+</td>
+<td valign="top">
+
+**ATX power control — an optocoupler module** (optional)
+
+A small board that presses the target's power and reset buttons and senses the
+power LED without a direct electrical connection. Wiring is in
+[docs/wiring.md](docs/wiring.md).
 
 </td>
 </tr>
@@ -121,27 +166,6 @@ boot-from-image.
 used only to identify the hardware. ESP-KVM is not affiliated with Espressif,
 Waveshare or Geekworm. The pin map is in
 `components/kvm_board/include/kvm_board.h`.</sub>
-
-**Also supported - [Espressif ESP32-P4 Function EV Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4x-function-ev-board/user_guide.html) (chip rev v3.2)**
-
-<img src="docs/board-funcev.webp" width="45%" alt="Espressif ESP32-P4 Function EV Board">
-
-Espressif's own ESP32-P4 board. It has its own build target
-(`boards/funcev_p4.defaults`) and the [browser flasher](https://espkvm.io/flash/)
-offers it directly - pick it from the board list. The rev 3.2 silicon captures
-native YUV422 straight into the H.264 and JPEG encoders, so it needs no PPA
-colour-convert pass; that frees ~4 MB of PSRAM for a deeper capture-buffer ring,
-which lifts 1080p to a little over 20 fps.
-
-**The chip revision matters.** Below revision 3.0 several peripherals behave
-differently and rev <3.0 and >=3.0 are mutually exclusive build targets. On rev
-<3.0 the colour conversion the H.264 encoder needs goes through the PPA; on rev
->=3.0 the encoders take the captured YUV422 (or RGB) directly and the PPA is not
-used. The default build (`sdkconfig.defaults`) selects the pre-3.0 family, so a
-v1.x part builds and runs as shipped; a rev 3.x board is built from its own
-overlay (see [boards/](boards/README.md)). What was measured on the boards in
-front of us, including the documented claims that turned out to be false, is
-written down in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
 ## Quick start
 
