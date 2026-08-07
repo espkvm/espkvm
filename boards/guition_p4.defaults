@@ -22,12 +22,12 @@
 # to the HS port (that is the keyboard/mouse the target sees).
 
 # --- chip revision ----------------------------------------------------------
-# CONFIRM: the chip revision is not documented. This is a 2025 board, so it is very
-# likely rev v3.x - keep the two lines below if so (they also compile esp_h264's
-# faster RGB/YUV422-direct path). If it is actually a rev <3.0 part, DELETE both
-# lines so it builds against the pre-3.0 family like Waveshare.
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
-CONFIG_ESP32P4_REV_MIN_300=y
+# Tested by DaveDavenport (2026-08): his Guition is pre-3.0 silicon, so build
+# against the rev <3.0 family like the Waveshare reference - Ethernet, USB HID and
+# 1080p capture all confirmed. If your unit is rev 3.x, flip these to =n / =y for
+# esp_h264's faster RGB/YUV422-direct path (see boards/funcev_p4.defaults).
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_300=n
 
 # --- flash / partitions -----------------------------------------------------
 # 16 MB; use the shared 16 MB table (same app/OTA slots as the 32 MB one, smaller

@@ -7,6 +7,27 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-07
+
+### Added
+- **Headscale (self-hosted Tailscale).** Point the device's native Tailscale client
+  at your own Headscale or Ionscale control server instead of Tailscale's cloud -
+  just a control-server URL (and optional port) in the VPN settings.
+
+### Changed
+- The target now sees the "monitor" as **ESP-KVM** instead of the capture chip's
+  Toshiba name.
+
+### Fixed
+- The Waveshare ESP32-P4-NANO and Guition ESP32-P4-M3-Dev now build for pre-3.0
+  silicon by default. The units a contributor actually tested turned out to be
+  pre-3.0, and the 0.18.0 images (built for rev 3.x) wouldn't boot on them. Capture,
+  USB and Ethernet are confirmed working on both; rev-3.x owners can flip a config
+  for the faster H.264 path.
+- The PWA install splash was blurry on Android - the icons were marked maskable
+  without any padding, so it zoomed into the logo. They're plain "any" now, so it
+  renders crisp.
+
 ## [0.18.0] - 2026-08-06
 
 ### Added

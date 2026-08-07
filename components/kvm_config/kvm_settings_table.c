@@ -405,6 +405,21 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_TS,
     },
     {
+        .key = "ts_control_url", .section = "vpn", .type = KVM_VT_STR,
+        .title = "Control server",
+        .help = "Coordination server for a self-hosted control plane (Headscale, "
+                "Ionscale). Empty uses Tailscale's own (controlplane.tailscale.com). "
+                "Host only, no scheme - e.g. headscale.example.com.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_TS,
+    },
+    {
+        .key = "ts_control_port", .section = "vpn", .type = KVM_VT_INT,
+        .title = "Control server port",
+        .help = "Port for the control server. 0 = default (443 with TLS, else 80). "
+                "Set only if your Headscale listens on a non-standard port.",
+        .def = 0, .min = 0, .max = 65535, .requires_cap = KVM_CAP_TS,
+    },
+    {
         .key = "ts_ctrl_tls", .section = "vpn", .type = KVM_VT_BOOL,
         .title = "Control plane over TLS",
         .help = "Reach the coordination server over HTTPS. Required for the hosted "

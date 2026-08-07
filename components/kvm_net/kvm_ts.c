@@ -47,6 +47,8 @@ static kvm_ts_identity_cb_t s_identity_cb;
 static char s_auth[64];
 static char s_name[64];
 static bool s_tls;
+static char s_ctrl_host[64]; /* self-hosted control server (Headscale); "" = Tailscale */
+static uint16_t s_ctrl_port;
 
 static void ts_task(void *arg);
 
@@ -153,10 +155,13 @@ static void ts_reconcile(void)
         name = kvm_setting_str("net_hostname");
     }
     const bool tls = kvm_setting_bool("ts_ctrl_tls");
+    /* Self-hosted control server (Headscale/Ionscale); empty = hosted Tailscale. */
+    const char *ctrl = kvm_setting_str("ts_control_url");
+    const uint16_t ctrl_port = (uint16_t)kvm_setting_int("ts_control_port");
 
     /* Already joined with these exact parameters? Nothing to do. */
     if (s_started && strcmp(auth, s_auth) == 0 && strcmp(name ? name : "", s_name) == 0 &&
-        tls == s_tls) {
+        tls == s_tls && strcmp(ctrl ? ctrl : "", s_ctrl_host) == 0 && ctrl_port == s_ctrl_port) {
         kvm_cap_report(KVM_CAP_TS, true, NULL);
         return;
     }
@@ -167,6 +172,8 @@ static void ts_reconcile(void)
     snprintf(s_auth, sizeof(s_auth), "%s", auth);
     snprintf(s_name, sizeof(s_name), "%s", name ? name : "");
     s_tls = tls;
+    snprintf(s_ctrl_host, sizeof(s_ctrl_host), "%s", ctrl ? ctrl : "");
+    s_ctrl_port = ctrl_port;
 
     microlink_config_t cfg = {
         .auth_key = s_auth,
@@ -185,6 +192,10 @@ static void ts_reconcile(void)
         /* Reach the hosted control plane, which is HTTPS-only. Operators pointing
          * at a plain-HTTP Headscale can turn this off. */
         .ctrl_tls = tls,
+        /* A self-hosted control server (Headscale/Ionscale), or NULL for Tailscale.
+         * s_ctrl_host is a static buffer so it outlives the session, like s_auth. */
+        .ctrl_host = s_ctrl_host[0] ? s_ctrl_host : NULL,
+        .ctrl_port = s_ctrl_port,
     };
 
     /* A failed init/start is a runtime error to log and retry on the next apply,
