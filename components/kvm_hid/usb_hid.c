@@ -373,7 +373,7 @@ const char *usb_hid_target_os(void)
         return "unknown"; /* too little of an enumeration to tell */
     }
     int langid = 0;
-    bool has_ee = false, dup = false;
+    bool has_ee = false, dup = false, langid_first = false, first_string = true;
     int prev = -1;
     for (int i = 0; i < n; i++) {
         if ((s_probe[i] >> 12) != 2) { /* string requests only */
@@ -381,6 +381,13 @@ const char *usb_hid_target_os(void)
             continue;
         }
         const int idx = s_probe[i] & 0x0FFF;
+        if (first_string) {
+            /* Linux asks for the langid (S00) before any string; macOS asks for
+             * it last. This is the tell that separates them when a Linux host also
+             * happens to re-read one string (e.g. udev reading the serial twice). */
+            langid_first = (idx == 0);
+            first_string = false;
+        }
         if (idx == 0xEE) {
             has_ee = true;
         }
@@ -400,7 +407,11 @@ const char *usb_hid_target_os(void)
     if (langid >= 3) {
         return "android";
     }
-    if (dup) {
+    /* macOS reads strings twice in a row AND requests the langid last; a lone
+     * repeated string on a host that asked for the langid first is Linux, not
+     * macOS (an ASUS NUC on Ubuntu that re-read its serial three times was being
+     * misidentified as a Mac). */
+    if (dup && !langid_first) {
         return "macos";
     }
     return "linux";

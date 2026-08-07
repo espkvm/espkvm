@@ -59,14 +59,15 @@ void kvm_storage_status(kvm_storage_status_t *out);
 const char *kvm_storage_mount_point(void);
 
 /**
- * Whether the device can write to the card. False on this board: the SD write
- * path times out at any clock fast enough to serve from, so images are prepared
- * in an external reader and the card is served read-only. The web layer uses
- * this to disable upload and delete rather than let them fail.
+ * Whether the device can write to the card. On pre-3.0 silicon this is always
+ * false: the SD write path times out at any clock fast enough to serve from, so
+ * images are prepared in an external reader and the card is served read-only. On
+ * rev >= 3.0 the controller writes reliably, so this is true whenever a card is
+ * mounted. The web layer uses it to enable/disable upload and delete.
  */
 bool kvm_storage_writable(void);
 
-/** Human-readable reason the card is read-only, for the UI. */
+/** Human-readable reason writing is unavailable (NULL when writable), for the UI. */
 const char *kvm_storage_write_unavailable_reason(void);
 
 /* ---- virtual media: an image file exposed to the target over USB MSC ------

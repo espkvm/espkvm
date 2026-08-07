@@ -6,6 +6,8 @@
 
 #include <string.h>
 
+#include "sdkconfig.h"
+
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -26,13 +28,17 @@
 #define MEDIA_BLOCK_SIZE 512u
 
 /*
- * The card is served read-only. This board's SD interface is marginal (a known
- * ESP32-P4 limitation): it reads reliably only at a low clock (see the bus setup
- * below) and cannot write at all - write commands time out getting status at
- * every clock the read path can use, with no software knob for the write-side
- * timing. So images are prepared in an external card reader and the device only
- * reads. This lets the web layer disable upload/delete with a plain reason
- * instead of letting them fail.
+ * microSD write is gated on the chip revision. On pre-3.0 silicon this board's SD
+ * interface is marginal (a known ESP32-P4 limitation): it reads reliably only at a
+ * low clock (see the bus setup below) and cannot write at all - write commands time
+ * out getting status at every clock the read path can use, with no software knob for
+ * the write-side timing. So there the card is read-only and images are prepared in
+ * an external reader, and the web layer disables upload/delete with a plain reason.
+ *
+ * On rev >= 3.0 silicon (CONFIG_ESP32P4_REV_MIN_300) the SD controller writes
+ * reliably - verified on hardware (a full write + read-back on a Function EV board) -
+ * so upload and delete are enabled. Both codepaths are already implemented in the web
+ * layer; kvm_storage_writable() is the single switch between them.
  */
 #define SD_WRITE_UNAVAILABLE_REASON \
     "this board cannot write the microSD reliably; prepare the card in a reader"
@@ -154,12 +160,23 @@ const char *kvm_storage_mount_point(void)
 
 bool kvm_storage_writable(void)
 {
+#if CONFIG_ESP32P4_REV_MIN_300
+    /* rev >= 3.0 writes the microSD reliably; writable once a card is mounted. */
+    return s_card != NULL;
+#else
+    /* pre-3.0: SD write times out - card stays read-only regardless of a card. */
     return false;
+#endif
 }
 
 const char *kvm_storage_write_unavailable_reason(void)
 {
+#if CONFIG_ESP32P4_REV_MIN_300
+    /* Only reached when writable is false, i.e. no card is in the slot. */
+    return s_card ? NULL : "no microSD card in the slot";
+#else
     return SD_WRITE_UNAVAILABLE_REASON;
+#endif
 }
 
 void kvm_storage_status(kvm_storage_status_t *out)

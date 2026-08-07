@@ -7,6 +7,19 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-08-07
+
+### Changed
+- microSD is now **writable on rev-3.x boards** - you can upload and delete images
+  from the console. The write path was there all along but gated off, because the
+  older ESP32-P4 stepping times out on SD writes; rev 3.x handles it fine (verified
+  on hardware). Pre-3.0 boards stay read-only.
+
+### Fixed
+- A Linux machine that re-reads a USB string descriptor (an ASUS NUC on Ubuntu
+  re-reading its serial number) was being detected as a Mac. The OS guess now also
+  checks that the langid is requested last - the macOS tell - so Linux reads as Linux.
+
 ## [0.19.0] - 2026-08-07
 
 ### Added
