@@ -7,6 +7,19 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-08-09
+
+### Fixed
+- ATX power control could never be turned on: the settings that configure it (the
+  button GPIOs and the enable toggle) were hidden until ATX was already working -
+  which needed those very settings. A deadlock. The Power settings are now always
+  visible, so you can wire up the optocouplers, set the GPIOs, and enable it. Thanks
+  to marcopompili for the report.
+- OTA updates sometimes finished but didn't reboot on their own (issue #13, thanks
+  petrn). The restart was fired inline from the request handler right after the
+  upload, where a blocked response send or an already-closed connection could swallow
+  it; it now runs on a short timer and reliably reboots once the new image is written.
+
 ## [0.19.1] - 2026-08-07
 
 ### Changed

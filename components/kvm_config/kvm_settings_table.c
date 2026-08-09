@@ -176,21 +176,21 @@ static const kvm_setting_t s_settings[] = {
         .key = "atx_enable", .section = "power", .type = KVM_VT_BOOL,
         .title = "Enable ATX control",
         .help = "Requires optocouplers wired to the target's front-panel header.",
-        .def = 0, .requires_cap = KVM_CAP_ATX,
+        .def = 0, .requires_cap = -1,
     },
     {
         .key = "atx_pwr_gpio", .section = "power", .type = KVM_VT_INT,
         .title = "Power button GPIO",
         .help = "Drives the optocoupler across the target's power button. A free "
                 "pin on the Waveshare board; 20 is a safe default. -1 to disable.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_ATX, .flags = KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "atx_rst_gpio", .section = "power", .type = KVM_VT_INT,
         .title = "Reset button GPIO",
         .help = "Drives the optocoupler across the target's reset button. 21 is a "
                 "safe default. -1 to disable.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_ATX, .flags = KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "atx_led_gpio", .section = "power", .type = KVM_VT_INT,
@@ -198,26 +198,26 @@ static const kvm_setting_t s_settings[] = {
         .help = "Reads the target's power LED through an optocoupler. Wire it to the "
                 "power LED, not the HDD LED, which only blinks on disk activity. 22 "
                 "is a safe default. -1 if you are not sensing the LED.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_ATX, .flags = KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "atx_short_ms", .section = "power", .type = KVM_VT_INT,
         .title = "Short press (ms)",
         .help = "How long a normal power or reset press is held.",
-        .min = 50, .max = 2000, .def = 200, .requires_cap = KVM_CAP_ATX,
+        .min = 50, .max = 2000, .def = 200, .requires_cap = -1,
     },
     {
         .key = "atx_long_ms", .section = "power", .type = KVM_VT_INT,
         .title = "Force-off hold (ms)",
         .help = "How long the power button is held for a hard power off.",
-        .min = 1000, .max = 15000, .def = 5000, .requires_cap = KVM_CAP_ATX,
+        .min = 1000, .max = 15000, .def = 5000, .requires_cap = -1,
     },
     {
         .key = "atx_active_high", .section = "power", .type = KVM_VT_BOOL,
         .title = "Buttons active-high",
         .help = "On to press the button when the GPIO drives high (high-level-trigger "
                 "optocoupler modules). Turn off if your module presses on a low.",
-        .def = 1, .requires_cap = KVM_CAP_ATX,
+        .def = 1, .requires_cap = -1,
     },
     {
         /* Key kept <= 15 chars: NVS rejects longer keys, and "atx_led_active_high"
@@ -226,7 +226,7 @@ static const kvm_setting_t s_settings[] = {
         .title = "Power LED active-high",
         .help = "On if the LED sense reads high when the target is powered. Flip it if "
                 "the reported power state is inverted.",
-        .def = 1, .requires_cap = KVM_CAP_ATX,
+        .def = 1, .requires_cap = -1,
     },
 
     /* ---- audio ---------------------------------------------------------- */

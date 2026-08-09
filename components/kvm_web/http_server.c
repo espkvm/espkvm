@@ -312,6 +312,33 @@ static esp_err_t api_system_usbprobe_get(httpd_req_t *req)
 }
 
 /*
+ * Restart shortly, from a timer rather than inline. Calling esp_restart() straight
+ * from a request handler proved unreliable after a large OTA (issue #13): the
+ * handler task can be mid-teardown with its TLS session, or blocked in the response
+ * send (up to send_wait_timeout), so the reboot sometimes never happened. A one-shot
+ * timer fires it from a clean context a moment after we reply.
+ */
+static void restart_soon_cb(void *arg)
+{
+    (void)arg;
+    esp_restart();
+}
+
+static void restart_soon(uint32_t delay_ms)
+{
+    static esp_timer_handle_t timer;
+    if (!timer) {
+        const esp_timer_create_args_t args = {.callback = restart_soon_cb, .name = "restart"};
+        if (esp_timer_create(&args, &timer) != ESP_OK) {
+            esp_restart(); /* fall back to an inline restart if the timer won't create */
+            return;
+        }
+    }
+    (void)esp_timer_stop(timer);
+    (void)esp_timer_start_once(timer, (uint64_t)delay_ms * 1000);
+}
+
+/*
  * Receive a firmware image and boot it next.
  *
  * The image is streamed straight into the inactive slot - it is larger than
@@ -387,13 +414,11 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
     }
 
     ESP_LOGW(TAG, "update written to %s, restarting", target->label);
+    /* Arm the reboot before replying, so it fires even if the send below blocks or
+     * the connection is already gone (issue #13). */
+    restart_soon(1000);
     httpd_resp_set_type(req, "application/json");
-    esp_err_t sent = httpd_resp_sendstr(req, "{\"status\":\"written\",\"restarting\":true}");
-
-    /* Let the response reach the browser before the device disappears. */
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return sent;
+    return httpd_resp_sendstr(req, "{\"status\":\"written\",\"restarting\":true}");
 }
 
 /*
