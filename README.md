@@ -13,7 +13,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/espkvm/espkvm"><img src="docs/star-on-github.svg" height="44" alt="Star us on GitHub"></a>
+  &nbsp;
   <a href="https://buymeacoffee.com/dexif"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=dexif&button_colour=FFDD00&font_colour=000000&font_family=Inter&outline_colour=000000&coffee_colour=ffffff" height="40" alt="Buy me a coffee"></a>
+</p>
+
+<p align="center">
+  <sub>A ⭐ costs you nothing and helps others find the project.</sub>
 </p>
 
 An IP-KVM built from an ESP32-P4 and a Toshiba TC358743 HDMI-to-CSI bridge. It
@@ -463,10 +469,11 @@ A 3D-printed enclosure for the original parts is published by jrowny on
 
 ## Support
 
-ESP-KVM is free and open source. If it saved you a trip to a dead machine and you
-want to say thanks, you can [buy me a coffee](https://buymeacoffee.com/dexif) -
-entirely optional, and contributions of code, issues and ideas are just as
-welcome.
+ESP-KVM is free and open source. The easiest way to help is to
+[star it on GitHub](https://github.com/espkvm/espkvm) - it costs nothing and helps
+others find the project. If it saved you a trip to a dead machine and you want to say
+thanks, you can [buy me a coffee](https://buymeacoffee.com/dexif) - entirely optional,
+and contributions of code, issues and ideas are just as welcome.
 
 ## Licence
 
