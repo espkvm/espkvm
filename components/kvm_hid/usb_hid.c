@@ -12,6 +12,7 @@
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -464,12 +465,30 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
 
 /* ---- MSC (virtual media) callbacks -------------------------------------- */
 /*
- * The target sees one removable, read-only LUN. Its medium is whatever image
- * kvm_storage currently has open; with none open the drive answers "no medium"
- * like an empty card reader, which is a state every host understands. All the
- * disk lives on the microSD and is read on the target's behalf, so the firmware
- * never yields the card - uploads and target reads run at the same time.
+ * The target sees one removable LUN. Its medium is whatever kvm_storage has open;
+ * with none open the drive answers "no medium" like an empty card reader, which
+ * every host understands. The disk lives on the microSD (or on-flash rescue) and
+ * is read on the target's behalf, so the firmware never yields the card - uploads
+ * and target reads run at the same time. It is read-only except for the whole-card
+ * passthrough, which the target may write while it owns the card exclusively.
  */
+
+/*
+ * The device type the host sees: a CD-ROM for .iso images (so it boots and mounts
+ * as an optical drive), a removable disk otherwise. The host reads this once, at
+ * enumeration; usb_hid_msc_set_type re-attaches the device when the type changes
+ * so it is read again. s_msc_present tracks whether the MSC interface is even in
+ * the descriptor (only when virtual media was enabled at boot). Block size follows
+ * the type: 2048 for a CD, 512 for a disk.
+ */
+static bool s_msc_cdrom;
+static bool s_msc_present;
+static esp_timer_handle_t s_msc_reconnect_timer;
+
+static uint32_t msc_block_size(void)
+{
+    return s_msc_cdrom ? 2048u : 512u;
+}
 
 void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16],
                         uint8_t product_rev[4])
@@ -519,27 +538,31 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
 bool tud_msc_is_writable_cb(uint8_t lun)
 {
     (void)lun;
-    return false; /* images are served read-only in this version */
+    /* Only the whole-card passthrough is writable; everything else is read-only. */
+    return kvm_storage_media_writable();
 }
 
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
     (void)lun;
-    const uint64_t addr = (uint64_t)lba * 512u + offset;
+    const uint64_t addr = (uint64_t)lba * msc_block_size() + offset;
     return kvm_storage_media_read(addr, buffer, bufsize);
 }
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer,
                            uint32_t bufsize)
 {
-    (void)lba;
-    (void)offset;
-    (void)buffer;
-    (void)bufsize;
-    /* Read-only: reject writes with a write-protect sense. is_writable_cb above
-     * already tells the host as much, so this is the belt-and-suspenders path. */
-    tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00);
-    return -1;
+    if (!kvm_storage_media_writable()) {
+        /* Reject with a write-protect sense; is_writable_cb already told the host. */
+        tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00);
+        return -1;
+    }
+    const uint64_t addr = (uint64_t)lba * msc_block_size() + offset;
+    const int32_t n = kvm_storage_media_write(addr, buffer, bufsize);
+    if (n < 0) {
+        tud_msc_set_sense(lun, SCSI_SENSE_MEDIUM_ERROR, 0x03, 0x00);
+    }
+    return n;
 }
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
@@ -554,6 +577,43 @@ int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, u
         tud_msc_set_sense(lun, SCSI_SENSE_ILLEGAL_REQUEST, 0x20, 0x00);
         return -1;
     }
+}
+
+uint32_t tud_msc_inquiry2_cb(uint8_t lun, scsi_inquiry_resp_t *resp, uint32_t bufsize)
+{
+    (void)lun;
+    (void)bufsize;
+    resp->peripheral_device_type = s_msc_cdrom ? SCSI_PDT_CD_DVD : SCSI_PDT_DIRECT_ACCESS;
+    resp->is_removable = 1;
+    memcpy(resp->vendor_id, "ESP-KVM ", 8);
+    memcpy(resp->product_id, "Virtual Media   ", 16);
+    memcpy(resp->product_rev, "1.0 ", 4);
+    return sizeof(scsi_inquiry_resp_t);
+}
+
+static void msc_reconnect_cb(void *arg)
+{
+    (void)arg;
+    tud_connect();
+}
+
+void usb_hid_msc_set_type(bool cdrom)
+{
+    if (cdrom == s_msc_cdrom) {
+        return;
+    }
+    s_msc_cdrom = cdrom;
+    /* Nothing for the host to re-read until the drive exists and is enumerated. */
+    if (!s_msc_present || !s_msc_reconnect_timer || !tud_mounted()) {
+        return;
+    }
+    /* Drop off the bus and come back, so the host re-issues INQUIRY and picks up
+     * the new device type. Deferred reconnect keeps the caller (a settings write
+     * on the web task) from blocking; the HID endpoints blink out for the ~100 ms
+     * this takes, which is the cost of swapping an ISO for a disk image. */
+    tud_disconnect();
+    (void)esp_timer_stop(s_msc_reconnect_timer);
+    (void)esp_timer_start_once(s_msc_reconnect_timer, 100 * 1000);
 }
 
 /* ---- report emission ---------------------------------------------------- */
@@ -871,6 +931,11 @@ esp_err_t usb_hid_init(void)
      * endpoints when virtual media is actually wanted.
      */
     const bool with_msc = kvm_setting_bool("msc_enable");
+    s_msc_present = with_msc;
+    if (with_msc) {
+        const esp_timer_create_args_t args = {.callback = msc_reconnect_cb, .name = "msc_reconn"};
+        (void)esp_timer_create(&args, &s_msc_reconnect_timer);
+    }
     build_config_descriptor(s_fs_config_descriptor, with_msc, k_msc_iface_fs, sizeof(k_msc_iface_fs));
     build_config_descriptor(s_hs_config_descriptor, with_msc, k_msc_iface_hs, sizeof(k_msc_iface_hs));
     ESP_LOGI(TAG, "USB functions: HID%s", with_msc ? " + mass storage" : " only");

@@ -86,6 +86,14 @@ size_t usb_hid_probe_trace(char *out, size_t len);
  */
 const char *usb_hid_target_os(void);
 
+/**
+ * Choose the device type the virtual-media drive presents: a CD-ROM (for .iso
+ * images) or a removable disk. If the drive is already enumerated and the type
+ * changes, the device re-attaches so the host reads the new type. A no-op when
+ * virtual media was not enabled at boot (no drive to re-type).
+ */
+void usb_hid_msc_set_type(bool cdrom);
+
 #ifdef __cplusplus
 }
 #endif

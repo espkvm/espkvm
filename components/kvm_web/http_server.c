@@ -609,9 +609,13 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
         cJSON_AddBoolToObject(rj, "hasImage", rescue.has_image);
         cJSON_AddNumberToObject(rj, "capacityBytes", (double)rescue.capacity_bytes);
     }
+    /* While the whole card is handed to the target, the firmware stays off the
+     * filesystem, so there is no file list to give and uploads are disabled. */
+    const bool handed_over = kvm_storage_card_handed_over();
+    cJSON_AddBoolToObject(root, "handedOver", handed_over);
     cJSON *images = cJSON_AddArrayToObject(root, "images");
 
-    if (sd.mounted && images) {
+    if (sd.mounted && !handed_over && images) {
         DIR *dir = opendir(kvm_storage_mount_point());
         if (dir) {
             struct dirent *ent;
@@ -678,6 +682,13 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
 /* Give up if the sender goes quiet this many receive-timeouts in a row, so a
  * dropped connection leaves neither a zombie task nor a half-written file. */
 #define UPLOAD_MAX_IDLE 3
+/* Staging buffer for the card write. Filled across as many recv() calls as it
+ * takes (a TLS record or an lwIP segment at a time) then written in one go, so
+ * the SD sees a single multi-block command per 64 KB rather than one per recv -
+ * far less per-write overhead. In PSRAM: the P4 has 32 MB of it and this keeps
+ * internal RAM free for the TLS session. Upload only runs on rev >= 3.0
+ * (kvm_storage_writable), so none of this executes on the Waveshare board. */
+#define UPLOAD_CHUNK (64 * 1024)
 
 typedef struct {
     httpd_req_t *req;
@@ -715,34 +726,43 @@ static void upload_worker_task(void *arg)
     }
     ESP_LOGW(TAG, "image upload: %zu bytes -> %s", ctx->content_len, path);
 
-    char *chunk = malloc(4096);
+    char *chunk = heap_caps_malloc(UPLOAD_CHUNK, MALLOC_CAP_SPIRAM);
     bool ok = chunk != NULL;
     size_t received = 0;
     int idle = 0;
     while (ok && received < ctx->content_len) {
-        const size_t want =
-            4096u < (ctx->content_len - received) ? 4096u : (ctx->content_len - received);
-        const int n = httpd_req_recv(req, chunk, want);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            if (++idle >= UPLOAD_MAX_IDLE) {
-                ESP_LOGE(TAG, "upload stalled after %zu of %zu bytes", received, ctx->content_len);
-                ok = false;
+        /* Fill the staging buffer, or take whatever arrived before a lull, then
+         * flush it as one write. recv hands back a record at a time; batching
+         * them turns many small SD writes into a few large ones. */
+        size_t filled = 0;
+        while (filled < UPLOAD_CHUNK && received + filled < ctx->content_len) {
+            const size_t room = UPLOAD_CHUNK - filled;
+            const size_t left = ctx->content_len - received - filled;
+            const int n = httpd_req_recv(req, chunk + filled, room < left ? room : left);
+            if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+                if (++idle >= UPLOAD_MAX_IDLE) {
+                    ESP_LOGE(TAG, "upload stalled after %zu of %zu bytes", received + filled,
+                             ctx->content_len);
+                    ok = false;
+                }
+                break; /* flush what we have, then re-check ok on the outer loop */
             }
-            continue;
+            idle = 0;
+            if (n <= 0) {
+                ESP_LOGE(TAG, "upload cut short after %zu of %zu bytes", received + filled,
+                         ctx->content_len);
+                ok = false;
+                break;
+            }
+            filled += (size_t)n;
         }
-        idle = 0;
-        if (n <= 0) {
-            ESP_LOGE(TAG, "upload cut short after %zu of %zu bytes", received, ctx->content_len);
-            ok = false;
-            break;
-        }
-        if (fwrite(chunk, 1, (size_t)n, f) != (size_t)n) {
+        if (filled && fwrite(chunk, 1, filled, f) != filled) {
             /* Almost always the card filled up. */
             ESP_LOGE(TAG, "write failed after %zu bytes: %s", received, strerror(errno));
             ok = false;
             break;
         }
-        received += (size_t)n;
+        received += filled;
     }
     free(chunk);
     fclose(f);

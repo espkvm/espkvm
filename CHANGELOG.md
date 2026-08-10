@@ -7,6 +7,27 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-10
+
+### Added
+- **Virtual media now serves the right kind of drive on its own.** An `.iso` is
+  presented to the target as a CD-ROM, so installers boot and mount as an optical
+  drive; anything else comes up as a removable disk. Nothing to set - though you can
+  still force CD-ROM or disk if a file is misnamed. Switching between the two re-plugs
+  the USB drive for you.
+- **Hand the whole microSD card to the target.** A new "Whole microSD card" item in
+  the Media panel exposes the entire card as a USB drive - every file, not one image.
+  On rev-3.x boards it's read-write, so the target can copy files onto it; while the
+  card is handed over the console steps off it so there's a single owner, and re-reads
+  it when you switch the medium back (a reformat by the target is fine).
+- **Uploads show throughput and a time estimate**, so a slow multi-gigabyte write to
+  the card visibly moves instead of looking hung.
+
+### Changed
+- **The Media panel is now the one place to pick and turn on virtual media** - it has
+  its own on/off switch (with the restart reminder), the rescue slot shows its size,
+  and the duplicate "Mounted image" field is gone from Settings.
+
 ## [0.19.2] - 2026-08-09
 
 ### Fixed

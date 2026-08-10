@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 
 #include <string.h>
+#include <strings.h>
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -85,14 +86,51 @@ static void on_setting_changed(const char *key, void *user)
 }
 
 /*
- * Reconcile the virtual drive with the settings: offer the chosen image to the
- * target when the card is mounted, the feature is on, and an image is named;
- * otherwise show an empty drive. Called at boot and whenever a storage setting
- * changes, so inserting or ejecting from the console takes effect at once
- * without a USB re-enumeration.
+ * Whether the named medium should be served as a CD-ROM rather than a disk.
+ * msc_mode is the operator's override: 0 = auto, 1 = force CD-ROM, 2 = force disk.
+ * Auto picks CD-ROM for a .iso file and a disk for everything else; the reserved
+ * "@" media (rescue, whole card) have no extension, so auto leaves them a disk.
+ */
+static bool media_is_cdrom(const char *image)
+{
+    switch (kvm_setting_int("msc_mode")) {
+    case 1:
+        return true;
+    case 2:
+        return false;
+    default: /* auto */
+        break;
+    }
+    if (image[0] == '@') {
+        return false;
+    }
+    const size_t n = strlen(image);
+    return n >= 4 && strcasecmp(image + n - 4, ".iso") == 0;
+}
+
+/*
+ * Reconcile the virtual drive with the settings: offer the chosen medium to the
+ * target when the feature is on and something is named; otherwise show an empty
+ * drive. Called at boot and whenever a storage setting changes, so swapping the
+ * medium from the console takes effect at once. The device type (CD-ROM vs disk)
+ * is handed to the USB layer, which re-attaches only if it actually changed.
  */
 static void apply_media_selection(void)
 {
+    /* Reserved names: "@rescue" is the on-flash image, "@wholesd" the whole card.
+     * Any other name is a file on the card. */
+    static char prev_image[64] = "";
+    const char *image = kvm_setting_str("msc_image");
+    const bool want = kvm_setting_bool("msc_enable") && image && image[0];
+    const char *effective = want ? image : "";
+
+    /* Coming out of the whole-card passthrough: the target may have written the
+     * card, so re-read its filesystem before we touch it again. */
+    if (strcmp(prev_image, "@wholesd") == 0 && strcmp(effective, "@wholesd") != 0) {
+        kvm_storage_reread();
+    }
+    snprintf(prev_image, sizeof(prev_image), "%s", effective);
+
     kvm_storage_status_t sd;
     kvm_storage_status(&sd);
     kvm_rescue_t rescue;
@@ -102,23 +140,28 @@ static void apply_media_selection(void)
     kvm_cap_report(KVM_CAP_MSC, sd.mounted || rescue.supported,
                    "no microSD card and no rescue partition");
 
-    /* The reserved name "@rescue" selects the on-flash image; any other name is
-     * a file on the card. Booting from the card is unchanged. */
-    const char *image = kvm_setting_str("msc_image");
-    const bool want = kvm_setting_bool("msc_enable") && image && image[0];
     esp_err_t err;
+    bool cdrom = false;
     if (want && strcmp(image, "@rescue") == 0) {
-        err = kvm_storage_media_select_rescue();
+        cdrom = media_is_cdrom(image);
+        err = kvm_storage_media_select_rescue(cdrom);
+    } else if (want && strcmp(image, "@wholesd") == 0) {
+        err = kvm_storage_media_select_whole_sd();
     } else if (want && sd.mounted) {
-        err = kvm_storage_media_select(image);
+        cdrom = media_is_cdrom(image);
+        err = kvm_storage_media_select(image, cdrom);
     } else {
         kvm_storage_media_eject();
+        usb_hid_msc_set_type(false);
         return;
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "cannot offer media '%s': %s", image, esp_err_to_name(err));
         kvm_storage_media_eject();
+        usb_hid_msc_set_type(false);
+        return;
     }
+    usb_hid_msc_set_type(cdrom);
 }
 
 /*

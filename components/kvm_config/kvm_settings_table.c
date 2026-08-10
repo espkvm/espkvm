@@ -18,7 +18,7 @@ static const char *const s_mouse_choices[] = {"absolute", "relative"};
 static const char *const s_engage_choices[] = {"click", "hover"};
 /* Only layouts with a verified character table; see web/src/layouts.js. */
 static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
-static const char *const s_media_choices[] = {"cdrom", "removable", "whole_sd"};
+static const char *const s_media_choices[] = {"auto", "cdrom", "disk"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
 static const char *const s_side_choices[] = {"left", "right"};
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
@@ -152,12 +152,19 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "msc_mode", .section = "storage", .type = KVM_VT_ENUM,
         .title = "Media type",
-        .help = "CD-ROM for bootable ISO images, removable for writable disk images, "
-                "or hand the whole microSD card to the target as a flash drive.",
+        .help = "How an image is presented to the target. \"auto\" serves a .iso as a "
+                "CD-ROM (so it boots and mounts as an optical drive) and any other file "
+                "as a removable disk - the right choice almost always. Force \"cdrom\" or "
+                "\"disk\" only if a file is misnamed. Handing over the whole card is picked "
+                "in the Media panel, not here. Switching the type re-attaches the USB drive.",
         .min = 0, .max = 2, .def = 0, .choices = s_media_choices, .requires_cap = KVM_CAP_MSC,
     },
     {
-        .key = "msc_image", .section = "storage", .type = KVM_VT_STR,
+        /* The active medium, chosen from the Media panel (a file name, or "@rescue"
+         * / "@wholesd"). Kept out of the settings panel - section "storage_hidden"
+         * is not one the panel renders - so the Media panel is the single place it
+         * is picked, rather than showing the same choice twice. */
+        .key = "msc_image", .section = "storage_hidden", .type = KVM_VT_STR,
         .title = "Mounted image",
         .help = "File on the microSD card currently offered to the target.",
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_MSC,
