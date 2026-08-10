@@ -36,6 +36,27 @@ menu "ESP-KVM"
                 it to the browser. Requires BCLK/LRCK/DATA wired from the capture
                 board to the ESP32-P4.
 
+        config KVM_ENABLE_DISPLAY
+            bool "Status display (I2C OLED / round SPI LCD)"
+            default y
+            help
+                Drive a small status display that shows the device's IP, link,
+                capture status and health. Two kinds are supported: an I2C OLED
+                (SSD1306/SH1106) that shares the capture chip's I2C bus and is
+                auto-detected with no dedicated pins; and a round colour SPI LCD
+                (GC9A01, e.g. the Waveshare 1.28"), which needs the SPI pins set
+                below. Off unless switched on in settings, and it does nothing
+                when no panel is connected, so it is safe to build into every board.
+
+        config KVM_GC9A01_SPI_HOST
+            int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
+            depends on KVM_ENABLE_DISPLAY
+            default 2
+            help
+                SPI peripheral index for the round GC9A01 LCD. Its GPIO pins are set
+                at runtime in Settings -> Display, not here. Only used when the
+                display type is GC9A01.
+
         config KVM_ENABLE_HTTPS
             bool "HTTPS and authentication"
             default y

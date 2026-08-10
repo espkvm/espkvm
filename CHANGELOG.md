@@ -7,6 +7,24 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-11
+
+### Added
+- **A little status display.** Solder on a small OLED (SSD1306 or SH1106,
+  auto-detected on the capture I2C bus) or a round GC9A01 colour LCD, switch it on in
+  Settings, and the device shows its IP, link, capture status and health right on the
+  panel - a boot logo first, then cycling pages with icons and temperature/RAM bars.
+  Off by default, and it stays out of the encoder's way so streaming is unaffected.
+- **Assign GPIO pins from the console.** Pin settings are now drop-downs of the free
+  GPIOs (plus "None"), and a new Pins tab shows the whole map at a glance - what the
+  board reserves, what you've assigned, and what's free. The ATX pins live on that map
+  now too, so they can't quietly collide with anything else.
+
+### Fixed
+- Scrolling the settings page no longer changes a setting when the pointer happens to
+  land on a drop-down - which could silently flip the display type and blank the screen.
+- The round LCD now shows the Tailscale address as well, matching the OLED.
+
 ## [0.20.0] - 2026-08-10
 
 ### Added

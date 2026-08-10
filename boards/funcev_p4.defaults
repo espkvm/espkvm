@@ -61,3 +61,13 @@ CONFIG_KVM_SD_PWR_GPIO=-1
 # CONFIG_KVM_ETH_RMII_RXD0_GPIO=29
 # CONFIG_KVM_ETH_RMII_RXD1_GPIO=30
 # CONFIG_KVM_BUTTON_GPIO=35   # set to -1 if there is no reachable BOOT button
+
+# Round GC9A01 SPI LCD: its GPIO pins are runtime settings (Settings -> Display).
+
+
+CONFIG_KVM_GC9A01_SPI_HOST=2
+
+# Log over USB-serial-JTAG (the same port used for flashing), so the console log
+# is readable without a UART adapter - and GPIO 37/38 that the UART console would
+# use become free pins.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "driver/i2c_master.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,6 +32,14 @@ typedef struct {
 void capture_start(void);
 
 void capture_status_get(kvm_video_status_t *out);
+
+/**
+ * The I2C master bus the capture bridge lives on (I2C_NUM_0, the board's
+ * TC358743 SDA/SCL). Shared so an optional status OLED wired to the same two
+ * lines can be probed and driven without any dedicated pins. NULL before the
+ * capture hardware has been brought up.
+ */
+i2c_master_bus_handle_t capture_i2c_bus(void);
 
 #ifdef __cplusplus
 }

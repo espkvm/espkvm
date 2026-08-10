@@ -78,6 +78,13 @@ static const cap_desc_t s_desc[KVM_CAP_COUNT] = {
     [KVM_CAP_NET_STATIC] = {"net_static", true, NULL},
     [KVM_CAP_WG] = {"wireguard", true, NULL},
     [KVM_CAP_TS] = {"tailscale", true, NULL},
+    [KVM_CAP_DISPLAY] = {"display",
+#if CONFIG_KVM_ENABLE_DISPLAY
+                         true,
+#else
+                         false,
+#endif
+                         "disp_enable"},
 };
 
 typedef struct {

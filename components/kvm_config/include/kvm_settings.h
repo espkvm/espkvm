@@ -32,6 +32,9 @@ typedef enum {
 enum {
     KVM_SF_REBOOT = 1u << 0, /**< takes effect only after a restart */
     KVM_SF_SECRET = 1u << 1, /**< never serialise the value (passwords) */
+    KVM_SF_PIN = 1u << 2,    /**< an INT that is a GPIO number: the console renders it
+                                 as a pin picker (free GPIOs + "None"), and it feeds the
+                                 pin map. -1 means unassigned. */
 };
 
 typedef struct {
@@ -48,6 +51,10 @@ typedef struct {
     uint16_t max_len;           /**< STR only, excluding the terminator */
     int8_t requires_cap;        /**< kvm_cap_t, or -1 when always applicable */
     uint8_t flags;              /**< KVM_SF_* */
+    const char *visible_key;    /**< when non-NULL, the console shows this setting only
+                                     while setting[visible_key] equals @p visible_val
+                                     (e.g. the GC9A01 pins only for the round LCD type) */
+    int32_t visible_val;
 } kvm_setting_t;
 
 /** Called after a value changed and was persisted. @p key is never NULL. */

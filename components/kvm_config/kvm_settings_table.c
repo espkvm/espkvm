@@ -21,6 +21,8 @@ static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
 static const char *const s_media_choices[] = {"auto", "cdrom", "disk"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
 static const char *const s_side_choices[] = {"left", "right"};
+/* Must match the driver names in kvm_display.c's driver table. */
+static const char *const s_display_choices[] = {"ssd1306", "sh1106", "gc9a01"};
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap"};
@@ -190,14 +192,14 @@ static const kvm_setting_t s_settings[] = {
         .title = "Power button GPIO",
         .help = "Drives the optocoupler across the target's power button. A free "
                 "pin on the Waveshare board; 20 is a safe default. -1 to disable.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
         .key = "atx_rst_gpio", .section = "power", .type = KVM_VT_INT,
         .title = "Reset button GPIO",
         .help = "Drives the optocoupler across the target's reset button. 21 is a "
                 "safe default. -1 to disable.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
         .key = "atx_led_gpio", .section = "power", .type = KVM_VT_INT,
@@ -205,7 +207,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Reads the target's power LED through an optocoupler. Wire it to the "
                 "power LED, not the HDD LED, which only blinks on disk activity. 22 "
                 "is a safe default. -1 if you are not sensing the LED.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
         .key = "atx_short_ms", .section = "power", .type = KVM_VT_INT,
@@ -582,6 +584,65 @@ static const kvm_setting_t s_settings[] = {
         .title = "Panel side",
         .help = "Which side of the screen the button rail and its panels sit on.",
         .min = 0, .max = 1, .def = 0, .choices = s_side_choices, .requires_cap = -1,
+    },
+
+    /* ---- status display ------------------------------------------------- */
+    {
+        .key = "disp_enable", .section = "display", .type = KVM_VT_BOOL,
+        .title = "Status display",
+        .help = "Drive a small display that shows the IP, link, capture status and "
+                "health. An I2C OLED (SSD1306/SH1106) shares the capture chip's I2C "
+                "and is auto-detected with no extra pins; a round SPI LCD (GC9A01) "
+                "uses the SPI pins set at build time. Off by default; does nothing "
+                "when no panel is connected.",
+        .def = 0, .requires_cap = -1,
+    },
+    {
+        .key = "disp_type", .section = "display", .type = KVM_VT_ENUM,
+        .title = "Display type",
+        .help = "Which panel is wired. SSD1306/SH1106 are 128x64 I2C OLEDs (pick SH1106 "
+                "if the image is shifted by two pixels or wraps). GC9A01 is a 240x240 "
+                "round colour SPI LCD, e.g. the Waveshare 1.28\" module.",
+        .min = 0, .max = 2, .def = 0, .choices = s_display_choices, .requires_cap = -1,
+    },
+    /* GC9A01 SPI pins (the I2C OLEDs need none - they share the capture bus).
+     * Pins, so the console offers only free GPIOs; a restart re-attaches on the
+     * new wiring. Defaults are a sane free set on the P4; set them to your board. */
+    {
+        .key = "disp_sclk", .section = "display", .type = KVM_VT_INT, .title = "LCD SCLK / CLK",
+        .help = "SPI clock GPIO for the GC9A01. Ignored by the I2C OLEDs.",
+        .min = -1, .max = 54, .def = 20, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+    },
+    {
+        .key = "disp_mosi", .section = "display", .type = KVM_VT_INT, .title = "LCD MOSI / DIN",
+        .help = "SPI data GPIO for the GC9A01.",
+        .min = -1, .max = 54, .def = 21, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+    },
+    {
+        .key = "disp_cs", .section = "display", .type = KVM_VT_INT, .title = "LCD CS",
+        .help = "Chip-select GPIO for the GC9A01.",
+        .min = -1, .max = 54, .def = 22, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+    },
+    {
+        .key = "disp_dc", .section = "display", .type = KVM_VT_INT, .title = "LCD DC",
+        .help = "Data/command GPIO for the GC9A01.",
+        .min = -1, .max = 54, .def = 45, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+    },
+    {
+        .key = "disp_rst", .section = "display", .type = KVM_VT_INT, .title = "LCD RST",
+        .help = "Reset GPIO for the GC9A01. -1 (None) if RST is tied to 3V3.",
+        .min = -1, .max = 54, .def = 33, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+    },
+    {
+        .key = "disp_bl", .section = "display", .type = KVM_VT_INT, .title = "LCD backlight",
+        .help = "Backlight GPIO for the GC9A01. -1 (None) if BL is tied to 3V3 (always on).",
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
 };
 /* clang-format on */

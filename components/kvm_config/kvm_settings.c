@@ -379,6 +379,15 @@ char *kvm_settings_schema_json(void)
              * the operator types a new one. */
             cJSON_AddBoolToObject(o, "secret", true);
         }
+        if (d->flags & KVM_SF_PIN) {
+            cJSON_AddBoolToObject(o, "pin", true);
+        }
+        if (d->visible_key) {
+            cJSON *si = cJSON_CreateObject();
+            cJSON_AddStringToObject(si, "key", d->visible_key);
+            cJSON_AddNumberToObject(si, "eq", d->visible_val);
+            cJSON_AddItemToObject(o, "showIf", si);
+        }
         cJSON_AddItemToArray(arr, o);
     }
     char *out = cJSON_PrintUnformatted(arr);

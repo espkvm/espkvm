@@ -44,6 +44,12 @@ static esp_cam_ctlr_handle_t s_cam;
 static isp_proc_handle_t s_isp_bypass;
 
 static capture_ctx_t s_cap;
+static i2c_master_bus_handle_t s_i2c_bus; /* shared with an optional status OLED */
+
+i2c_master_bus_handle_t capture_i2c_bus(void)
+{
+    return s_i2c_bus;
+}
 
 static void tc358743_resetn_pulse(void)
 {
@@ -348,6 +354,7 @@ capture_ctx_t *capture_hw_init_start(void)
         .flags = {.enable_internal_pullup = 1},
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus));
+    s_i2c_bus = i2c_bus; /* publish for the optional OLED sharing this bus */
 
     /* A missing capture card must not take the whole device down: without it the
      * KVM still serves HID, and the web UI explains what is wrong. */

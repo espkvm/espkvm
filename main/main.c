@@ -12,6 +12,7 @@
 #include "nvs_flash.h"
 
 #include "capture.h"
+#include "kvm_display.h"
 #include "ethernet.h"
 #include "wifi.h"
 #include "http_server.h"
@@ -340,6 +341,10 @@ void app_main(void)
 
     ESP_LOGI(TAG, "boot: capture");
     capture_start();
+
+    /* Optional status OLED. Starts after capture so the shared I2C bus exists;
+     * the task self-detects a panel and does nothing when none is wired. */
+    kvm_display_init();
 
     report_pending_capabilities();
     kvm_caps_log();

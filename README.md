@@ -62,6 +62,7 @@ Useful for what it does today, and honest about the rest.
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; ESP32-P4 Function EV board only (the Waveshare board has no radio). One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
+| Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306/SH1106, auto-detected on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
 | VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
 | HDMI audio | not implemented |

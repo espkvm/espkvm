@@ -103,6 +103,73 @@ static esp_err_t api_settings_schema_get(httpd_req_t *req)
     return send_json_owned(req, kvm_settings_schema_json());
 }
 
+/* Add a fixed-peripheral pin to the reserved list (skipped when disabled, -1). */
+static void pins_add_reserved(cJSON *arr, int pin, const char *use)
+{
+    if (pin < 0) {
+        return;
+    }
+    cJSON *o = cJSON_CreateObject();
+    if (!o) {
+        return;
+    }
+    cJSON_AddNumberToObject(o, "pin", pin);
+    cJSON_AddStringToObject(o, "use", use);
+    cJSON_AddItemToArray(arr, o);
+}
+
+/*
+ * The GPIO map the console needs for its pin pickers and the Pins tab: the usable
+ * range, and which pins the board's fixed peripherals hold (with labels). Pins
+ * assigned to editable settings are known to the console already (they are
+ * "pin"-flagged settings), so only the fixed ones are listed here.
+ */
+static esp_err_t api_pins_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    cJSON_AddNumberToObject(root, "usableMin", 0);
+    cJSON_AddNumberToObject(root, "usableMax", 54);
+    cJSON *r = cJSON_AddArrayToObject(root, "reserved");
+    if (r) {
+        pins_add_reserved(r, CONFIG_KVM_I2C_SDA_GPIO, "Capture I2C SDA");
+        pins_add_reserved(r, CONFIG_KVM_I2C_SCL_GPIO, "Capture I2C SCL");
+        pins_add_reserved(r, CONFIG_KVM_TC358743_RST_GPIO, "Capture reset");
+        pins_add_reserved(r, CONFIG_KVM_SD_CLK_GPIO, "microSD CLK");
+        pins_add_reserved(r, CONFIG_KVM_SD_CMD_GPIO, "microSD CMD");
+        pins_add_reserved(r, CONFIG_KVM_SD_D0_GPIO, "microSD D0");
+        pins_add_reserved(r, CONFIG_KVM_SD_D1_GPIO, "microSD D1");
+        pins_add_reserved(r, CONFIG_KVM_SD_D2_GPIO, "microSD D2");
+        pins_add_reserved(r, CONFIG_KVM_SD_D3_GPIO, "microSD D3");
+        pins_add_reserved(r, CONFIG_KVM_SD_PWR_GPIO, "microSD power");
+#if CONFIG_KVM_ETH_ENABLE
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_CLK_GPIO, "Ethernet REFCLK");
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_TX_EN_GPIO, "Ethernet TX_EN");
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_TXD0_GPIO, "Ethernet TXD0");
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_TXD1_GPIO, "Ethernet TXD1");
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_CRS_DV_GPIO, "Ethernet CRS_DV");
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_RXD0_GPIO, "Ethernet RXD0");
+        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_RXD1_GPIO, "Ethernet RXD1");
+        pins_add_reserved(r, CONFIG_KVM_ETH_MDC_GPIO, "Ethernet MDC");
+        pins_add_reserved(r, CONFIG_KVM_ETH_MDIO_GPIO, "Ethernet MDIO");
+        pins_add_reserved(r, CONFIG_KVM_ETH_PHY_RST_GPIO, "Ethernet PHY reset");
+#endif
+        pins_add_reserved(r, CONFIG_KVM_BUTTON_GPIO, "BOOT button");
+#if CONFIG_ESP_CONSOLE_UART_DEFAULT
+        pins_add_reserved(r, 37, "Console UART TX");
+        pins_add_reserved(r, 38, "Console UART RX");
+#endif
+    }
+    char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return send_json_owned(req, out);
+}
+
 static esp_err_t api_settings_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
@@ -2377,7 +2444,7 @@ httpd_handle_t http_server_start(void)
      * ~33 are registered now (REST + auth + the two WebSockets + the agent
      * endpoints); 40 leaves room.
      */
-    cfg.max_uri_handlers = 42;
+    cfg.max_uri_handlers = 44;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -2507,6 +2574,7 @@ httpd_handle_t http_server_start(void)
     static const httpd_uri_t api_uris[] = {
         {.uri = "/api/capabilities", .method = HTTP_GET, .handler = api_capabilities_get},
         {.uri = "/api/v1/settings/schema", .method = HTTP_GET, .handler = api_settings_schema_get},
+        {.uri = "/api/v1/pins", .method = HTTP_GET, .handler = api_pins_get},
         {.uri = "/api/v1/video/status", .method = HTTP_GET, .handler = api_video_status_get},
         {.uri = "/api/v1/system/info", .method = HTTP_GET, .handler = api_system_info_get},
         {.uri = "/api/v1/system/usbprobe", .method = HTTP_GET, .handler = api_system_usbprobe_get},
