@@ -199,13 +199,42 @@ power LED without a direct electrical connection. Wiring is in
 </tr>
 </table>
 
+**Status display — a small OLED or round LCD** (optional)
+
+<table>
+<tr>
+<td width="50%"><img src="docs/SSD1306.jpg" alt="SSD1306/SH1106 128x64 I2C OLED module"></td>
+<td width="50%"><img src="docs/GC9A01.webp" alt="GC9A01 240x240 round colour SPI LCD module"></td>
+</tr>
+<tr>
+<td valign="top">
+
+**I2C OLED (SSD1306 / SH1106)**
+
+A 0.96&Prime; 128&times;64 mono OLED on four wires (VCC, GND, SCL, SDA). It shares
+the capture chip's I2C bus, needs no pins of its own, and is auto-detected.
+
+</td>
+<td valign="top">
+
+**Round colour LCD (GC9A01)**
+
+A 1.28&Prime; 240&times;240 round SPI LCD, e.g. the Waveshare module. Wire its SPI
+pins to any free GPIOs and pick them in the console.
+
+</td>
+</tr>
+</table>
+
+Both are off by default &mdash; turn the display on in Settings and choose its type.
+
 **Cables:** a 15-pin CSI ribbon between the two boards, HDMI from the target,
 and USB-C from the board's OTG port to the target. A microSD card if you want
 boot-from-image.
 
-<sub>Board photos (c) their makers, taken from the product pages linked above and
-used only to identify the hardware. ESP-KVM is not affiliated with Espressif,
-Waveshare or Geekworm. The pin map is in
+<sub>Board and module photos (c) their makers, taken from product pages and used
+only to identify the hardware. ESP-KVM is not affiliated with Espressif, Waveshare
+or Geekworm. The pin map is in
 `components/kvm_board/include/kvm_board.h`.</sub>
 
 ## Quick start
