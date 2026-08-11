@@ -7,6 +7,22 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-11
+
+### Fixed
+- **An update now tells you where it is.** The bar used to fill up and then sit
+  there while the device quietly wrote and verified the image, so a working update
+  looked like a hung one ([#13](https://github.com/orgs/espkvm/discussions/13)). It
+  now names each step - downloading, uploading, writing, restarting - waits for the
+  device to answer again, and reloads the console onto the new firmware by itself.
+  If it doesn't come back, it says so instead of leaving you guessing.
+- An update that fails now leaves the reason on screen in the firmware panel, rather
+  than in a toast that fades while you're watching the progress ring. A file that
+  clearly isn't a firmware image is turned away before the upload starts.
+- A dropped connection on the last byte of an upload is no longer reported as a
+  failure - that's what the device restarting looks like from the browser, so the
+  console waits it out and checks.
+
 ## [0.21.0] - 2026-08-11
 
 ### Added

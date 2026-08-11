@@ -175,7 +175,7 @@ target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`.
 <table>
 <tr>
 <td width="50%"><img src="docs/board-c790.webp" alt="Geekworm C790 TC358743 HDMI-to-CSI capture board"></td>
-<td width="50%" align="center" valign="middle"><em>any two-channel<br>optocoupler module</em></td>
+<td width="50%"><img src="docs/817.webp" alt="PC817 two-channel optocoupler isolation module"></td>
 </tr>
 <tr>
 <td valign="top">
