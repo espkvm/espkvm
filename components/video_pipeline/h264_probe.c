@@ -73,25 +73,8 @@
 static uint32_t s_ppa_us_per_mpx;
 static uint32_t s_enc_us_per_mpx;
 
-static const char *h264_err_name(esp_h264_err_t err)
-{
-    switch (err) {
-    case ESP_H264_ERR_OK:
-        return "ok";
-    case ESP_H264_ERR_ARG:
-        return "invalid argument";
-    case ESP_H264_ERR_MEM:
-        return "out of memory";
-    case ESP_H264_ERR_UNSUPPORTED:
-        return "unsupported on this chip";
-    case ESP_H264_ERR_TIMEOUT:
-        return "timeout";
-    case ESP_H264_ERR_OVERFLOW:
-        return "output buffer overflow";
-    default:
-        return "failed";
-    }
-}
+/* Defined in capture_h264.c (same component). */
+const char *h264_err_name(esp_h264_err_t err);
 
 /** Content that neither converts nor compresses away to nothing. */
 static void fill_test_pattern(uint8_t *rgb, uint32_t w, uint32_t h)

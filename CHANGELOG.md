@@ -7,6 +7,15 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Fixed
+- **Pressing `f` no longer flips the browser to fullscreen while you're typing.**
+  The console's `f`-for-fullscreen shortcut fired even inside a text field, so
+  typing an `f` into the login password - right after an OTA update or a reboot,
+  before you're logged in - toggled fullscreen instead of entering the character.
+  Most visible in Safari, where it looked like an unasked-for Cmd-F. The shortcut
+  now stays out of the way while a field is focused or a modifier is held. Thanks
+  to the reporter in [#16](https://github.com/orgs/espkvm/discussions/16).
+
 ## [0.21.1] - 2026-08-11
 
 ### Fixed

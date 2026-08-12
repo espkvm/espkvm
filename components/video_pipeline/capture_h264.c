@@ -106,7 +106,8 @@ static uint32_t s_enc_h;
 static uint8_t s_gop;
 static uint32_t s_bitrate;
 
-static const char *h264_err_name(esp_h264_err_t err)
+/* Shared with h264_probe.c (same component); forward-declared there. */
+const char *h264_err_name(esp_h264_err_t err)
 {
     switch (err) {
     case ESP_H264_ERR_OK:

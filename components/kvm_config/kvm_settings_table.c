@@ -12,11 +12,15 @@
 
 #include "sdkconfig.h"
 
+/* Derive an ENUM's .max from its choices array so the two can't drift
+ * (the schema iterates choices[0..max]; a short array reads OOB). */
+#define ENUM_MAX(arr) ((int)(sizeof(arr) / sizeof((arr)[0]) - 1))
+
 static const char *const s_codec_choices[] = {"mjpeg", "h264"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "custom"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
 static const char *const s_engage_choices[] = {"click", "hover"};
-/* Only layouts with a verified character table; see web/src/layouts.js. */
+/* Only layouts with a verified character table; see web/src/layouts.ts. */
 static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
 static const char *const s_media_choices[] = {"auto", "cdrom", "disk"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
@@ -38,7 +42,7 @@ static const kvm_setting_t s_settings[] = {
                 "barely changes, and about a third of the frame rate. Browsers decode "
                 "it through WebCodecs, which they offer on HTTPS pages only, so it is "
                 "unusable over plain HTTP until TLS is in place.",
-        .min = 0, .max = 1, .def = 0, .choices = s_codec_choices,
+        .min = 0, .max = ENUM_MAX(s_codec_choices), .def = 0, .choices = s_codec_choices,
         .requires_cap = KVM_CAP_H264,
     },
     {
@@ -74,7 +78,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "What the capture card claims to be. \"full\" advertises the common "
                 "modes from 640x480 up; switch to \"1080p30\" if a source refuses to "
                 "output a picture.",
-        .min = 0, .max = 2, .def = 0, .choices = s_edid_choices,
+        .min = 0, .max = ENUM_MAX(s_edid_choices), .def = 0, .choices = s_edid_choices,
         .requires_cap = KVM_CAP_VIDEO, .flags = KVM_SF_REBOOT,
     },
 
@@ -86,7 +90,7 @@ static const kvm_setting_t s_settings[] = {
                 "Meta key, and which OS-specific key combinations it offers. \"auto\" "
                 "trusts the guess made from how the target enumerates USB, shown next "
                 "to the USB status; set it by hand if that guess is wrong or unknown.",
-        .min = 0, .max = 4, .def = 0, .choices = s_targetos_choices, .requires_cap = KVM_CAP_HID,
+        .min = 0, .max = ENUM_MAX(s_targetos_choices), .def = 0, .choices = s_targetos_choices, .requires_cap = KVM_CAP_HID,
     },
     {
         .key = "mouse_mode", .section = "input", .type = KVM_VT_ENUM,
@@ -94,7 +98,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Absolute puts the target's cursor exactly where you click and is "
                 "the right choice almost always. Relative is for software that "
                 "captures the pointer, such as games and 3D viewers.",
-        .min = 0, .max = 1, .def = 0, .choices = s_mouse_choices, .requires_cap = KVM_CAP_HID,
+        .min = 0, .max = ENUM_MAX(s_mouse_choices), .def = 0, .choices = s_mouse_choices, .requires_cap = KVM_CAP_HID,
     },
     {
         .key = "ptr_engage", .section = "input", .type = KVM_VT_ENUM,
@@ -104,7 +108,7 @@ static const kvm_setting_t s_settings[] = {
                 "is still delivered. \"hover\" tracks the pointer as soon as it is over "
                 "the video, the way a remote desktop behaves. Keyboard input always "
                 "requires a click first.",
-        .min = 0, .max = 1, .def = 0, .choices = s_engage_choices, .requires_cap = KVM_CAP_HID,
+        .min = 0, .max = ENUM_MAX(s_engage_choices), .def = 0, .choices = s_engage_choices, .requires_cap = KVM_CAP_HID,
     },
     {
         .key = "mouse_sens", .section = "input", .type = KVM_VT_INT,
@@ -122,7 +126,7 @@ static const kvm_setting_t s_settings[] = {
         .title = "Target keyboard layout",
         .help = "Used when pasting text, so the characters sent match what the target "
                 "actually types. A KVM sends key positions, not characters.",
-        .min = 0, .max = 1, .def = 0, .choices = s_layout_choices, .requires_cap = KVM_CAP_HID,
+        .min = 0, .max = ENUM_MAX(s_layout_choices), .def = 0, .choices = s_layout_choices, .requires_cap = KVM_CAP_HID,
     },
     {
         .key = "type_delay", .section = "input", .type = KVM_VT_INT,
@@ -159,7 +163,7 @@ static const kvm_setting_t s_settings[] = {
                 "as a removable disk - the right choice almost always. Force \"cdrom\" or "
                 "\"disk\" only if a file is misnamed. Handing over the whole card is picked "
                 "in the Media panel, not here. Switching the type re-attaches the USB drive.",
-        .min = 0, .max = 2, .def = 0, .choices = s_media_choices, .requires_cap = KVM_CAP_MSC,
+        .min = 0, .max = ENUM_MAX(s_media_choices), .def = 0, .choices = s_media_choices, .requires_cap = KVM_CAP_MSC,
     },
     {
         /* The active medium, chosen from the Media panel (a file name, or "@rescue"
@@ -290,7 +294,7 @@ static const kvm_setting_t s_settings[] = {
                 "device makes its own WiFi hotspot for setup where there is no "
                 "network to join. If WiFi is unreachable, hold the reset button to "
                 "return to Ethernet.",
-        .min = 0, .max = 2, .def = 0, .choices = s_netmode_choices,
+        .min = 0, .max = ENUM_MAX(s_netmode_choices), .def = 0, .choices = s_netmode_choices,
         .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
     {
@@ -326,7 +330,7 @@ static const kvm_setting_t s_settings[] = {
                 "whole time WiFi is trying, so you can always reach the device "
                 "on-site to fix its settings - set a Hotspot password first. Only "
                 "applies in WiFi (station) mode.",
-        .min = 0, .max = 1, .def = 0, .choices = s_fallback_choices,
+        .min = 0, .max = ENUM_MAX(s_fallback_choices), .def = 0, .choices = s_fallback_choices,
         .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
 
@@ -577,13 +581,13 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "log_level", .section = "system", .type = KVM_VT_ENUM,
         .title = "Log verbosity",
-        .min = 0, .max = 3, .def = 2, .choices = s_log_choices, .requires_cap = -1,
+        .min = 0, .max = ENUM_MAX(s_log_choices), .def = 2, .choices = s_log_choices, .requires_cap = -1,
     },
     {
         .key = "ui_side", .section = "system", .type = KVM_VT_ENUM,
         .title = "Panel side",
         .help = "Which side of the screen the button rail and its panels sit on.",
-        .min = 0, .max = 1, .def = 0, .choices = s_side_choices, .requires_cap = -1,
+        .min = 0, .max = ENUM_MAX(s_side_choices), .def = 0, .choices = s_side_choices, .requires_cap = -1,
     },
 
     /* ---- status display ------------------------------------------------- */
@@ -603,7 +607,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Which panel is wired. SSD1306/SH1106 are 128x64 I2C OLEDs (pick SH1106 "
                 "if the image is shifted by two pixels or wraps). GC9A01 is a 240x240 "
                 "round colour SPI LCD, e.g. the Waveshare 1.28\" module.",
-        .min = 0, .max = 2, .def = 0, .choices = s_display_choices, .requires_cap = -1,
+        .min = 0, .max = ENUM_MAX(s_display_choices), .def = 0, .choices = s_display_choices, .requires_cap = -1,
     },
     /* GC9A01 SPI pins (the I2C OLEDs need none - they share the capture bus).
      * Pins, so the console offers only free GPIOs; a restart re-attaches on the

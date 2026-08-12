@@ -299,9 +299,10 @@ static void wg_reconcile(void)
         return;
     }
 
-    /* Endpoint "host:port". */
+    /* Endpoint "host:port"; the port defaults to the standard WireGuard port
+     * when the endpoint omits it. */
     char host[64];
-    int port = 51820;
+    int port = WG_LISTEN_PORT;
     snprintf(host, sizeof(host), "%s", endp);
     char *colon = strrchr(host, ':');
     if (colon) {

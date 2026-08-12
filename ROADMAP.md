@@ -29,6 +29,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 ## Planned
 
 - **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser
+- **IPv6**
 - **More supported boards**
 
 ## Under consideration
@@ -36,5 +37,6 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - A screen recorder (save a clip of the target's output)
 - Serial console passthrough
 - A USB network interface to the target
+- Yggdrasil - a decentralised overlay as an alternative to the WireGuard/Tailscale backends
 
 Have a use case that is not here? Open a discussion.

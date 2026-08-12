@@ -82,7 +82,6 @@ void capture_loop_run(capture_ctx_t *c)
         return;
     }
 
-    const unsigned bpp = capture_csi_bpp();
     int64_t hdmi_recover_cooldown_until_us = 0;
     int64_t last_encode_us = 0;
     /* Set after anything that invalidates what clients are holding. */
@@ -115,13 +114,11 @@ void capture_loop_run(capture_ctx_t *c)
             if (!c->signal_present) {
                 continue;
             }
-#if CONFIG_KVM_TC358743_ADV_DEBUG
-            static uint32_t s_csi_timeout_logs;
-#endif
             ESP_LOGW(CAPTURE_LOG_TAG, "csi frame wait timeout (dma_done_irqs=%lu)",
                      (unsigned long)c->csi_dma_done_irqs);
-            capture_debug_csi_timeout(c, bpp, c->frame_bytes);
 #if CONFIG_KVM_TC358743_ADV_DEBUG
+            static uint32_t s_csi_timeout_logs;
+            capture_debug_csi_timeout(c, capture_csi_bpp(), c->frame_bytes);
             tc358743_debug_stall_extras(c->tc);
             if ((s_csi_timeout_logs++ % 8u) == 0u) {
                 tc358743_debug_status(c->tc);

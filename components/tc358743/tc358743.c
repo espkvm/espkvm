@@ -120,7 +120,12 @@ static const char *TAG = "tc358743";
 #define HPD_CTL 0x8544
 #define MASK_HPD_OUT0 0x01
 
+/** CEC clock divider registers (Toshiba TC358743 datasheet). */
+#define CECHCLK 0x0028
+#define CECLCLK 0x002a
+
 #define SYS_STATUS 0x8520
+/* SYS_STATUS bit fields are TC358743_SYS_* in the public header. */
 #define VI_STATUS1 0x8522
 /** Linux tc358743_regs.h: interlace flag lives in VI_STATUS1, not VI_STATUS3. */
 #define MASK_S_V_INTERLACE 0x10
@@ -265,7 +270,11 @@ struct tc358743 {
     tc358743_cfg_t cfg;
     bool csi_uyvy422;
     tc358743_edid_profile_t edid_profile;
+    bool i2c_ok; /* tracks I2C health so a wedged bus is logged once, not per-register */
 };
+
+/* Largest single register write: the 128-byte EDID block plus the 2-byte address. */
+#define TC358743_MAX_WRITE (2 + 128)
 
 void tc358743_cfg_defaults_waveshare_pi(tc358743_cfg_t *c)
 {
@@ -291,19 +300,42 @@ void tc358743_cfg_defaults_waveshare_pi(tc358743_cfg_t *c)
     c->hdmi_detection_delay = 0;
 }
 
+/* Log once on the healthy->failed edge: wr/rd below can't return, so surface a
+ * wedged bus here instead of one line per register. */
+static void i2c_note_result(tc358743_t *d, uint16_t reg, esp_err_t err)
+{
+    if (err == ESP_OK) {
+        d->i2c_ok = true;
+        return;
+    }
+    if (d->i2c_ok) {
+        ESP_LOGW(TAG, "I2C transfer failed at reg 0x%04x: %s (bus wedged? register writes are being lost)",
+                 reg, esp_err_to_name(err));
+        d->i2c_ok = false;
+    }
+}
+
 static esp_err_t i2c_write_reg(tc358743_t *d, uint16_t reg, const void *data, size_t len)
 {
-    uint8_t buf[2 + len];
+    if (len > TC358743_MAX_WRITE - 2) {
+        ESP_LOGE(TAG, "i2c_write_reg: len %u exceeds max %u", (unsigned)len, TC358743_MAX_WRITE - 2);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    uint8_t buf[TC358743_MAX_WRITE];
     buf[0] = (uint8_t)(reg >> 8);
     buf[1] = (uint8_t)(reg & 0xff);
     memcpy(buf + 2, data, len);
-    return i2c_master_transmit(d->i2c, buf, sizeof(buf), -1);
+    esp_err_t err = i2c_master_transmit(d->i2c, buf, len + 2, -1);
+    i2c_note_result(d, reg, err);
+    return err;
 }
 
 static esp_err_t i2c_read_reg(tc358743_t *d, uint16_t reg, void *data, size_t len)
 {
     uint8_t addr[2] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xff)};
-    return i2c_master_transmit_receive(d->i2c, addr, sizeof(addr), data, len, -1);
+    esp_err_t err = i2c_master_transmit_receive(d->i2c, addr, sizeof(addr), data, len, -1);
+    i2c_note_result(d, reg, err);
+    return err;
 }
 
 static void wr8(tc358743_t *d, uint16_t r, uint8_t v)
@@ -406,8 +438,8 @@ static void set_ref_clk(tc358743_t *d)
     wr8_and_or(d, NCO_F0_MOD, (uint8_t)~MASK_NCO_F0_MOD, (pdata->refclk_hz == 27000000) ? MASK_NCO_F0_MOD_27MHZ : 0);
 
     uint32_t cec_freq = (656u * sys_freq) / 4200u;
-    wr16(d, 0x0028, (uint16_t)cec_freq);
-    wr16(d, 0x002a, (uint16_t)cec_freq);
+    wr16(d, CECHCLK, (uint16_t)cec_freq);
+    wr16(d, CECLCLK, (uint16_t)cec_freq);
 }
 
 static void set_pll(tc358743_t *d)
@@ -638,6 +670,7 @@ esp_err_t tc358743_probe(i2c_master_bus_handle_t bus, const tc358743_cfg_t *cfg,
     ESP_RETURN_ON_FALSE(bus && out_dev, ESP_ERR_INVALID_ARG, TAG, "args");
     tc358743_t *d = calloc(1, sizeof(tc358743_t));
     ESP_RETURN_ON_FALSE(d, ESP_ERR_NO_MEM, TAG, "calloc");
+    d->i2c_ok = true; /* assume healthy until a transfer proves otherwise */
     if (cfg) {
         d->cfg = *cfg;
     } else {
@@ -781,10 +814,10 @@ esp_err_t tc358743_get_timings(tc358743_t *d, tc358743_timings_t *out)
 
     const uint8_t st = rd8(d, SYS_STATUS);
     out->sys_status = st;
-    out->ddc5v = (st & 0x01u) != 0u;
-    out->tmds = (st & 0x02u) != 0u;
-    out->hdmi_mode = (st & 0x10u) != 0u;
-    out->sync = (st & 0x80u) != 0u;
+    out->ddc5v = (st & TC358743_SYS_DDC5V) != 0u;
+    out->tmds = (st & TC358743_SYS_TMDS) != 0u;
+    out->hdmi_mode = (st & TC358743_SYS_HDMI_MODE) != 0u;
+    out->sync = (st & TC358743_SYS_SYNC) != 0u;
     out->interlaced = (rd8(d, VI_STATUS1) & MASK_S_V_INTERLACE) != 0u;
     return ESP_OK;
 }

@@ -80,7 +80,7 @@ static void wait_tc358743_pixel_stream(tc358743_t *tc, uint32_t timeout_ms)
     uint32_t waited = 0;
     while (waited < timeout_ms) {
         uint8_t st = 0;
-        if (tc358743_sys_status(tc, &st) == ESP_OK && (st & 0x02) != 0 && (st & 0x80) != 0) {
+        if (tc358743_sys_status(tc, &st) == ESP_OK && (st & TC358743_SYS_TMDS) != 0 && (st & TC358743_SYS_SYNC) != 0) {
             ESP_LOGI(CAPTURE_LOG_TAG, "HDMI ready SYS_STATUS=0x%02x after %u ms", st, waited);
             return;
         }
@@ -90,6 +90,7 @@ static void wait_tc358743_pixel_stream(tc358743_t *tc, uint32_t timeout_ms)
     ESP_LOGW(CAPTURE_LOG_TAG, "HDMI lock wait %u ms - starting CSI anyway", (unsigned)timeout_ms);
 }
 
+#if CONFIG_KVM_TC358743_ADV_DEBUG
 void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
 {
     const uint32_t gdma_64b = (uint32_t)(c->hres * c->vres * bpp / 64);
@@ -142,6 +143,7 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes)
             (uint32_t)MIPI_CSI_BRIDGE.dma_req_interval.dma_req_interval);
     }
 }
+#endif /* CONFIG_KVM_TC358743_ADV_DEBUG */
 
 unsigned capture_csi_bpp(void)
 {
@@ -458,6 +460,22 @@ capture_ctx_t *capture_hw_init_start(void)
     return &s_cap;
 }
 
+/* Reset the frame-ring bookkeeping and adopt a new mode. CSI is torn down before
+ * this runs, so no ISR races these resets. */
+static void capture_ctx_reset_ring(capture_ctx_t *c, uint32_t hres, uint32_t vres)
+{
+    c->ping_fb_idx = 0;
+    c->done_fb = NULL;
+    c->write_fb_idx = -1;
+    c->ready_fb_idx = -1;
+    c->held_fb_idx = -1;
+    c->csi_dma_done_irqs = 0;
+    c->csi_get_new_irqs = 0;
+    c->hres = hres;
+    c->vres = vres;
+    c->frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
+}
+
 esp_err_t capture_hw_apply_mode(capture_ctx_t *c, uint32_t hres, uint32_t vres)
 {
     ESP_RETURN_ON_FALSE(c, ESP_ERR_INVALID_ARG, CAPTURE_LOG_TAG, "ctx");
@@ -474,17 +492,7 @@ esp_err_t capture_hw_apply_mode(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     while (xSemaphoreTake(c->csi_done_sem, 0) == pdTRUE) {
         /* Completions from the previous mode describe frames of the wrong size. */
     }
-    c->ping_fb_idx = 0;
-    c->done_fb = NULL;
-    /* CSI is torn down before a reconfigure, so no ISR races these resets. */
-    c->write_fb_idx = -1;
-    c->ready_fb_idx = -1;
-    c->held_fb_idx = -1;
-    c->csi_dma_done_irqs = 0;
-    c->csi_get_new_irqs = 0;
-    c->hres = hres;
-    c->vres = vres;
-    c->frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
+    capture_ctx_reset_ring(c, hres, vres);
 
     esp_err_t er = csi_create(c, hres, vres);
     if (er != ESP_OK) {
@@ -542,17 +550,7 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
     }
     capture_tc_unlock(c);
 
-    c->ping_fb_idx = 0;
-    c->done_fb = NULL;
-    /* CSI is torn down before a reconfigure, so no ISR races these resets. */
-    c->write_fb_idx = -1;
-    c->ready_fb_idx = -1;
-    c->held_fb_idx = -1;
-    c->csi_dma_done_irqs = 0;
-    c->csi_get_new_irqs = 0;
-    c->hres = hres;
-    c->vres = vres;
-    c->frame_bytes = (size_t)hres * (size_t)vres * capture_pixfmt_bytes();
+    capture_ctx_reset_ring(c, hres, vres);
 
     er = csi_create(c, hres, vres);
     if (er != ESP_OK) {

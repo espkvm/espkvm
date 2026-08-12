@@ -128,7 +128,9 @@ void capture_monitor_start(capture_ctx_t *c);
 bool capture_tc_lock(capture_ctx_t *c, uint32_t timeout_ms);
 void capture_tc_unlock(capture_ctx_t *c);
 
+#if CONFIG_KVM_TC358743_ADV_DEBUG
 void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes);
+#endif
 
 /** CSI bits per pixel for debug logs (RGB888 -> 24 bpp BGR order in DRAM). */
 unsigned capture_csi_bpp(void);

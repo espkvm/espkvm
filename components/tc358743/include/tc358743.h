@@ -130,6 +130,12 @@ esp_err_t tc358743_read_chip_id(tc358743_t *dev, uint16_t *chip_id);
 /** SYS_STATUS register (cable / TMDS / sync bits). */
 esp_err_t tc358743_sys_status(tc358743_t *dev, uint8_t *out_st);
 
+/** SYS_STATUS bit fields (Toshiba TC358743 datasheet register 0x8520). */
+#define TC358743_SYS_DDC5V 0x01u
+#define TC358743_SYS_TMDS 0x02u
+#define TC358743_SYS_HDMI_MODE 0x10u
+#define TC358743_SYS_SYNC 0x80u
+
 /**
  * Read what the bridge currently measures on its HDMI input.
  *

@@ -48,6 +48,11 @@ enum {
 
 #define NUM_HID_ITF 3 /* keyboard, pointer, relative mouse */
 
+#define HID_KBD_KEYS 6            /* boot-protocol keyboard: 6-key rollover */
+#define HID_QUEUE_DEPTH 192       /* HID reports that can queue to the worker */
+#define HID_WORKER_STACK 4096     /* bytes */
+#define HID_WORKER_PRIO (tskIDLE_PRIORITY + 8) /* above stream/httpd so input isn't delayed */
+
 /* MSC bulk endpoints, sharing endpoint number 4 (IN 0x84, OUT 0x04) beside the
  * three HID interrupt IN endpoints 0x81/0x82/0x83. */
 #define EPNUM_MSC_OUT 0x04
@@ -252,7 +257,7 @@ typedef struct {
         } rel;
         struct {
             uint8_t modifier;
-            uint8_t keycode[6];
+            uint8_t keycode[HID_KBD_KEYS];
         } key;
         uint16_t consumer;
     } u;
@@ -678,7 +683,7 @@ static void send_rel(uint8_t buttons, int32_t dx, int32_t dy, int8_t wheel, int8
     hid_emit(ITF_REL_MOUSE, 0, &r, sizeof(r));
 }
 
-static void send_keyboard(uint8_t modifier, const uint8_t keycode[6])
+static void send_keyboard(uint8_t modifier, const uint8_t keycode[HID_KBD_KEYS])
 {
     (void)ulTaskNotifyTake(pdTRUE, 0); /* drop any stale completion from a prior timeout */
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -699,7 +704,7 @@ static void send_consumer(uint16_t usage)
 
 static void send_release_all(void)
 {
-    const uint8_t none[6] = {0};
+    const uint8_t none[HID_KBD_KEYS] = {0};
     send_keyboard(0, none);
     send_consumer(0);
     send_rel(0, 0, 0, 0, 0);
@@ -875,14 +880,14 @@ void usb_hid_mouse_rel(uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, in
     enqueue(&m);
 }
 
-void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[6])
+void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[HID_KBD_KEYS])
 {
     if (!keycode) {
         return;
     }
     q_msg_t m = {.type = Q_KEY};
     m.u.key.modifier = modifier;
-    memcpy(m.u.key.keycode, keycode, 6);
+    memcpy(m.u.key.keycode, keycode, sizeof(m.u.key.keycode));
     enqueue(&m);
 }
 
@@ -921,7 +926,7 @@ esp_err_t usb_hid_init(void)
         ESP_RETURN_ON_ERROR(err, TAG, "gpio_install_isr_service");
     }
 
-    s_hid_q = xQueueCreate(192, sizeof(q_msg_t));
+    s_hid_q = xQueueCreate(HID_QUEUE_DEPTH, sizeof(q_msg_t));
     ESP_RETURN_ON_FALSE(s_hid_q, ESP_ERR_NO_MEM, TAG, "queue");
 
     /*
@@ -955,7 +960,7 @@ esp_err_t usb_hid_init(void)
     ESP_RETURN_ON_ERROR(usb_err, TAG, "tinyusb_driver_install");
 
     /* Above stream/httpd work so HID reports are not delayed by MJPEG or WS parsing. */
-    BaseType_t ok = xTaskCreate(hid_worker, "usb_hid", 4096, NULL, tskIDLE_PRIORITY + 8, &s_hid_task);
+    BaseType_t ok = xTaskCreate(hid_worker, "usb_hid", HID_WORKER_STACK, NULL, HID_WORKER_PRIO, &s_hid_task);
     ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "task");
 
     return ESP_OK;

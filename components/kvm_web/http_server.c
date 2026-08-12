@@ -211,8 +211,9 @@ static esp_err_t api_settings_put(httpd_req_t *req)
     return send_json_owned(req, kvm_settings_values_json());
 }
 
-/* Defined with the video WebSocket below; reported here so a viewer that the
- * device still believes in is visible from the API rather than only as an
+/* Live video WebSocket subscribers. Defined here (ahead of the video WebSocket
+ * code that maintains it) so api_video_status_get below can report it: a viewer
+ * the device still believes in should be visible from the API, not just as an
  * encoder that will not go idle. */
 static uint8_t s_video_client_count;
 /** Multipart /stream responses in flight, counted separately from WebSocket
@@ -1044,23 +1045,31 @@ static uint16_t clamp_abs(double v)
     return (uint16_t)v;
 }
 
+/* Mouse button bits in a USB HID boot-mouse report's button byte. */
+#define MOUSE_BTN_LEFT 0x01
+#define MOUSE_BTN_RIGHT 0x02
+#define MOUSE_BTN_MIDDLE 0x04
+
+/* Keyboard modifier byte: Left Shift bit (USB HID). */
+#define HID_MOD_LSHIFT 0x02
+
 /* "left" (default) / "right" / "middle", or a raw button mask as a number. */
 static uint8_t parse_button(const cJSON *j)
 {
     const cJSON *b = cJSON_GetObjectItem(j, "button");
     if (cJSON_IsString(b)) {
         if (strcmp(b->valuestring, "right") == 0) {
-            return 0x02;
+            return MOUSE_BTN_RIGHT;
         }
         if (strcmp(b->valuestring, "middle") == 0) {
-            return 0x04;
+            return MOUSE_BTN_MIDDLE;
         }
-        return 0x01;
+        return MOUSE_BTN_LEFT;
     }
     if (cJSON_IsNumber(b)) {
         return (uint8_t)b->valueint;
     }
-    return 0x01;
+    return MOUSE_BTN_LEFT;
 }
 
 /* Map a printable ASCII byte to a US-layout HID usage + whether Shift is held.
@@ -1303,8 +1312,8 @@ static esp_err_t api_hid_type_post(httpd_req_t *req)
             continue; /* silently skip characters the US layout can't type */
         }
         const uint8_t kc[6] = {usage, 0, 0, 0, 0, 0};
-        usb_hid_keyboard(shift ? 0x02 : 0x00, kc); /* press; 0x02 = Left Shift */
-        usb_hid_keyboard(0, none);                 /* release */
+        usb_hid_keyboard(shift ? HID_MOD_LSHIFT : 0x00, kc); /* press */
+        usb_hid_keyboard(0, none);                           /* release */
     }
     cJSON_Delete(j);
     return send_ok(req);
@@ -1986,7 +1995,7 @@ static int s_video_fds[VIDEO_MAX_CLIENTS];
  * comes out of the encoder.
  */
 static bool s_video_need_key[VIDEO_MAX_CLIENTS];
-static uint8_t s_video_client_count;
+/* s_video_client_count is defined near api_video_status_get (declared once, above). */
 static SemaphoreHandle_t s_video_mu;
 
 static void video_add_client(int fd)
@@ -2260,15 +2269,22 @@ static bool req_on_ap_iface(httpd_req_t *req)
     if (getsockname(fd, (struct sockaddr *)&ss, &sl) != 0) {
         return false;
     }
-    char ip[INET6_ADDRSTRLEN] = {0};
+    /* The softAP always hands the device 192.168.4.1, so a socket whose local
+     * address is exactly that came in over the AP, not the station/Ethernet link.
+     * Compared numerically (covers the IPv4-mapped ::ffff:192.168.4.1 form too)
+     * rather than by substring, which would also match e.g. 192.168.4.1x. */
+    const uint32_t ap_addr = htonl(0xC0A80401u); /* 192.168.4.1, network byte order */
     if (ss.ss_family == AF_INET) {
-        inet_ntop(AF_INET, &((struct sockaddr_in *)&ss)->sin_addr, ip, sizeof(ip));
-    } else {
-        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&ss)->sin6_addr, ip, sizeof(ip));
+        return ((struct sockaddr_in *)&ss)->sin_addr.s_addr == ap_addr;
     }
-    /* Matches both "192.168.4.1" and the IPv4-mapped "::ffff:192.168.4.1". The
-     * device's AP address is always .1, so this never collides with a client. */
-    return strstr(ip, "192.168.4.1") != NULL;
+    if (ss.ss_family == AF_INET6) {
+        const uint8_t *b = ((struct sockaddr_in6 *)&ss)->sin6_addr.s6_addr;
+        static const uint8_t v4mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        uint32_t v4;
+        memcpy(&v4, b + 12, sizeof(v4));
+        return memcmp(b, v4mapped, sizeof(v4mapped)) == 0 && v4 == ap_addr;
+    }
+    return false;
 }
 
 /* The hotel-style landing page the OS "sign in to network" sheet shows when a
@@ -2309,7 +2325,7 @@ static esp_err_t captive_landing(httpd_req_t *req)
         "a.b{display:inline-block;margin-top:18px;padding:12px 22px;border-radius:10px;"
         "background:#3b82f6;color:#fff;text-decoration:none;font-weight:600}"
         "a.s{display:block;margin-top:14px;color:#6b7699;font-size:13px}</style>"
-        "<div class=c><div style=font-size:40px>&#128421;</div>"
+        "<div class=c>"
         "<h1>ESP-KVM</h1><p>Setup hotspot active.</p>"
         "<a class=b href=\"%s\">Open console &rarr;</a>"
         "<a class=s href=\"/cert.pem\">Download CA certificate</a></div>",

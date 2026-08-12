@@ -16,6 +16,8 @@
 #include "nvs.h"
 #include "psa/crypto.h"
 
+#include "cJSON.h"
+
 #include "kvm_board.h"
 #include "kvm_settings.h"
 #include "kvm_tls.h"
@@ -344,9 +346,11 @@ static esp_err_t store_password(const char *password)
 static bool password_matches(const char *password)
 {
     if (!s_have_password) {
-        /* Nothing stored yet: the device answers to the default once, and the
-         * session it hands back is good for changing the password and nothing
-         * else. */
+        /* Nothing stored yet: the device answers to the well-known default once,
+         * and the session it hands back is good for changing the password and
+         * nothing else. Plain strcmp is fine here - "admin" is public, not a
+         * secret, so there is no timing side channel worth defending; the real
+         * stored password below is compared in constant time (equal_ct). */
         return strcmp(password, DEFAULT_PASSWORD) == 0;
     }
     uint8_t candidate[HASH_LEN];
@@ -539,39 +543,19 @@ static esp_err_t read_body(httpd_req_t *req, char *buf, size_t buf_len)
     return ESP_OK;
 }
 
-/** Minimal field reader: the bodies here are two short strings. */
-static bool json_field(const char *json, const char *name, char *out, size_t out_len)
+/* Copy a required string field into a fixed buffer; reject missing, non-string
+ * or over-long (truncation is an error here, not a silent cut). */
+static bool json_str_field(const cJSON *root, const char *name, char *out, size_t out_len)
 {
-    char needle[32];
-    int n = snprintf(needle, sizeof(needle), "\"%s\"", name);
-    if (n <= 0 || n >= (int)sizeof(needle)) {
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(root, name);
+    if (!cJSON_IsString(it) || it->valuestring == NULL) {
         return false;
     }
-    const char *p = strstr(json, needle);
-    if (!p) {
+    if (strlen(it->valuestring) >= out_len) {
         return false;
     }
-    p = strchr(p + n, ':');
-    if (!p) {
-        return false;
-    }
-    p++;
-    while (*p == ' ') {
-        p++;
-    }
-    if (*p != '"') {
-        return false;
-    }
-    p++;
-    size_t o = 0;
-    while (*p && *p != '"' && o + 1 < out_len) {
-        if (*p == '\\' && p[1]) {
-            p++;
-        }
-        out[o++] = *p++;
-    }
-    out[o] = '\0';
-    return *p == '"';
+    strlcpy(out, it->valuestring, out_len);
+    return true;
 }
 
 /**
@@ -639,8 +623,11 @@ static esp_err_t auth_login_post(httpd_req_t *req)
     }
     char user[40] = {0};
     char password[80] = {0};
-    if (!json_field(body, "user", user, sizeof(user)) ||
-        !json_field(body, "password", password, sizeof(password))) {
+    cJSON *j = cJSON_Parse(body);
+    bool fields_ok = j && json_str_field(j, "user", user, sizeof(user)) &&
+                     json_str_field(j, "password", password, sizeof(password));
+    cJSON_Delete(j);
+    if (!fields_ok) {
         return send_json(req, "400 Bad Request", "{\"error\":\"user and password are required\"}");
     }
 
@@ -709,8 +696,11 @@ static esp_err_t auth_password_post(httpd_req_t *req)
     }
     char current[80] = {0};
     char next[80] = {0};
-    if (!json_field(body, "current", current, sizeof(current)) ||
-        !json_field(body, "next", next, sizeof(next))) {
+    cJSON *j = cJSON_Parse(body);
+    bool fields_ok = j && json_str_field(j, "current", current, sizeof(current)) &&
+                     json_str_field(j, "next", next, sizeof(next));
+    cJSON_Delete(j);
+    if (!fields_ok) {
         return send_json(req, "400 Bad Request",
                          "{\"error\":\"current and next passwords are required\"}");
     }
