@@ -7,6 +7,8 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-08-12
+
 ### Fixed
 - **Pressing `f` no longer flips the browser to fullscreen while you're typing.**
   The console's `f`-for-fullscreen shortcut fired even inside a text field, so
