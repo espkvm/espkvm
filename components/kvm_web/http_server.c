@@ -24,6 +24,7 @@
 
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -271,6 +272,58 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
  * needs to know an update is possible at all - a single-slot partition table
  * makes the question moot.
  */
+/* OTA image state as a short, stable token the console maps to a badge. */
+static const char *ota_state_name(esp_ota_img_states_t s)
+{
+    switch (s) {
+    case ESP_OTA_IMG_NEW:            return "new";
+    case ESP_OTA_IMG_PENDING_VERIFY: return "pending";
+    case ESP_OTA_IMG_VALID:          return "valid";
+    case ESP_OTA_IMG_INVALID:        return "invalid";
+    case ESP_OTA_IMG_ABORTED:        return "aborted";
+    default:                         return "undefined";
+    }
+}
+
+/*
+ * The OTA app slots as a JSON array: each slot's stored version and image state,
+ * and which one is running now and which the bootloader will start next. A slot
+ * with no valid image reports an empty version. Written into `out`; returns the
+ * number of bytes used (never more than cap-1).
+ */
+static int ota_slots_json(char *out, size_t cap)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_partition_t *boot = esp_ota_get_boot_partition();
+    int p = snprintf(out, cap, "[");
+    bool first = true;
+    esp_partition_iterator_t it =
+        esp_partition_find(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, NULL);
+    for (; it != NULL; it = esp_partition_next(it)) {
+        const esp_partition_t *part = esp_partition_get(it);
+        if (part->subtype < ESP_PARTITION_SUBTYPE_APP_OTA_MIN ||
+            part->subtype > ESP_PARTITION_SUBTYPE_APP_OTA_MAX) {
+            continue; /* only ota_0..ota_15, not a factory or test image */
+        }
+        esp_app_desc_t d;
+        const char *ver =
+            (esp_ota_get_partition_description(part, &d) == ESP_OK) ? d.version : "";
+        esp_ota_img_states_t st;
+        const char *state =
+            (esp_ota_get_state_partition(part, &st) == ESP_OK) ? ota_state_name(st) : "undefined";
+        p += snprintf(out + p, cap - (size_t)p,
+                      "%s{\"label\":\"%s\",\"version\":\"%s\",\"state\":\"%s\","
+                      "\"running\":%s,\"boot\":%s}",
+                      first ? "" : ",", part->label, ver, state,
+                      (running && part->address == running->address) ? "true" : "false",
+                      (boot && part->address == boot->address) ? "true" : "false");
+        first = false;
+    }
+    esp_partition_iterator_release(it);
+    p += snprintf(out + p, cap - (size_t)p, "]");
+    return p;
+}
+
 static esp_err_t api_system_info_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
@@ -297,10 +350,13 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_wg_status_t wg;
     kvm_wg_status(&wg);
 
-    char body[1200];
+    char ota_json[512];
+    ota_slots_json(ota_json, sizeof(ota_json));
+
+    char body[1600];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
-                     "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,"
+                     "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"wifiUp\":%s,"
@@ -310,7 +366,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
                      "\"ts\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"peers\":%d}}",
                      app->project_name, app->version, app->date, app->time, app->idf_ver,
-                     running ? running->label : "?", next ? "true" : "false",
+                     running ? running->label : "?", next ? "true" : "false", ota_json,
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), (int)temp_c,
@@ -1032,6 +1088,64 @@ static cJSON *read_json_body(httpd_req_t *req)
     cJSON *j = cJSON_Parse(buf);
     free(buf);
     return j;
+}
+
+/*
+ * Boot the other OTA slot on the next restart - the console's "boot from this
+ * slot", to fall back to a known-good image or forward to one an OTA left
+ * unconfirmed, without reflashing. Refused unless the target slot holds a valid
+ * image, so a click can never leave the device booting an empty or bad slot.
+ */
+static esp_err_t api_system_boot_slot_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    cJSON *j = read_json_body(req);
+    const cJSON *jl = j ? cJSON_GetObjectItem(j, "label") : NULL;
+    char label[16] = {0};
+    if (cJSON_IsString(jl) && jl->valuestring) {
+        snprintf(label, sizeof(label), "%s", jl->valuestring);
+    }
+    if (j) {
+        cJSON_Delete(j);
+    }
+    if (!label[0]) {
+        return send_json_error(req, "400 Bad Request", "which slot? send {\"label\":\"ota_1\"}");
+    }
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_partition_t *target =
+        esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, label);
+    if (!target || target->subtype < ESP_PARTITION_SUBTYPE_APP_OTA_MIN ||
+        target->subtype > ESP_PARTITION_SUBTYPE_APP_OTA_MAX) {
+        return send_json_error(req, "404 Not Found", "no such OTA slot");
+    }
+    if (running && target->address == running->address) {
+        return send_json_error(req, "409 Conflict", "that slot is already running");
+    }
+    /* A slot with no valid app, or one the bootloader has marked bad, would brick
+     * the next boot - refuse both. */
+    esp_app_desc_t d;
+    if (esp_ota_get_partition_description(target, &d) != ESP_OK) {
+        return send_json_error(req, "409 Conflict", "that slot has no firmware");
+    }
+    esp_ota_img_states_t st;
+    if (esp_ota_get_state_partition(target, &st) == ESP_OK &&
+        (st == ESP_OTA_IMG_INVALID || st == ESP_OTA_IMG_ABORTED)) {
+        return send_json_error(req, "409 Conflict", "that slot's image was marked bad");
+    }
+    esp_err_t err = esp_ota_set_boot_partition(target);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "set_boot_partition(%s): %s", label, esp_err_to_name(err));
+        return send_json_error(req, "500 Internal Server Error", "could not switch slot");
+    }
+    ESP_LOGW(TAG, "boot slot switched to %s (%s); restarting", label, d.version);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t sent = httpd_resp_sendstr(req, "{\"status\":\"restarting\"}");
+    /* From a timer, a moment after the reply reaches the browser (see restart_soon). */
+    restart_soon(300);
+    return sent;
 }
 
 static uint16_t clamp_abs(double v)
@@ -2599,6 +2713,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
+        {.uri = "/api/v1/system/boot-slot", .method = HTTP_POST, .handler = api_system_boot_slot_post},
         {.uri = "/api/v1/tls", .method = HTTP_GET, .handler = api_tls_get},
         {.uri = "/api/v1/tls/cert", .method = HTTP_PUT, .handler = api_tls_cert_put},
         {.uri = "/api/v1/tls/cert", .method = HTTP_DELETE, .handler = api_tls_cert_delete},

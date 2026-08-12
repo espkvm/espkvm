@@ -299,22 +299,6 @@ void app_main(void)
         ESP_ERROR_CHECK(kvm_wifi_init());
     }
 
-    /* MQTT bridge: build its timer/state now; it connects later, from
-     * report_pending_capabilities(), once every capability it advertises to
-     * Home Assistant has been settled. */
-    ESP_ERROR_CHECK(kvm_mqtt_init());
-
-    /* VPN backends share one WireGuard stack and are selected at runtime (enable
-     * one). Classic WireGuard tunnel: */
-    ESP_ERROR_CHECK(kvm_wg_init());
-
-    /* Native Tailscale client: build its worker and start watching for the
-     * network; it joins later, from report_pending_capabilities() / GOT_IP. The
-     * bridge lets it hand its tailnet address/name to the TLS layer (so the
-     * console certificate is valid over Tailscale) without a component cycle. */
-    kvm_ts_set_identity_cb(kvm_tls_set_tailnet);
-    ESP_ERROR_CHECK(kvm_ts_init());
-
     /* Before the web server, which reads published frames. */
     video_frame_store_init();
     ESP_LOGI(TAG, "boot: web server");
@@ -326,6 +310,26 @@ void app_main(void)
          * it unconfirmed so the bootloader can still roll back to what worked. */
         ESP_LOGE(TAG, "web server did not start; leaving the image unconfirmed for rollback");
     }
+
+    /*
+     * Network features that only connect later (from report_pending_capabilities()
+     * / GOT_IP). Moved past the OTA confirm above on purpose: each builds a worker
+     * and could fail its init, and none is needed to reach the console, so a hiccup
+     * here must not leave a freshly-flashed but reachable image unconfirmed and
+     * bound for rollback.
+     */
+    /* MQTT bridge: build its timer/state now; it connects later, once every
+     * capability it advertises to Home Assistant has been settled. */
+    ESP_ERROR_CHECK(kvm_mqtt_init());
+
+    /* VPN backends share one WireGuard stack and are selected at runtime. */
+    ESP_ERROR_CHECK(kvm_wg_init());
+
+    /* Native Tailscale client: build its worker and start watching for the
+     * network; it joins later. The identity bridge hands its tailnet address/name
+     * to the TLS layer so the console certificate is valid over Tailscale. */
+    kvm_ts_set_identity_cb(kvm_tls_set_tailnet);
+    ESP_ERROR_CHECK(kvm_ts_init());
 
     /*
      * Now the peripherals a warm esp_restart() does not power-cycle. USB is not

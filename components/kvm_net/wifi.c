@@ -68,25 +68,17 @@ static SemaphoreHandle_t s_scan_mu;
 /*
  * esp-hosted auto-initialises its SDIO transport from a C constructor that runs
  * before app_main, which immediately claims the P4's single SD host controller.
- * On this board that controller is shared with the microSD, so in Ethernet mode
- * (where WiFi is unused) the eager init makes the card unmountable - and it
- * cannot be undone afterwards, because esp_hosted_deinit() races the co-processor's
- * async bring-up and asserts, boot-looping the device.
+ * That controller is shared with the microSD, so in Ethernet mode (where WiFi is
+ * unused) the eager init makes the card unmountable and leaves the co-processor's
+ * SDIO link failing in a retry loop that drags the whole boot out to ~30 s.
  *
- * So block the constructor's init with a linker wrap (-Wl,--wrap=esp_hosted_init,
- * set in CMakeLists) and bring the co-processor up ourselves, once, only when a
- * WiFi mode actually needs it. In Ethernet mode it never starts and the microSD
- * has the bus to itself.
+ * esp-hosted 3.0 gates that constructor behind CONFIG_ESP_HOSTED_AUTO_CALL_INIT_
+ * BEFORE_APP_MAIN, which the C6 board overlays set to n. So it never runs at boot;
+ * we bring the co-processor up ourselves, once, only when a WiFi mode needs it (see
+ * kvm_wifi_init). In Ethernet mode it never starts and the microSD has the bus to
+ * itself. (Older esp-hosted drove this from esp_hosted_init(), which we used to
+ * intercept with a -Wl,--wrap; 3.0 split init from the slave handshake - see below.)
  */
-int __real_esp_hosted_init(void);
-static bool s_hosted_allowed;
-int __wrap_esp_hosted_init(void)
-{
-    if (!s_hosted_allowed) {
-        return 0; /* ESP_OK: swallow the constructor's eager init */
-    }
-    return __real_esp_hosted_init();
-}
 
 /*
  * Captive-portal DNS: a minimal responder on UDP :53 that answers every A query
@@ -402,12 +394,17 @@ esp_err_t kvm_wifi_init(void)
     const int32_t m = kvm_setting_int("net_mode");
     s_mode = (m == KVM_NET_WIFI_AP) ? KVM_NET_WIFI_AP : KVM_NET_WIFI_STA;
 
-    /* The co-processor's constructor init was blocked so Ethernet mode could keep
-     * the SD bus; bring it up now, which is the point a WiFi mode needs it. */
-    s_hosted_allowed = true;
+    /* The co-processor's eager constructor init is disabled (see the note above and
+     * the board overlay) so Ethernet mode keeps the SD bus; bring it up now, which is
+     * the point a WiFi mode needs it. esp-hosted 3.0 split the bring-up: esp_hosted_init
+     * opens the transport, esp_hosted_connect_to_slave completes the handshake with the
+     * C6 (older versions did both from esp_hosted_init). */
     int herr = esp_hosted_init();
+    if (herr == 0) {
+        herr = esp_hosted_connect_to_slave();
+    }
     if (herr != 0) {
-        ESP_LOGW(TAG, "esp_hosted_init failed (%d) - is the C6 present?", herr);
+        ESP_LOGW(TAG, "esp_hosted bring-up failed (%d) - is the C6 present?", herr);
         kvm_cap_report(KVM_CAP_WIFI, false, "WiFi co-processor did not start");
         return ESP_OK;
     }

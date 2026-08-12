@@ -43,6 +43,12 @@ CONFIG_KVM_WIFI=y
 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+# esp-hosted must NOT bring the C6's SDIO transport up from its boot constructor:
+# the P4 has one SD host controller, shared with the microSD, so an eager grab in
+# Ethernet mode wedges the card and leaves the C6 link retry-looping (a ~30 s boot).
+# Disable the auto-init; kvm_net/wifi.c brings the co-processor up itself, once, only
+# when a WiFi mode is selected.
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 
 # --- board pins -------------------------------------------------------------
 # CONFIRMED inherited (match the Waveshare defaults, per the wiki):

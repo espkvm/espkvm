@@ -7,6 +7,32 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-12
+
+### Added
+- **See both firmware slots - and boot the other one.** The firmware panel now
+  lists both app slots with the version on each, which one is active, and whether
+  it's confirmed or still unconfirmed. A "Boot this" button switches onto the other
+  slot and restarts - handy for dropping back to a known-good image without
+  reflashing. A slot with no valid image is refused, so a click can't strand the
+  device.
+
+### Fixed
+- **The Function EV board boots cleanly again** (and the NANO/Guition targets).
+  esp-hosted 3.0 moved its boot-time init, so the guard that keeps the WiFi
+  co-processor off the shared SD bus in Ethernet mode quietly stopped working: the
+  onboard C6 grabbed the bus, the microSD fought it for the card, and the board took
+  ~30s to start while logging an endless SDIO error. It's back to a few seconds.
+  Boards with no co-processor (the Waveshare P4-ETH) were never affected.
+- **A glitchy H.264 picture repairs itself.** The browser's video decoder can
+  silently stall - the image fills with artefacts and even a keyframe won't clear
+  it. The console now spots that no decoded frames are coming out, rebuilds the
+  decoder and resyncs on the next keyframe instead of needing a reload; if it still
+  can't recover, it falls back to the MJPEG stream.
+- A just-installed over-the-air image is now confirmed before the optional network
+  features (MQTT, WireGuard, Tailscale) start, so a hiccup bringing one of those up
+  can't leave a perfectly reachable update unconfirmed and bound for rollback.
+
 ## [0.21.2] - 2026-08-12
 
 ### Fixed
