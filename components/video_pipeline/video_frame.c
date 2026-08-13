@@ -162,7 +162,9 @@ esp_err_t video_frame_begin_write(int *out_slot, uint8_t **out_buf, size_t *out_
         if (esp_timer_get_time() >= deadline) {
             return ESP_ERR_TIMEOUT;
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
+        /* At least one full tick: pdMS_TO_TICKS(1) is 0 ticks at 100 Hz, and
+         * vTaskDelay(0) never yields to a lower-priority task - a busy loop. */
+        vTaskDelay(1);
     }
 }
 

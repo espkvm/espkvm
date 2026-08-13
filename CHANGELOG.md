@@ -7,6 +7,24 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-08-13
+
+### Fixed
+- **Video no longer falls apart while you watch.** The frame pump polled with a
+  5 ms delay that, at this firmware's 100 Hz tick, rounds down to zero - a busy
+  loop that starved the chip whenever a viewer was connected: stutter, artefacts,
+  and eventually a stream only a reboot would bring back. The pump now sleeps on
+  the frame signal itself, which also shaves a little latency.
+- **A heavy screen change repairs itself at once.** Opening a window is a burst of
+  large frames; when the sender falls behind and skips one, the H.264 picture
+  shatters until the next keyframe. The device now notices the skip and asks for a
+  keyframe immediately - a blink instead of a two-second smear.
+- A viewer that stops reading - a closed laptop lid, a dead link - is skipped and
+  then dropped, instead of slowing the stream for everyone else.
+- The update popup showed its percentage in three places at once; now it's one bar
+  and one line. It also says which slot the update will install to (the inactive
+  one - the running slot is untouched until the new image verifies).
+
 ## [0.22.0] - 2026-08-12
 
 ### Added

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -2025,7 +2026,7 @@ static void stream_worker_task(void *arg)
             if (stream_peer_disconnected(req)) {
                 break;
             }
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(1); /* >=1 tick; pdMS_TO_TICKS(5) is 0 ticks at 100 Hz */
             continue;
         }
 
@@ -2101,6 +2102,12 @@ static void stream_worker_task(void *arg)
 
 #define VIDEO_MAX_CLIENTS 4
 
+/* Frames a client may be unwritable for before it is dropped. A viewer whose TCP
+ * send buffer stays full is not reading (a stalled decoder, a backgrounded tab, a
+ * dead link); ~3 s at 30 fps is long enough to ride out normal flow control but
+ * short enough that a truly gone viewer stops holding up the pump. */
+#define VIDEO_STALL_DROP_FRAMES 90
+
 static int s_video_fds[VIDEO_MAX_CLIENTS];
 /**
  * A viewer that has not been sent a decodable frame yet. H.264 P-frames are
@@ -2109,6 +2116,10 @@ static int s_video_fds[VIDEO_MAX_CLIENTS];
  * comes out of the encoder.
  */
 static bool s_video_need_key[VIDEO_MAX_CLIENTS];
+/* Consecutive frames a client has been unable to accept (its send buffer full).
+ * A half-open socket left by an unclean disconnect, or a viewer that stopped
+ * reading, sits here until it is dropped - so it never gets a spinning TLS send. */
+static int s_video_stall[VIDEO_MAX_CLIENTS];
 /* s_video_client_count is defined near api_video_status_get (declared once, above). */
 static SemaphoreHandle_t s_video_mu;
 
@@ -2133,6 +2144,19 @@ static void video_add_client(int fd)
         if (s_video_fds[i] < 0) {
             s_video_fds[i] = fd;
             s_video_need_key[i] = true;
+            s_video_stall[i] = 0;
+            /* Bound sends to this viewer. esp-tls left the socket non-blocking, so a
+             * full send buffer makes esp_tls_conn_write return 0 (WANT_WRITE) and
+             * httpd_send_all spin on it with no yield - pegging the pump task and
+             * tripping the watchdog. Switch to blocking with a short send timeout, so
+             * a stuck send blocks-with-timeout (yielding) instead of spinning; the
+             * pump's writability check still skips and eventually drops a dead one. */
+            int fl = fcntl(fd, F_GETFL, 0);
+            if (fl >= 0) {
+                (void)fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+            }
+            const struct timeval sndto = {.tv_sec = 0, .tv_usec = 400000};
+            (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sndto, sizeof(sndto));
             if (s_video_client_count++ == 0) {
                 /* First viewer: the encoder is idle until someone is reading. */
                 video_frame_viewer_enter();
@@ -2150,6 +2174,7 @@ static void video_drop_client_locked(int index)
 {
     s_video_fds[index] = -1;
     s_video_need_key[index] = false;
+    s_video_stall[index] = 0;
     if (s_video_client_count > 0 && --s_video_client_count == 0) {
         video_frame_viewer_leave();
     }
@@ -2193,15 +2218,47 @@ static void video_pump_task(void *arg)
             last_seq = video_frame_seq();
             continue;
         }
-        if (video_frame_seq() == last_seq) {
-            vTaskDelay(pdMS_TO_TICKS(5));
+        /*
+         * Block until the store publishes something newer - do NOT poll. The old
+         * 5 ms poll here was the watchdog: at CONFIG_FREERTOS_HZ=100 a tick is
+         * 10 ms, so pdMS_TO_TICKS(5) truncates to 0 and vTaskDelay(0) never lets
+         * a lower-priority task run. With a viewer connected this loop then
+         * busy-span between frames, starving IDLE0 (task_wdt, "kvm_video" on
+         * CPU0) and the prio-4 capture monitor - glitching the video it was
+         * pumping. The semaphore wait sleeps properly at any tick rate.
+         */
+        if (!video_frame_wait_new(last_seq, 500)) {
             continue;
         }
 
         video_frame_ref_t f;
         if (!video_frame_acquire(&f)) {
+            /* The front slot is momentarily invalid - e.g. a codec/resolution
+             * reinit (video_frame_install) set it aside and bumped the sequence.
+             * At least one full tick, not pdMS_TO_TICKS(5): that is 0 ticks at
+             * 100 Hz, i.e. no delay at all (see above). */
+            vTaskDelay(1);
             last_seq = video_frame_seq();
             continue;
+        }
+        /*
+         * The store hands out the newest frame, so falling behind a burst (a
+         * window opening is a run of large deltas) coalesces - a skipped H.264
+         * delta breaks the decoder's reference chain and the picture shatters
+         * until a keyframe. The gap says exactly when that happened: ask for an
+         * IDR now and the repair arrives within a frame or two instead of at the
+         * next scheduled keyframe. Rate-limited so a sustained overload asks for
+         * keyframes at a bounded rate rather than for every dropped frame (IDRs
+         * are the biggest frames - that would feed the very overload it repairs).
+         */
+        if (last_seq != 0 && (uint32_t)(f.seq - last_seq) > 1u &&
+            f.payload == VIDEO_PAYLOAD_H264) {
+            static int64_t s_gap_idr_us;
+            const int64_t now_us = esp_timer_get_time();
+            if (now_us - s_gap_idr_us > 300000) {
+                s_gap_idr_us = now_us;
+                video_frame_request_keyframe();
+            }
         }
         last_seq = f.seq;
 
@@ -2256,21 +2313,49 @@ static void video_pump_task(void *arg)
             continue;
         }
         for (int i = 0; i < VIDEO_MAX_CLIENTS; i++) {
-            if (s_video_fds[i] < 0) {
+            const int fd = s_video_fds[i];
+            if (fd < 0) {
                 continue;
             }
-            if (s_video_need_key[i]) {
-                if (!keyframe) {
-                    continue;
-                }
-                s_video_need_key[i] = false;
+            if (s_video_need_key[i] && !keyframe) {
+                continue; /* still waiting for its first decodable frame */
             }
-            targets[target_count++] = s_video_fds[i];
+            /*
+             * Only send to a client that can take the frame now. A viewer whose TCP
+             * send buffer is full is not reading it - a stalled decoder, a
+             * backgrounded tab, or a half-open socket left by an unclean disconnect.
+             * Sending anyway spins the TLS write (esp_tls returns 0 on WANT_WRITE and
+             * httpd_send_all loops on that with no yield), pegging this task and
+             * tripping the watchdog. A non-blocking select skips such a client; once
+             * it has been stuck too long it is dropped so it stops holding up the
+             * pump (and lets the encoder idle if it was the last viewer).
+             */
+            fd_set wfds;
+            FD_ZERO(&wfds);
+            FD_SET(fd, &wfds);
+            struct timeval tv0 = {0, 0};
+            if (select(fd + 1, NULL, &wfds, NULL, &tv0) <= 0 || !FD_ISSET(fd, &wfds)) {
+                if (++s_video_stall[i] >= VIDEO_STALL_DROP_FRAMES) {
+                    video_drop_client_locked(i);
+                }
+                continue;
+            }
+            s_video_stall[i] = 0;
+            s_video_need_key[i] = false; /* decodable frame (a keyframe if it was waiting) */
+            targets[target_count++] = fd;
         }
         xSemaphoreGive(s_video_mu);
 
         for (int i = 0; i < target_count; i++) {
-            if (httpd_ws_send_frame_async(server, targets[i], &frame) != ESP_OK) {
+            const int64_t send_t0 = esp_timer_get_time();
+            const esp_err_t send_r = httpd_ws_send_frame_async(server, targets[i], &frame);
+            const int64_t send_ms = (esp_timer_get_time() - send_t0) / 1000;
+            if (send_ms > 500) {
+                /* Diagnostic: a send this slow is the watchdog culprit. */
+                ESP_LOGW(TAG, "slow video send fd=%d len=%zu key=%d took %lldms", targets[i],
+                         packet_len, keyframe, (long long)send_ms);
+            }
+            if (send_r != ESP_OK) {
                 /* A viewer that has gone stops being counted, which is also
                  * what lets the encoder go idle again. */
                 video_remove_client(targets[i]);
