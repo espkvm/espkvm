@@ -40,6 +40,7 @@
 #include "wireguardif.h"
 
 #include "kvm_caps.h"
+#include "kvm_ipv6.h"
 #include "kvm_settings.h"
 
 #define TAG "kvm_wg"
@@ -83,6 +84,11 @@ static bool net_is_up(void)
     esp_netif_t *netif = esp_netif_get_default_netif();
     esp_netif_ip_info_t ip;
     if (netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+        s_net_up = true;
+    } else if (kvm_ipv6_routable(NULL, 0)) {
+        /* An IPv6-only network still counts as up. Whether the peer can actually
+         * be reached over it is the tunnel's problem to report - refusing to
+         * start at all would leave the operator with no error to read. */
         s_net_up = true;
     }
     return s_net_up;

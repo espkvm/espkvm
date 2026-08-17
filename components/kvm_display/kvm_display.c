@@ -26,6 +26,7 @@
 #include "capture.h"
 #include "kvm_caps.h"
 #include "kvm_display_driver.h"
+#include "kvm_ipv6.h"
 #include "kvm_settings.h"
 #include "kvm_thermal.h"
 #include "kvm_ts.h"
@@ -81,6 +82,11 @@ static void gather(kvm_display_status_t *st)
     esp_netif_ip_info_t ip;
     if (nif && esp_netif_get_ip_info(nif, &ip) == ESP_OK && ip.ip.addr) {
         esp_ip4addr_ntoa(&ip.ip, st->ip, sizeof(st->ip));
+    } else if (kvm_ipv6_routable(NULL, 0)) {
+        /* IPv6-only: the address itself is far too long for this panel, so show
+         * the name that resolves to it instead - which is what someone standing
+         * in front of the device would type anyway. */
+        snprintf(st->ip, sizeof(st->ip), "%s.local", st->hostname);
     }
 
     kvm_ts_status_t ts;

@@ -5,7 +5,30 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.23.0] - 2026-08-17
+
+### Added
+- **IPv6.** The device now answers on IPv6 as well as IPv4, on Ethernet and on
+  WiFi. Nothing to fill in - the address comes from the router - and
+  `espkvm.local` resolves to it too. The certificate learns the address and names
+  it from the next restart, so `https://[address]/` is trusted the same way the
+  v4 one is. There is a switch in Settings &rarr; Network if you would rather the
+  KVM stayed off IPv6.
+- **Tap the network icon** in the footer to see everything about the connection
+  in one place: what it is connected by, the name it answers to, its IPv4 address,
+  every IPv6 address with what each one is good for, and the MAC you would put in
+  a DHCP reservation. Each one is a link and has a Copy button, because nobody
+  retypes an IPv6 address.
+- **A network with no IPv4 at all now works.** Tailscale and WireGuard used to
+  wait for an IPv4 address that was never coming; over WiFi, `espkvm.local` was
+  never announced for the same reason; and the little status screen showed a
+  blank address. All three now take the IPv6 route. Wake-on-LAN genuinely cannot
+  work there - a magic packet is an IPv4 broadcast, and IPv6 has none - so it
+  says so and hides the button instead of failing quietly.
+- The device now appears in network discovery under **its own hostname** rather
+  than as one of several identical "ESP-KVM" entries. Only the name you chose is
+  published: no firmware version, no board model. mDNS is shouted at every device
+  on the link, and a version number there is a free list of which bugs apply.
 
 ## [0.22.1] - 2026-08-13
 

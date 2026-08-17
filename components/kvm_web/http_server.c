@@ -30,6 +30,7 @@
 #include "esp_timer.h"
 
 #include "esp_https_server.h"
+#include "esp_netif.h"
 
 #include "lwip/sockets.h"
 
@@ -37,6 +38,7 @@
 
 #include "capture.h"
 #include "ethernet.h"
+#include "kvm_ipv6.h"
 #include "wifi.h"
 #include "kvm_atx.h"
 #include "kvm_mqtt.h"
@@ -351,17 +353,55 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_wg_status_t wg;
     kvm_wg_status(&wg);
 
+    /*
+     * What the active link is, in the terms an operator needs to reach the device
+     * or write it into a router: the name it answers to, the IPv4 address, the MAC
+     * a DHCP reservation is keyed on, and the autoconfigured IPv6 addresses.
+     *
+     * The browser knows the address it dialled, but that is not the same fact: it
+     * may have arrived over the VPN, over mDNS, or over a v6 address, and none of
+     * those tell you what the device holds on the LAN.
+     */
+    const char *hostname = kvm_setting_str("net_hostname");
+    if (!hostname || !hostname[0]) {
+        hostname = CONFIG_KVM_MDNS_HOSTNAME;
+    }
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    esp_netif_ip_info_t ip4_info;
+    char ip4[16] = "";
+    if (netif && esp_netif_get_ip_info(netif, &ip4_info) == ESP_OK && ip4_info.ip.addr) {
+        snprintf(ip4, sizeof(ip4), IPSTR, IP2STR(&ip4_info.ip));
+    }
+    uint8_t mac_raw[6] = {0};
+    char mac_str[18] = "";
+    if (netif && esp_netif_get_mac(netif, mac_raw) == ESP_OK) {
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", mac_raw[0], mac_raw[1],
+                 mac_raw[2], mac_raw[3], mac_raw[4], mac_raw[5]);
+    }
+
+    /* The IPv6 addresses the active link holds, most routable first. Autoconfigured,
+     * so nothing else tells the operator what they turned out to be. */
+    char ip6[KVM_IP6_MAX_ADDRS][KVM_IP6_STRLEN];
+    const int ip6_count = kvm_ipv6_addrs(ip6, KVM_IP6_MAX_ADDRS);
+    char ip6_json[KVM_IP6_MAX_ADDRS * (KVM_IP6_STRLEN + 4) + 4];
+    int q = snprintf(ip6_json, sizeof(ip6_json), "[");
+    for (int i = 0; i < ip6_count; i++) {
+        q += snprintf(ip6_json + q, sizeof(ip6_json) - (size_t)q, "%s\"%s\"", i ? "," : "", ip6[i]);
+    }
+    snprintf(ip6_json + q, sizeof(ip6_json) - (size_t)q, "]");
+
     char ota_json[512];
     ota_slots_json(ota_json, sizeof(ota_json));
 
-    char body[1600];
+    char body[2048];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"wifiUp\":%s,"
-                     "\"rssi\":%d,\"ssid\":\"%s\",\"apClients\":%d},"
+                     "\"rssi\":%d,\"ssid\":\"%s\",\"apClients\":%d,"
+                     "\"hostname\":\"%s\",\"ip4\":\"%s\",\"mac\":\"%s\",\"ipv6\":%s},"
                      "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s},"
                      "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
                      "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
@@ -374,7 +414,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
                      kvm_thermal_state_name(kvm_thermal_state()),
                      net_up ? "true" : "false", net_mbps, net_mode,
-                     wifi.up ? "true" : "false", wifi.rssi, wifi.ssid, wifi.ap_clients,
+                     wifi.up ? "true" : "false", wifi.rssi, wifi.ssid, wifi.ap_clients, hostname,
+                     ip4, mac_str, ip6_json,
                      atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
                      atx.power_on ? "true" : "false", mqtt_on ? "true" : "false",
                      mqtt_conn ? "true" : "false", wg.enabled ? "true" : "false",

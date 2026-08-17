@@ -16,6 +16,8 @@
 #include "mdns.h"
 #include "sdkconfig.h"
 
+#include "kvm_caps.h"
+#include "kvm_ipv6.h"
 #include "kvm_settings.h"
 #include "wifi.h" /* kvm_net_mode_t (net_mode enum) */
 
@@ -36,6 +38,21 @@ esp_err_t kvm_wol_send(const char *mac)
     memset(pkt, 0xFF, 6);
     for (int i = 0; i < 16; i++) {
         memcpy(pkt + 6 + i * 6, m, 6);
+    }
+
+    /*
+     * Wake-on-LAN is a subnet broadcast, and IPv6 has no broadcast at all - the
+     * magic packet only exists over IPv4. On a v6-only network this cannot work,
+     * so say so once and take the control out of the console rather than letting
+     * it fail silently every time it is pressed.
+     */
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    esp_netif_ip_info_t ip4;
+    if (!netif || esp_netif_get_ip_info(netif, &ip4) != ESP_OK || ip4.ip.addr == 0) {
+        kvm_cap_report(KVM_CAP_WOL, false,
+                       "Wake-on-LAN is an IPv4 broadcast; this device has no IPv4 address");
+        ESP_LOGW(TAG, "WoL needs an IPv4 address and this device has none");
+        return ESP_ERR_INVALID_STATE;
     }
 
     int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -95,6 +112,10 @@ static void eth_on_event(void *arg, esp_event_base_t base, int32_t id, void *dat
         }
         s_eth_up = true;
         ESP_LOGI(TAG, "Ethernet link up (%d Mbps)", s_eth_mbps);
+        /* IPv6 starts here rather than at init: forming the link-local address
+         * needs the interface to be up, and everything else is autoconfigured
+         * from the router once it is. */
+        kvm_ipv6_start(s_eth_netif);
     } else if (id == ETHERNET_EVENT_DISCONNECTED) {
         s_eth_up = false;
         s_eth_mbps = 0;
@@ -115,6 +136,15 @@ void kvm_eth_link(bool *up, int *mbps)
 
 void kvm_net_advertise(const char *hostname)
 {
+    /* Called from whichever address arrives first, and there may be several (a
+     * v4 lease and an autoconfigured v6 address land seconds apart), so this has
+     * to be safe to call more than once - the service would otherwise be
+     * registered twice. */
+    static bool advertised;
+    if (advertised) {
+        return;
+    }
+
     esp_err_t mdns_err = mdns_init();
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS init failed: %s", esp_err_to_name(mdns_err));
@@ -124,7 +154,20 @@ void kvm_net_advertise(const char *hostname)
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS hostname: %s", esp_err_to_name(mdns_err));
     }
-    mdns_err = mdns_instance_name_set("ESP-KVM");
+    /*
+     * The instance name is what a discovery tool lists, so it carries the name
+     * the operator chose rather than a constant every device shares - otherwise
+     * someone running several of these sees the same "ESP-KVM" repeated and has
+     * to open each one to tell them apart.
+     *
+     * Deliberately nothing else: mDNS is multicast to the whole link,
+     * unauthenticated, and pushed at every device on it whether or not it could
+     * ever log in. A firmware version in a TXT record would hand out exactly
+     * which known bugs apply, for free, to anyone listening. The hostname is
+     * already public here (it is the .local name) and is the operator's own
+     * word, so it discloses nothing they did not choose to.
+     */
+    mdns_err = mdns_instance_name_set((hostname && hostname[0]) ? hostname : "ESP-KVM");
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS instance: %s", esp_err_to_name(mdns_err));
     }
@@ -138,11 +181,12 @@ void kvm_net_advertise(const char *hostname)
     };
     /* Advertised under the service the device really answers, so a browser or a
      * discovery tool lands on the working port. */
-    mdns_err = mdns_service_add("ESP-KVM", tls ? "_https" : "_http", "_tcp", tls ? 443 : 80,
-                                http_txt, 1);
+    mdns_err = mdns_service_add(NULL, tls ? "_https" : "_http", "_tcp", tls ? 443 : 80, http_txt,
+                                1);
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS service: %s", esp_err_to_name(mdns_err));
     } else {
+        advertised = true;
         ESP_LOGI(TAG, "mDNS: %s://%s.local/", tls ? "https" : "http", hostname);
     }
 }

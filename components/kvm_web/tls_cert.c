@@ -27,6 +27,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "lwip/sockets.h" /* inet_pton, for the IPv6 address SAN */
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -67,7 +68,7 @@
 #define CA_VERSION 3
 /** Bumped to force every cached leaf to be re-issued (e.g. after a fix to how the
  *  leaf is built) WITHOUT regenerating the CA, so an imported CA stays valid. */
-#define LEAF_VERSION 2
+#define LEAF_VERSION 3
 /** The hostname baked into the CA's subject when it was generated. The leaf's
  *  issuer must match the CA subject exactly, and the CA is kept across hostname
  *  changes, so the original name is remembered rather than rebuilt from the
@@ -78,6 +79,13 @@
  *  tailnet to come up. */
 #define NVS_KEY_TS_IP "ts_ip"
 #define NVS_KEY_TS_NAME "ts_fqdn"
+/** The routable IPv6 addresses the device last came up on, remembered for the
+ *  same reason: autoconfiguration only hands them over seconds after boot, long
+ *  after the certificate has been issued and served. Two of them, because the
+ *  global address and the unique-local one fail in opposite directions - the
+ *  first is reachable from outside, the second survives a change of prefix. */
+#define NVS_KEY_IP6 "ip6"
+#define NVS_KEY_IP6_ULA "ip6_ula"
 
 /* One NVS string tops out at 4000 bytes; keep each PEM comfortably under that.
  * A leaf plus a couple of intermediates and a P-256 or RSA-2048 key fit easily -
@@ -143,6 +151,17 @@ static bool parse_ip4(const char *s, uint8_t out[4])
     out[2] = (uint8_t)c;
     out[3] = (uint8_t)d;
     return true;
+}
+
+/** The sixteen bytes of an IPv6 address, for an iPAddress SAN. lwIP's parser
+ *  takes the compressed form and the zone suffixes it accepts are not something
+ *  a certificate should carry, so anything with one is refused. */
+static bool parse_ip6(const char *s, uint8_t out[16])
+{
+    if (!s || !s[0] || strchr(s, '%')) {
+        return false;
+    }
+    return inet_pton(AF_INET6, s, out) == 1;
 }
 
 /*
@@ -224,7 +243,7 @@ static esp_err_t nvs_load_leaf(const char *idkey, char **cert, char **key)
     if (err != ESP_OK) {
         return err;
     }
-    char stored[220] = {0};
+    char stored[320] = {0}; /* as long as the idkey the caller built */
     size_t len = sizeof(stored);
     err = nvs_get_str(h, NVS_KEY_NAME, stored, &len);
     if (err != ESP_OK || strcmp(stored, idkey) != 0) {
@@ -400,7 +419,7 @@ done:
  *  if given, @p ip in its SANs. */
 static esp_err_t gen_leaf(const char *ca_key_pem, const char *name, const char *ip,
                           const char *ca_host, const char *ts_ip, const char *ts_fqdn,
-                          char **cert_out, char **key_out)
+                          const char *ip6, const char *ip6_ula, char **cert_out, char **key_out)
 {
     esp_err_t res = ESP_FAIL;
     mbedtls_pk_context ca_key;
@@ -477,6 +496,35 @@ static esp_err_t gen_leaf(const char *ca_key_pem, const char *name, const char *
         san_head = &san_ts_ip;
     }
 
+    /* The IPv6 addresses the device came up on last time, so opening the console
+     * at https://[address]/ is trusted the same way the v4 literal is. Both are
+     * named: the global address is the one that reaches it from elsewhere, the
+     * unique-local one the address that survives the ISP handing out a new
+     * prefix - which is what anyone who bookmarks the console ends up using. An
+     * iPAddress SAN is the raw sixteen bytes; a browser matches it against the
+     * address it dialled, so a stale one is simply never matched. */
+    uint8_t ip6_bytes[16];
+    const bool have_ip6 = parse_ip6(ip6, ip6_bytes);
+    mbedtls_x509_san_list san_ip6 = {
+        .node = {.type = MBEDTLS_X509_SAN_IP_ADDRESS,
+                 .san = {.unstructured_name = {.p = ip6_bytes, .len = sizeof(ip6_bytes)}}},
+        .next = san_head,
+    };
+    if (have_ip6) {
+        san_head = &san_ip6;
+    }
+    uint8_t ip6_ula_bytes[16];
+    const bool have_ip6_ula = parse_ip6(ip6_ula, ip6_ula_bytes);
+    mbedtls_x509_san_list san_ip6_ula = {
+        .node = {.type = MBEDTLS_X509_SAN_IP_ADDRESS,
+                 .san = {.unstructured_name = {.p = ip6_ula_bytes,
+                                               .len = sizeof(ip6_ula_bytes)}}},
+        .next = san_head,
+    };
+    if (have_ip6_ula) {
+        san_head = &san_ip6_ula;
+    }
+
     /* extendedKeyUsage = serverAuth; Chrome requires it on the leaf when the
      * chain is validated against a privately-imported CA. */
     mbedtls_asn1_sequence eku = {
@@ -542,6 +590,8 @@ typedef struct {
     const char *ca_host;    /* JOB_LEAF: CA's own hostname, for the issuer */
     const char *ts_ip;      /* JOB_LEAF: Tailscale 100.x address, or "" */
     const char *ts_fqdn;    /* JOB_LEAF: Tailscale MagicDNS name, or "" */
+    const char *ip6;        /* JOB_LEAF: last global IPv6 address, or "" */
+    const char *ip6_ula;    /* JOB_LEAF: last unique-local IPv6 address, or "" */
     char *cert;             /* out */
     char *key;              /* out */
     esp_err_t result;
@@ -554,7 +604,8 @@ static void gen_task(void *arg)
     job->result = (job->kind == JOB_CA)
                       ? gen_ca(&job->cert, &job->key)
                       : gen_leaf(job->ca_key_pem, job->name, job->ip, job->ca_host, job->ts_ip,
-                                 job->ts_fqdn, &job->cert, &job->key);
+                                 job->ts_fqdn, job->ip6, job->ip6_ula, &job->cert,
+                                 &job->key);
     xSemaphoreGive(job->done);
     vTaskDelete(NULL);
 }
@@ -760,6 +811,63 @@ static void nvs_load_tailnet(char *ip, size_t iplen, char *fqdn, size_t fqdnlen)
     nvs_close(h);
 }
 
+static void nvs_load_ip6(char *global, size_t glen, char *ula, size_t ulen)
+{
+    if (global && glen) {
+        global[0] = '\0';
+    }
+    if (ula && ulen) {
+        ula[0] = '\0';
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    if (global) {
+        size_t l = glen;
+        nvs_get_str(h, NVS_KEY_IP6, global, &l);
+    }
+    if (ula) {
+        size_t l = ulen;
+        nvs_get_str(h, NVS_KEY_IP6_ULA, ula, &l);
+    }
+    nvs_close(h);
+}
+
+bool kvm_tls_set_ip6(const char *global, const char *ula)
+{
+    if (!global) {
+        global = "";
+    }
+    if (!ula) {
+        ula = "";
+    }
+    char cur_global[KVM_TLS_IP6_MAX] = {0};
+    char cur_ula[KVM_TLS_IP6_MAX] = {0};
+    nvs_load_ip6(cur_global, sizeof(cur_global), cur_ula, sizeof(cur_ula));
+    if (strcmp(cur_global, global) == 0 && strcmp(cur_ula, ula) == 0) {
+        return false; /* unchanged - the served leaf already names these */
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_set_str(h, NVS_KEY_IP6, global);
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, NVS_KEY_IP6_ULA, ula);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (err != ESP_OK) {
+        return false;
+    }
+    ESP_LOGI(TAG, "IPv6 addresses recorded for the certificate: %s / %s",
+             global[0] ? global : "(none)", ula[0] ? ula : "(none)");
+    return true;
+}
+
 bool kvm_tls_set_tailnet(const char *ip, const char *fqdn)
 {
     if (!ip) {
@@ -831,9 +939,13 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
     char ts_ip[24] = {0};
     char ts_fqdn[128] = {0};
     nvs_load_tailnet(ts_ip, sizeof(ts_ip), ts_fqdn, sizeof(ts_fqdn));
-    char idkey[220];
-    snprintf(idkey, sizeof(idkey), "v%d|%s|%s|%s|%s", LEAF_VERSION, name, ip[0] ? ip : "", ts_ip,
-             ts_fqdn);
+    /* Likewise the IPv6 addresses learned on an earlier boot. */
+    char ip6[KVM_TLS_IP6_MAX] = {0};
+    char ip6_ula[KVM_TLS_IP6_MAX] = {0};
+    nvs_load_ip6(ip6, sizeof(ip6), ip6_ula, sizeof(ip6_ula));
+    char idkey[320];
+    snprintf(idkey, sizeof(idkey), "v%d|%s|%s|%s|%s|%s|%s", LEAF_VERSION, name, ip[0] ? ip : "",
+             ts_ip, ts_fqdn, ip6, ip6_ula);
 
     /* The CA: generated once and kept, so importing it is a one-time act. Its
      * subject carries the hostname it was born with; remember that so the leaf's
@@ -877,7 +989,9 @@ esp_err_t kvm_tls_identity_get(kvm_tls_identity_t *out, bool allow_byo)
                          .ip = ip,
                          .ca_host = ca_host,
                          .ts_ip = ts_ip,
-                         .ts_fqdn = ts_fqdn};
+                         .ts_fqdn = ts_fqdn,
+                         .ip6 = ip6,
+                         .ip6_ula = ip6_ula};
         esp_err_t err = run_gen(&job);
         if (err != ESP_OK) {
             free(ca_cert);

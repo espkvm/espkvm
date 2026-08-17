@@ -88,6 +88,16 @@ CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
 # create a bridge - this is only here for that side effect.
 CONFIG_ESP_NETIF_BRIDGE_EN=y
 
+# IPv6. lwIP compiles it in by default but only ever gets a link-local address
+# without SLAAC, which is useless from another subnet. With autoconfiguration on,
+# the device picks up a routable address from the router's advertisements and the
+# console answers on it (esp_http_server already binds a dual-stack socket).
+# RDNSS carries the resolvers in the same advertisement, so DNS keeps working on
+# a link that only offers them over v6. Addressing is still dual-stack: IPv4 is
+# how the tunnels and Wake-on-LAN reach out.
+CONFIG_LWIP_IPV6_AUTOCONFIG=y
+CONFIG_LWIP_IPV6_RDNSS_MAX_DNS_SERVERS=2
+
 # Native Tailscale (microlink) wraps its Noise layer in ChaCha20-Poly1305 via the
 # PSA API. On WiFi SoCs the supplicant pulls these primitives in transitively; the
 # P4 has no WiFi radio, so enable them explicitly or PSA_ALG_CHACHA20_POLY1305 is

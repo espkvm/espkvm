@@ -12,16 +12,6 @@
   <img src="https://img.shields.io/badge/target-ESP32--P4-informational" alt="Target: ESP32-P4">
 </p>
 
-<p align="center">
-  <a href="https://github.com/espkvm/espkvm"><img src="docs/star-on-github.svg" height="44" alt="Star us on GitHub"></a>
-  &nbsp;
-  <a href="https://buymeacoffee.com/dexif"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=dexif&button_colour=FFDD00&font_colour=000000&font_family=Inter&outline_colour=000000&coffee_colour=ffffff" height="40" alt="Buy me a coffee"></a>
-</p>
-
-<p align="center">
-  <sub>A ⭐ costs you nothing and helps others find the project.</sub>
-</p>
-
 An IP-KVM built from an ESP32-P4 and a Toshiba TC358743 HDMI-to-CSI bridge. It
 captures the target machine's HDMI output, presents itself to that machine as a
 USB keyboard and mouse, and puts both in a browser.
@@ -29,6 +19,15 @@ USB keyboard and mouse, and puts both in a browser.
 The point is to reach a machine that has no working operating system - a BIOS
 screen, a boot menu, a kernel that will not come up - from a device that costs a
 fraction of a commercial KVM-over-IP.
+
+<!-- The buttons sit below the description on purpose: a search engine quotes the
+     first prose in this file, and that should say what the project is rather than
+     ask for a star. The ask itself lives in Support, at the bottom. -->
+<p align="center">
+  <a href="https://github.com/espkvm/espkvm"><img src="docs/star-on-github.svg" height="44" alt="Star us on GitHub"></a>
+  &nbsp;
+  <a href="https://buymeacoffee.com/dexif"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=dexif&button_colour=FFDD00&font_colour=000000&font_family=Inter&outline_colour=000000&coffee_colour=ffffff" height="40" alt="Buy me a coffee"></a>
+</p>
 
 ![The ESP-KVM console driving a real machine: its desktop, a right-click menu open on it, the live status bar, and the video settings panel.](docs/console.webp)
 
@@ -233,9 +232,10 @@ and USB-C from the board's OTG port to the target. A microSD card if you want
 boot-from-image.
 
 <sub>Board and module photos (c) their makers, taken from product pages and used
-only to identify the hardware. ESP-KVM is not affiliated with Espressif, Waveshare
-or Geekworm. The pin map is in
-`components/kvm_board/include/kvm_board.h`.</sub>
+only to identify the hardware. ESP-KVM is not affiliated with
+[Espressif](https://github.com/espressif), [Waveshare](https://github.com/waveshareteam),
+[Geekworm](https://github.com/geekworm-com) or [Guition](https://github.com/guitionofficial).
+The pin map is in `components/kvm_board/include/kvm_board.h`.</sub>
 
 ## Quick start
 
@@ -270,6 +270,22 @@ into your operating system or browser's **trusted authorities** (not "your
 certificates"), and reach the device by name at **https://espkvm.local**. On a
 static IP the certificate names the address too, so `https://<ip>` works after
 importing; on DHCP use the name.
+
+The device is dual-stack: on a network that advertises IPv6 it picks up an
+address there as well, with nothing to configure, and `espkvm.local` resolves to
+it. The certificate names those addresses from the next restart, so
+`https://[address]/` is trusted like the v4 literal. Turn it off in
+**Settings -> Network -> IPv6** if the KVM should stay off IPv6.
+
+Tapping the **network icon** in the console footer shows the whole picture: what
+the device is connected by, the name it answers to, its IPv4 address, every IPv6
+address labelled with what it is good for, and the MAC for a DHCP reservation.
+Each is a link and has a Copy button.
+
+A network with no IPv4 at all works too. The one thing that cannot follow is
+Wake-on-LAN: the magic packet is an IPv4 broadcast and IPv6 has no broadcast, so
+the console reports it unavailable there rather than pretending. The WireGuard
+and Tailscale tunnels still need a peer reachable over IPv4.
 
 Sign in as **admin / admin**. The console will not go any further until that
 password is changed: a KVM left on the password it shipped with is a keyboard
@@ -440,7 +456,7 @@ components/
   kvm_config/     settings registry and capability registry
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
   kvm_net/        Ethernet, WiFi (station/AP + rescue hotspot, captive portal),
-                  mDNS, Wake-on-LAN, WireGuard tunnel
+                  IPv6, mDNS, Wake-on-LAN, WireGuard tunnel
   kvm_board/      pin map
 web/              the console (Vue 3 + TypeScript + Vite)
 boards/           per-board build overlays (Waveshare, Function EV)
@@ -458,6 +474,11 @@ docs/             what the hardware actually does
 
 Also picked up and translated internationally - French, Greek, Spanish, Russian,
 Chinese, Japanese, Thai and German.
+
+I also wrote up the project's origin story on
+[Habr](https://habr.com/ru/articles/1069442/) - *ESP-KVM: how I built an IP-KVM
+on the ESP32-P4, and what I tripped over along the way* (the article is in
+Russian).
 
 Waveshare, the maker of the capture adapter, links ESP-KVM from its
 [HDMI to CSI adapter wiki](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter).

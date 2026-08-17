@@ -9,15 +9,18 @@ endif()
 
 idf_component_register(
     SRCS "ethernet.c"
+         "ipv6.c"
          "kvm_ts.c"
          "kvm_wg.c"
          "wifi.c"
     INCLUDE_DIRS "include"
+    # esp_netif is public rather than private: kvm_ipv6.h names esp_netif_t, so
+    # anything including it needs esp_netif's headers too.
+    REQUIRES esp_netif
     PRIV_REQUIRES
         kvm_config
         kvm_storage
         esp_eth
-        esp_netif
         esp_event
         espressif__mdns
         microlink

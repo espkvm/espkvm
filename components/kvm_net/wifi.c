@@ -35,6 +35,7 @@ __attribute__((unused)) static const char *TAG = "wifi";
 
 #include "ethernet.h"
 #include "kvm_caps.h"
+#include "kvm_ipv6.h"
 #include "kvm_settings.h"
 #include "kvm_storage.h"
 
@@ -266,6 +267,10 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         if (s_ssid[0]) {
             esp_wifi_connect(); /* nothing to join without an SSID (rescue-hotspot-only) */
         }
+    } else if (id == WIFI_EVENT_STA_CONNECTED) {
+        /* Association, not the address: IPv6 needs the interface up to form its
+         * link-local address, and does not wait for DHCP the way IPv4 does. */
+        kvm_ipv6_start(s_netif);
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         s_up = false;
         s_rssi = 0;
@@ -297,6 +302,26 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     kvm_net_advertise(wifi_hostname());
 }
 
+/*
+ * The same, for a network that only offers IPv6: this handler is the sole reason
+ * mDNS gets advertised in a WiFi mode, and IP_EVENT_STA_GOT_IP never fires
+ * without DHCP. Advertising is idempotent, so on a dual-stack network whichever
+ * address lands first does it and the other is a no-op.
+ */
+static void on_got_ip6(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)id;
+    (void)data;
+    if (!kvm_ipv6_routable(NULL, 0)) {
+        return; /* a link-local address reaches nobody; wait for a real one */
+    }
+    s_up = true;
+    s_retries = 0;
+    kvm_net_advertise(wifi_hostname());
+}
+
 static esp_err_t wifi_start_sta(void)
 {
     /* net_fallback=hotspot: run a rescue softAP alongside the station (APSTA) so the
@@ -313,6 +338,7 @@ static esp_err_t wifi_start_sta(void)
     (void)esp_netif_set_hostname(s_netif, wifi_hostname());
     (void)esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL);
     (void)esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL);
+    (void)esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, on_got_ip6, NULL);
 
     const char *ssid = kvm_setting_str("wifi_ssid");
     strlcpy(s_ssid, ssid ? ssid : "", sizeof(s_ssid));

@@ -284,6 +284,14 @@ static const kvm_setting_t s_settings[] = {
         .title = "DNS server", .def_str = "", .max_len = 15,
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
     },
+    {
+        .key = "net_ipv6", .section = "network", .type = KVM_VT_BOOL,
+        .title = "IPv6",
+        .help = "Also answer on an IPv6 address, alongside IPv4. There is nothing to "
+                "configure: the address comes from the router's advertisements. Turn it "
+                "off to keep the device off IPv6 entirely.",
+        .def = 1, .requires_cap = -1, .flags = KVM_SF_REBOOT,
+    },
 
     /* ---- wifi (boards with an ESP32-C6 co-processor only) ---------------- */
     {

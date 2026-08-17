@@ -182,7 +182,7 @@ static void draw_logo(mono_oled_t *m)
 static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_t page)
 {
     memset(m->fb, 0, sizeof(m->fb));
-    char buf[40]; /* only ~21 chars fit on screen, but size it so snprintf never truncates */
+    char buf[48]; /* only ~21 chars fit on screen, but size it so snprintf never truncates */
     switch (page) {
     case 0: /* network */
         fb_icon(m, 0, 0, icon_net);

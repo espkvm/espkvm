@@ -36,7 +36,13 @@ extern "C" {
  */
 typedef struct {
     char hostname[32]; /**< configured hostname (also the mDNS name) */
-    char ip[16];       /**< current IPv4, or "" when the link is down */
+    /**
+     * How to reach the console: the IPv4 address, or the mDNS name where there is
+     * no IPv4 (an IPv6-only network). A raw IPv6 address is not offered - it does
+     * not fit a panel this size and nobody would read it back off one - and this
+     * is "" only when the link is down.
+     */
+    char ip[40];
     char link[12];     /**< "Ethernet" / "Wi-Fi" / "AP mode" */
     char ssid[33];     /**< Wi-Fi SSID (station) or hotspot name (AP), else "" */
     char ts_ip[24];    /**< Tailscale 100.x address, or "" when not on a tailnet */

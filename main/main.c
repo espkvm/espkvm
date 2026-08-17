@@ -19,6 +19,7 @@
 #include "kvm_atx.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
+#include "kvm_ipv6.h"
 #include "kvm_mqtt.h"
 #include "kvm_storage.h"
 #include "kvm_ts.h"
@@ -282,6 +283,11 @@ void app_main(void)
      * came up reachable but was rolled back anyway because a later peripheral,
      * left in a bad state by the warm restart, never finished starting.
      */
+    /* Both links start IPv6 themselves once they are up; this only hands the
+     * address they learn to the TLS layer, through the same kind of callback the
+     * tailnet identity uses (a direct call would be a dependency cycle). */
+    kvm_ipv6_set_identity_cb(kvm_tls_set_ip6);
+
     /*
      * One link at a time (net_mode): Ethernet, WiFi station, or WiFi AP. Ethernet
      * is the default and the only mode on a board without a co-processor. WiFi's

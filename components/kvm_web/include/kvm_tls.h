@@ -67,6 +67,26 @@ esp_err_t kvm_tls_identity_reset(void);
  */
 bool kvm_tls_set_tailnet(const char *ip, const char *fqdn);
 
+/** Room for the longest textual IPv6 address plus its terminator. */
+#define KVM_TLS_IP6_MAX 46
+
+/**
+ * Record the routable IPv6 addresses the device is answering on, so the leaf
+ * certificate names them and https://[address]/ is trusted like the v4 literal.
+ * Both kinds are named: @p global is what reaches the device from outside, @p ula
+ * the unique-local address that survives the ISP handing out a new prefix - the
+ * one worth bookmarking, and so the one that must not be left out. Either may be
+ * "" for none.
+ *
+ * Persisted; unlike the tailnet identity this does NOT ask for a restart, because
+ * an autoconfigured address arrives seconds into every boot and a KVM that
+ * restarts itself at that moment is worse than a certificate that picks the
+ * address up next time.
+ *
+ * @return true if the stored values changed.
+ */
+bool kvm_tls_set_ip6(const char *global, const char *ula);
+
 /**
  * Install an operator-supplied certificate and matching private key (both PEM),
  * used in place of the self-signed identity from the next start. The pair is
