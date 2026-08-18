@@ -25,6 +25,7 @@
 #include "esp_cache.h"
 #include "esp_h264_alloc.h"
 #include "esp_h264_enc_single_hw.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_private/esp_cache_private.h"
 #include "esp_timer.h"
@@ -102,6 +103,21 @@ static void h264_encode_task(void *arg);
 /** Size the encoder is currently configured for, 0 when it is not open. */
 static uint32_t s_enc_w;
 static uint32_t s_enc_h;
+/**
+ * The encoder could not be built and retrying will not help.
+ *
+ * Set when the hardware encoder cannot get its memory, which is a state the
+ * pipeline cannot encode its way out of: the size it needs is fixed by the
+ * input resolution. Without this the encode path retried on every captured
+ * frame - some thirty times a second, forever, each one logging the same
+ * error - while the viewer sat looking at nothing.
+ */
+static bool s_enc_broken;
+
+bool capture_h264_encoder_failed(void)
+{
+    return s_enc_broken;
+}
 /** Last values pushed into the encoder, so a setting change is noticed. */
 static uint8_t s_gop;
 static uint32_t s_bitrate;
@@ -184,10 +200,27 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
     };
     esp_h264_err_t herr = esp_h264_enc_hw_new(&cfg, &s_enc);
     if (herr != ESP_H264_ERR_OK || !s_enc) {
-        ESP_LOGE(CAPTURE_LOG_TAG, "h264 encoder for %" PRIu32 "x%" PRIu32 ": %s", w, h,
-                 h264_err_name(herr));
+        /*
+         * Print BOTH heaps, and internal first: the encoder takes its working
+         * buffers from internal memory, of which this chip has about half a
+         * megabyte in total, while PSRAM sits there with tens of megabytes
+         * free. Logging PSRAM alone - which this did at first - reads as "the
+         * device is out of memory" and sends everyone off measuring the wrong
+         * heap. Largest block as well as free: a single multi-megabyte request
+         * fails on the longest free run, not on the total.
+         */
+        ESP_LOGE(CAPTURE_LOG_TAG,
+                 "h264 encoder for %" PRIu32 "x%" PRIu32 ": %s (internal %u KB free / %u KB "
+                 "largest, PSRAM %u KB free / %u KB largest)",
+                 w, h, h264_err_name(herr),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
         s_enc = NULL;
-        return ESP_ERR_NOT_SUPPORTED;
+        /* Distinct from every other failure: the caller drops to MJPEG on this
+         * one rather than retrying a frame later, forever. */
+        return herr == ESP_H264_ERR_MEM ? ESP_ERR_NO_MEM : ESP_ERR_NOT_SUPPORTED;
     }
     herr = esp_h264_enc_open(s_enc);
     if (herr != ESP_H264_ERR_OK) {
@@ -198,6 +231,7 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
     (void)esp_h264_enc_hw_get_param_hd(s_enc, &s_param);
     s_enc_w = w;
     s_enc_h = h;
+    s_enc_broken = false;
     ESP_LOGI(CAPTURE_LOG_TAG, "h264 encoder %" PRIu32 "x%" PRIu32 " @%" PRId32 " fps, %" PRIu32
              " kbit/s, gop %u", w, h, fps, s_bitrate / 1000u, s_gop);
     return ESP_OK;
@@ -404,6 +438,7 @@ static void h264_encode_job(const h264_job_t *job)
 {
     if (s_enc_w != job->hres || s_enc_h != job->vres) {
         if (encoder_open(job->hres, job->vres) != ESP_OK) {
+            s_enc_broken = true; /* the loop reads this and falls back to MJPEG */
             return;
         }
         /* A fresh encoder starts on an IDR, so nothing else to ask for. */
@@ -491,8 +526,12 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
         return ESP_ERR_INVALID_STATE;
     }
     if (s_enc_w != c->hres || s_enc_h != c->vres) {
-        if (encoder_open(c->hres, c->vres) != ESP_OK) {
-            return ESP_FAIL;
+        const esp_err_t oerr = encoder_open(c->hres, c->vres);
+        if (oerr != ESP_OK) {
+            s_enc_broken = true;
+            /* Pass the reason up: without an encoder there is nothing to retry
+             * next frame, and something has to decide to use MJPEG instead. */
+            return oerr;
         }
         (void)video_frame_take_keyframe_request();
     } else if (video_frame_take_keyframe_request()) {

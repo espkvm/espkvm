@@ -300,6 +300,9 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     /* WiFi is the sole active link when it associates (Ethernet is not started in
      * that mode), so it advertises the console over mDNS itself. */
     kvm_net_advertise(wifi_hostname());
+    char text[16];
+    snprintf(text, sizeof(text), IPSTR, IP2STR(&e->ip_info.ip));
+    kvm_net_record_ip4(text);
 }
 
 /*

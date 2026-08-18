@@ -5,6 +5,71 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.24.0] - 2026-08-18
+
+### Added
+- **Scan to join the rescue hotspot.** When the device is running its own hotspot,
+  the round LCD gives its whole face to a QR code: point a phone at it and it
+  joins, no squinting at a passphrase. The hotspot exists precisely because the
+  device is otherwise unreachable, so the panel is the only thing that can hand
+  you the credentials. The small mono OLEDs sit this one out - a code that size
+  is not something a phone can focus on.
+- **The certificate now names the address DHCP gave the device.** Typing the IP
+  used to land on an untrusted page, because only a static address was ever put
+  in the certificate. You could click through for the console, but not for the
+  video: a browser refuses a `wss://` stream to a mismatched certificate and
+  offers no way to accept it. The address is recorded when it arrives and named
+  from the next restart, exactly as the IPv6 addresses already were.
+- **The board button now tells you it heard you.** Holding it to reset a forgotten
+  password used to be a gesture into the void: no light, no message, no way to
+  tell whether the button was even wired. The panel now fills a ring around its
+  rim as you hold, empties it if you let go early, and says what it cleared when
+  it fires.
+
+### Fixed
+- **A WiFi network that disappears no longer locks you out for good.** Choosing
+  WiFi holds the wired port down, so if the network moved or changed its password
+  the device became unreachable by every route at once - and the one setting that
+  would fix it lived in the console you could no longer open. The button reset
+  always claimed to put you back on Ethernet; it never actually did. Now it does,
+  on that very boot.
+- **Hold the button AFTER the reset, not through it.** Every instruction we
+  shipped said to hold it down through a power-on. On boards where that button is
+  also the chip's download strap - the ESP32-P4 Function EV among them - that
+  drops the chip into firmware-download mode instead: nothing boots, and the board
+  looks dead. The window is polled seconds into start-up, so holding it through
+  the reset never helped anyway.
+- **The round LCD no longer starves the rest of the device.** Its framebuffer
+  lives in PSRAM but was not cache-aligned, so the SPI driver could not send it
+  where it lay and copied all 115 KB into internal memory for every frame - of
+  which this chip has about half a megabyte in total, shared with TLS, USB, the
+  network stack, the SD card and the video encoder. The panel logged a failure a
+  second, and the H.264 encoder could not get its reference frame: no picture in
+  the browser, from a display setting. The buffer is aligned now and goes out in
+  bands, so a single frame can never take the device down with it.
+- **A picture instead of a black rectangle when H.264 cannot start.** The
+  hardware encoder needs one contiguous multi-megabyte block for its reference
+  frame, and after a long uptime PSRAM can be half free and still not have one.
+  The encoder is rebuilt whenever the input resolution changes, so that is when
+  it bites. It used to retry on every captured frame - thirty times a second,
+  forever, logging the same error each time - while the viewer watched nothing.
+  Now it says so once, with the actual memory figures - internal and PSRAM,
+  free and largest block, because "out of memory" without them sends you
+  measuring the wrong heap - and carries on in MJPEG until the next restart.
+  Your codec setting is left alone.
+- **The video stream steps aside during a firmware update.** The device serves
+  the console, the stream and the upload from one small pool of connections, and
+  writes flash with the encoder running. Reported as updates that fail and then
+  work on the second or third try (#19 petrn).
+- The round LCD no longer runs long text off its edges. A 15-character IP address
+  wants more room than a 240-pixel circle has, and the overflow was silently
+  clipped rather than shrunk.
+- The console no longer offers pins that are already spoken for: the six SDIO
+  lines to the WiFi co-processor, its reset line, and the pin that carries SD
+  power on the Function EV. Picking one of those used to kill WiFi with no
+  explanation - and it was the display driver's own default data/command pin,
+  which is why a panel wired there stayed dark.
+
 ## [0.23.0] - 2026-08-17
 
 ### Added

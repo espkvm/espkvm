@@ -163,6 +163,10 @@ const capture_codec_t *capture_codec_mjpeg(void);
 void capture_mjpeg_probe(void);
 const capture_codec_t *capture_codec_h264(void);
 
+/** True once the H.264 encoder has failed to build and retrying cannot help
+ *  (it could not get its memory). The capture loop then falls back to MJPEG. */
+bool capture_h264_encoder_failed(void);
+
 /** Follow `jpg_quality` from the settings registry. Call once at start-up. */
 void capture_mjpeg_bind_settings(void);
 

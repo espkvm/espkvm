@@ -15,11 +15,14 @@
 
 #if CONFIG_KVM_ENABLE_DISPLAY
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_cache.h"
+#include "esp_private/esp_cache_private.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_gc9a01.h"
 #include "esp_lcd_panel_io.h"
@@ -32,6 +35,7 @@
 #include "kvm_display_driver.h"
 #include "logo.h"
 #include "kvm_settings.h"
+#include "qrcode.h"
 
 #define TAG "gc9a01"
 
@@ -43,6 +47,8 @@
 #define STATUS_SCREENS 3
 #define SCREEN_DWELL_TICKS 4
 #define SPLASH_TICKS 4 /* first half: version card, second half: espkvm logo */
+/* Rows per SPI transfer; see flush() for why the frame is not sent in one go. */
+#define FLUSH_BAND_ROWS 24
 
 typedef struct {
     esp_lcd_panel_handle_t panel;
@@ -113,6 +119,36 @@ static void ring(uint16_t *fb, int outer, int thick, uint16_t c)
     }
 }
 
+/*
+ * The same ring drawn as a gauge: filled @p fg clockwise from twelve o'clock to
+ * @p frac of a turn, the rest left as @p bg.
+ *
+ * This is the one thing a round panel does better than a rectangular one - a
+ * hold-to-confirm gesture has a natural home on the rim, where it reads as
+ * "keep going" from across a room without a single word.
+ */
+static void arc(uint16_t *fb, int outer, int thick, float frac, uint16_t fg, uint16_t bg)
+{
+    const int inner = outer - thick;
+    const int o2 = outer * outer, i2 = inner * inner;
+    for (int y = LCD_CENTER - outer; y <= LCD_CENTER + outer; y++) {
+        for (int x = LCD_CENTER - outer; x <= LCD_CENTER + outer; x++) {
+            const int dx = x - LCD_CENTER, dy = y - LCD_CENTER;
+            const int d2 = dx * dx + dy * dy;
+            if (d2 > o2 || d2 < i2) {
+                continue;
+            }
+            /* atan2(dx, -dy): zero straight up, growing clockwise, so the sweep
+             * matches how a progress dial is read. */
+            float t = atan2f((float)dx, (float)-dy) / (2.0f * (float)M_PI);
+            if (t < 0) {
+                t += 1.0f;
+            }
+            put_px(fb, x, y, t <= frac ? fg : bg);
+        }
+    }
+}
+
 /* One 5x7 glyph scaled by @p s, top-left at (x, y). */
 static void draw_char(uint16_t *fb, int x, int y, char ch, int s, uint16_t c)
 {
@@ -139,6 +175,51 @@ static void text_centered(uint16_t *fb, int y, const char *str, int s, uint16_t 
     for (const char *p = str; *p; p++, x += glyph) {
         draw_char(fb, x, y, *p, s, c);
     }
+}
+
+/*
+ * The largest scale at which @p str fits on row @p y, down to 1.
+ *
+ * Two things make a fixed scale wrong here. The face is round, so the usable
+ * width is a chord rather than the full 240 px - a row near the rim is much
+ * narrower than one across the middle. And the strings vary: an IPv4 address
+ * with three-digit octets is 15 characters, which at scale 3 wants 270 px, and
+ * "<hostname>.local" can be far longer still. Overflow was invisible rather than
+ * ugly, because put_px() clips - the ends simply disappeared off both edges.
+ */
+#define TEXT_R 108 /* usable radius, inside the status ring */
+
+static int text_scale_for(int y, const char *str, int max_s)
+{
+    const int len = (int)strlen(str);
+    if (len <= 0) {
+        return max_s;
+    }
+    for (int s = max_s; s > 1; s--) {
+        /* The corner of the text box furthest from the centre row decides the
+         * chord: a tall line sitting low is limited by its bottom edge. */
+        int top = y - LCD_CENTER, bot = y + 7 * s - LCD_CENTER;
+        if (top < 0) top = -top;
+        if (bot < 0) bot = -bot;
+        const int dy = top > bot ? top : bot;
+        if (dy >= TEXT_R) {
+            continue;
+        }
+        int half = TEXT_R; /* integer sqrt of TEXT_R^2 - dy^2 */
+        while (half > 0 && half * half > TEXT_R * TEXT_R - dy * dy) {
+            half--;
+        }
+        if (len * 6 * s <= 2 * half) {
+            return s;
+        }
+    }
+    return 1;
+}
+
+/* Centred text that shrinks to fit the round face rather than running off it. */
+static void text_fit(uint16_t *fb, int y, const char *str, int max_s, uint16_t c)
+{
+    text_centered(fb, y, str, text_scale_for(y, str, max_s), c);
 }
 
 /* An 8x8 icon (column-major, bit 0 = top) scaled by @p s, top-left (x, y), tint c. */
@@ -182,6 +263,99 @@ static void render_splash(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     }
 }
 
+/*
+ * The rescue hotspot's join code.
+ *
+ * A QR has to be dark-on-light - plenty of readers refuse an inverted one - so on
+ * this dark face the symbol gets its own white tile, quiet zone included. That
+ * four-module margin is part of the symbol rather than decoration: without it a
+ * reader cannot find the edges.
+ *
+ * Everything is sized in whole pixels per module. A fractional scale would put
+ * module boundaries mid-pixel, and that blurred edge is exactly what makes a
+ * small code unscannable.
+ */
+#define QR_QUIET 4
+/* The panel is round: the largest square inside a 240 px circle is about 169 px,
+ * and the caption below needs room too, so the symbol gets 140 - which keeps its
+ * corners well inside the glass. */
+#define QR_BOX 140
+#define QR_TOP 34
+
+typedef struct {
+    uint16_t *fb;
+    int side; /**< pixels actually drawn, 0 if it would not fit */
+} qr_paint_t;
+
+static void qr_paint(esp_qrcode_handle_t qr, void *user_data)
+{
+    qr_paint_t *p = (qr_paint_t *)user_data;
+    const int modules = esp_qrcode_get_size(qr);
+    const int total = modules + 2 * QR_QUIET;
+    const int scale = QR_BOX / total;
+    if (scale < 1) {
+        return; /* denser than this panel can show; caller falls back to text */
+    }
+
+    const int side = total * scale;
+    const int x0 = (LCD_W - side) / 2;
+    fill_rect(p->fb, x0, QR_TOP, side, side, rgb(255, 255, 255));
+
+    const uint16_t dark = rgb(0, 0, 0);
+    for (int y = 0; y < modules; y++) {
+        for (int x = 0; x < modules; x++) {
+            if (esp_qrcode_get_module(qr, x, y)) {
+                fill_rect(p->fb, x0 + (QR_QUIET + x) * scale, QR_TOP + (QR_QUIET + y) * scale,
+                          scale, scale, dark);
+            }
+        }
+    }
+    p->side = side;
+}
+
+/** Draw @p payload as a QR code. Returns the side length drawn, or 0 on failure. */
+static int draw_join_qr(uint16_t *fb, const char *payload)
+{
+    qr_paint_t paint = {.fb = fb, .side = 0};
+    esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+    cfg.display_func_with_cb = qr_paint;
+    cfg.user_data = &paint; /* non-NULL is what selects the callback form */
+    /*
+     * Version 6 is 41x41 modules - three pixels each here - and holds far more
+     * than the longest hotspot string a 63-character passphrase can produce.
+     * Allowing more would encode fine and scan badly, and the encoder's working
+     * buffer grows with the cap.
+     */
+    cfg.max_qrcode_version = 6;
+    cfg.qrcode_ecc_level = ESP_QRCODE_ECC_LOW;
+
+    return esp_qrcode_generate(&cfg, payload) == ESP_OK ? paint.side : 0;
+}
+
+/*
+ * A notice: one thing, said large, with the rim as its progress gauge.
+ *
+ * Nothing else is drawn - no status ring, no rotation. Someone reading this is
+ * standing at the device with a finger on the button, and the panel's whole job
+ * for those two seconds is to answer "is it working?".
+ */
+static void render_notice(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+{
+    const uint16_t bg = rgb(8, 10, 14);
+    const uint16_t cyan = rgb(90, 200, 235);
+    const uint16_t white = rgb(235, 238, 245);
+    const uint16_t grey = rgb(140, 150, 165);
+
+    fill(g->fb, bg);
+    if (st->notice_pct >= 0) {
+        arc(g->fb, 118, 10, st->notice_pct / 100.0f, cyan, rgb(38, 44, 54));
+    } else {
+        ring(g->fb, 118, 10, cyan);
+    }
+    text_fit(g->fb, 96, st->notice, 4, white);
+    text_fit(g->fb, 142, st->notice_detail, 2, grey);
+}
+
 static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 {
     const uint16_t bg = rgb(8, 10, 14);
@@ -202,17 +376,31 @@ static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 
     switch (g->screen) {
     case 0: /* network */
+        /*
+         * In hotspot mode the address is always 192.168.4.1 and the interesting
+         * thing is joining the network at all - so hand over the whole face to a
+         * code the phone can scan, rather than a passphrase to squint at and
+         * retype. Falls through to the text layout if the code will not fit.
+         */
+        if (st->ap_mode && st->join_qr[0]) {
+            const int side = draw_join_qr(g->fb, st->join_qr);
+            if (side > 0) {
+                text_centered(g->fb, QR_TOP + side + 8, "SCAN TO JOIN", 2, cyan);
+                text_fit(g->fb, QR_TOP + side + 28, st->ssid, 1, grey);
+                break;
+            }
+        }
         draw_icon(g->fb, 108, 36, icon_net, 3, cyan);
         text_centered(g->fb, 66, st->ap_mode ? "AP RESCUE" : "NETWORK", 2, cyan);
-        text_centered(g->fb, 104, st->ip[0] ? st->ip : "no link", 3, white);
+        text_fit(g->fb, 104, st->ip[0] ? st->ip : "no link", 3, white);
         if (st->ap_mode) {
             text_centered(g->fb, 150, "192.168.4.1", 2, grey);
         } else {
             snprintf(buf, sizeof(buf), "%s.local", st->hostname);
-            text_centered(g->fb, 150, buf, 2, grey);
+            text_fit(g->fb, 150, buf, 2, grey);
             if (st->ts_ip[0]) { /* also reachable over the tailnet */
                 snprintf(buf, sizeof(buf), "TS %s", st->ts_ip);
-                text_centered(g->fb, 176, buf, 2, green);
+                text_fit(g->fb, 176, buf, 2, green);
             }
         }
         break;
@@ -267,7 +455,15 @@ static esp_err_t attach(void **ctx)
     }
     g->bl = bl;
     g->splash = SPLASH_TICKS;
-    g->fb = heap_caps_malloc(FB_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    /* Cache-aligned, or the SPI driver cannot DMA out of PSRAM and falls back to
+     * a private internal copy of the whole frame - see flush(). */
+    size_t align = 64;
+    (void)esp_cache_get_alignment(MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, &align);
+    if (align == 0) {
+        align = 64;
+    }
+    const size_t fb_bytes = ((FB_PIXELS * sizeof(uint16_t)) + align - 1) / align * align;
+    g->fb = heap_caps_aligned_alloc(align, fb_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
     if (!g->fb) {
         free(g);
         return ESP_ERR_NO_MEM;
@@ -279,7 +475,8 @@ static esp_err_t attach(void **ctx)
         .miso_io_num = -1,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = FB_PIXELS * sizeof(uint16_t),
+        /* One band, not one frame: the bus sizes its DMA descriptors from this. */
+        .max_transfer_sz = LCD_W * FLUSH_BAND_ROWS * sizeof(uint16_t),
     };
     esp_err_t err = spi_bus_initialize(CONFIG_KVM_GC9A01_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE /* already initialised */) {
@@ -333,16 +530,51 @@ fail_fb:
     return err == ESP_OK ? ESP_FAIL : err;
 }
 
+/*
+ * Push the framebuffer to the panel in horizontal bands.
+ *
+ * Sending all 115 KB in one transfer asks the SPI driver for a DMA descriptor
+ * chain over the whole frame, and if it cannot use the buffer directly it
+ * allocates a private copy of that size in INTERNAL memory - of which this chip
+ * has about half a megabyte in total, shared with TLS sessions, USB, lwIP, the
+ * SD card and the H.264 encoder's own buffers. It loses that race, and then
+ * everything downwind of it loses too: the panel logs "send color failed" every
+ * second and the video encoder cannot get its reference frame.
+ *
+ * A band is a few kilobytes, so the worst case stops being fatal. The buffer is
+ * also cache-aligned now, which is what lets the DMA read it in place and skip
+ * the copy entirely - the bands are the belt to that pair of braces.
+ */
+static esp_err_t flush(gc9a01_ctx_t *g)
+{
+    for (int y = 0; y < LCD_H; y += FLUSH_BAND_ROWS) {
+        const int rows = (y + FLUSH_BAND_ROWS <= LCD_H) ? FLUSH_BAND_ROWS : (LCD_H - y);
+        const esp_err_t err =
+            esp_lcd_panel_draw_bitmap(g->panel, 0, y, LCD_W, y + rows, g->fb + (size_t)y * LCD_W);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return ESP_OK;
+}
+
 static esp_err_t render(void *ctx, const kvm_display_status_t *status)
 {
     gc9a01_ctx_t *g = ctx;
+    if (status->notice[0]) {
+        /* A notice arriving mid-splash ends the splash: by the time it clears,
+         * an animation about having just booted is no longer news. */
+        g->splash = 0;
+        render_notice(g, status);
+        return flush(g);
+    }
     if (g->splash > 0) {
         g->splash--;
         render_splash(g, status);
-        return esp_lcd_panel_draw_bitmap(g->panel, 0, 0, LCD_W, LCD_H, g->fb);
+        return flush(g);
     }
     render_status(g, status);
-    esp_err_t err = esp_lcd_panel_draw_bitmap(g->panel, 0, 0, LCD_W, LCD_H, g->fb);
+    esp_err_t err = flush(g);
     if (++g->tick >= SCREEN_DWELL_TICKS) {
         g->tick = 0;
         g->screen = (uint8_t)((g->screen + 1) % STATUS_SCREENS);

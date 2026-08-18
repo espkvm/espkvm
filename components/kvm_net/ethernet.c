@@ -5,7 +5,11 @@
 #include "ethernet.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "esp_check.h"
 #include "esp_eth.h"
@@ -81,6 +85,48 @@ static esp_eth_netif_glue_handle_t s_eth_glue;
 static esp_netif_t *s_eth_netif;
 static esp_eth_handle_t s_eth_handle;
 
+/*
+ * The IPv4 address, recorded so the certificate can name it.
+ *
+ * Writing NVS needs more stack than the system event task's 2.3 KB, so it goes
+ * on a task made for the purpose and thrown away after - the same shape the
+ * IPv6 recorder uses, and for the same reason.
+ */
+static kvm_net_ip4_identity_cb_t s_ip4_cb;
+static volatile bool s_ip4_busy;
+
+static void ip4_identity_task(void *arg)
+{
+    char *ip = (char *)arg;
+    if (s_ip4_cb && s_ip4_cb(ip)) {
+        ESP_LOGI(TAG, "recorded for the certificate; it names this address from the next restart");
+    }
+    free(ip);
+    s_ip4_busy = false;
+    vTaskDelete(NULL);
+}
+
+void kvm_net_set_ip4_identity_cb(kvm_net_ip4_identity_cb_t cb)
+{
+    s_ip4_cb = cb;
+}
+
+void kvm_net_record_ip4(const char *ip)
+{
+    if (!s_ip4_cb || s_ip4_busy || !ip || !ip[0]) {
+        return;
+    }
+    char *copy = strdup(ip);
+    if (!copy) {
+        return;
+    }
+    s_ip4_busy = true;
+    if (xTaskCreate(ip4_identity_task, "ip4_ident", 4096, copy, 4, NULL) != pdPASS) {
+        s_ip4_busy = false;
+        free(copy); /* the next lease or the next boot tries again */
+    }
+}
+
 static void eth_on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -93,6 +139,9 @@ static void eth_on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *da
     const char *scheme = kvm_setting_bool("sec_https") ? "https" : "http";
     ESP_LOGI(TAG, "Open %s://" IPSTR "/ or %s://%s.local/", scheme, IP2STR(&e->ip_info.ip), scheme,
              kvm_setting_str("net_hostname"));
+    char text[16];
+    snprintf(text, sizeof(text), IPSTR, IP2STR(&e->ip_info.ip));
+    kvm_net_record_ip4(text);
 }
 
 /* Live link state, so the console can show whether the cable is up and at what

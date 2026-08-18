@@ -88,6 +88,23 @@ void capture_loop_run(capture_ctx_t *c)
     bool force_publish = true;
 
     while (1) {
+        /*
+         * No codec is open: every path out of here closed one and could not
+         * open another, which on this device means memory. Keep the loop alive
+         * and keep trying rather than killing capture outright - the block that
+         * could not be had may well be free again in a few seconds, and a
+         * pipeline that gave up needs a reboot to come back.
+         */
+        if (!codec) {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            codec = codec_switch(NULL, codec_wanted());
+            if (codec) {
+                ESP_LOGW(CAPTURE_LOG_TAG, "codec recovered: %s", codec->name);
+                force_publish = true;
+            }
+            continue;
+        }
+
         /* The monitor task asks for mode switches here rather than doing them
          * itself, so the CSI receiver is never rebuilt under a running encode. */
         if (c->mode_change_pending) {
@@ -207,6 +224,46 @@ void capture_loop_run(capture_ctx_t *c)
         esp_err_t ee = codec->encode(c, src, force_publish);
         if (ee == ESP_OK) {
             force_publish = false;
+        } else if (codec != capture_codec_mjpeg() &&
+                   (ee == ESP_ERR_NO_MEM || capture_h264_encoder_failed())) {
+            /*
+             * The H.264 encoder could not be built - almost always because its
+             * reference frame wants one contiguous block that PSRAM can no
+             * longer hand out, after hours of uptime, at the moment the input
+             * resolution changed and forced a rebuild.
+             *
+             * There is nothing to retry: the block needed does not depend on
+             * when it is asked for. So say why, and carry on in MJPEG - which
+             * needs no such buffer - because a working picture and an
+             * explanation beat a black rectangle and a log filling at thirty
+             * lines a second.
+             *
+             * The codec test above is not decoration. Without it any failed
+             * MJPEG frame - once already switched - matched this branch too and
+             * "fell back" from MJPEG to MJPEG, which closes and reopens the
+             * codec: the status line flips between mjpeg and none forever.
+             */
+            kvm_cap_report(KVM_CAP_H264, false,
+                           "the encoder could not get memory for this resolution; using MJPEG "
+                           "until the next restart");
+            /*
+             * The setting is deliberately NOT written. Falling back is this
+             * run's decision, not a new preference: the memory that could not
+             * be had is most likely to be available again on a fresh boot,
+             * which is exactly when a persisted "MJPEG" would stop it being
+             * tried. The capability being marked unavailable already keeps
+             * codec_wanted() on MJPEG for the rest of this run.
+             */
+            codec = codec_switch(codec, capture_codec_mjpeg());
+            if (codec) {
+                force_publish = true;
+            } else {
+                /* Nothing is open now - codec_switch closed the old one before
+                 * finding it could not open MJPEG either. Encoding through a
+                 * closed codec is not an option, so idle and let the retry at
+                 * the top of the loop have another go when memory frees up. */
+                ESP_LOGE(CAPTURE_LOG_TAG, "no codec left running; retrying");
+            }
         }
 
         portENTER_CRITICAL(&c->fb_lock);

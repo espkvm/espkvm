@@ -47,6 +47,30 @@ typedef struct {
     char ssid[33];     /**< Wi-Fi SSID (station) or hotspot name (AP), else "" */
     char ts_ip[24];    /**< Tailscale 100.x address, or "" when not on a tailnet */
     bool ap_mode;      /**< the rescue/AP hotspot is the active link */
+    /**
+     * A ready-to-encode Wi-Fi join string for the rescue hotspot, in the format
+     * phone cameras understand ("WIFI:T:WPA;S:<ssid>;P:<pass>;;"), or "" when the
+     * hotspot is not the active link. Built by the core, already escaped, so a
+     * driver never has to know the format - it just hands this to a QR encoder.
+     *
+     * The point of the hotspot is that the device is otherwise unreachable, and
+     * the person standing in front of it should not have to type a passphrase off
+     * a screen this small. A panel with room for a scannable code draws one; one
+     * without ignores this field.
+     */
+    char join_qr[256];
+
+    /**
+     * A notice that outranks everything else on the panel: while @c notice is
+     * non-empty a driver must draw it and nothing else, ignoring its own screen
+     * rotation. See kvm_display_notice().
+     *
+     * The title is meant to stay put while the detail line changes underneath
+     * it, so the panel reads as one thing progressing rather than a slideshow.
+     */
+    char notice[16];
+    char notice_detail[24];
+    int8_t notice_pct; /**< 0..100 of progress, or -1 for a notice with none */
 
     bool video_signal; /**< HDMI is locked and delivering pixels */
     uint16_t hres;     /**< active width, 0 until locked */

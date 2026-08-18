@@ -1,4 +1,6 @@
 ## Managed dependencies for kvm_display.
 ## The GC9A01 round-LCD panel driver; the I2C OLEDs use no external component.
+## qrcode encodes the hotspot join code for panels with room to draw one.
 dependencies:
   espressif/esp_lcd_gc9a01: "^2.0.0"
+  espressif/qrcode: "^0.2.0"

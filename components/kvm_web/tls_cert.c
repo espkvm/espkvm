@@ -86,6 +86,7 @@
  *  first is reachable from outside, the second survives a change of prefix. */
 #define NVS_KEY_IP6 "ip6"
 #define NVS_KEY_IP6_ULA "ip6_ula"
+#define NVS_KEY_IP4 "ip4"
 
 /* One NVS string tops out at 4000 bytes; keep each PEM comfortably under that.
  * A leaf plus a couple of intermediates and a P-256 or RSA-2048 key fit easily -
@@ -170,16 +171,39 @@ static bool parse_ip6(const char *s, uint8_t out[16])
  * even up) and it does not move. A DHCP lease can change between boots, so
  * naming it would churn the certificate; DHCP stays hostname-only.
  */
+static void nvs_load_ip4(char *out, size_t len);
+
 static void cert_ip_now(char *out, size_t len)
 {
     out[0] = '\0';
-    if (kvm_setting_bool("net_dhcp")) {
+    uint8_t tmp[4];
+    if (!kvm_setting_bool("net_dhcp")) {
+        const char *ip = kvm_setting_str("net_ip");
+        if (parse_ip4(ip, tmp)) {
+            snprintf(out, len, "%s", ip);
+        }
         return;
     }
-    uint8_t tmp[4];
-    const char *ip = kvm_setting_str("net_ip");
-    if (parse_ip4(ip, tmp)) {
-        snprintf(out, len, "%s", ip);
+    /*
+     * On DHCP, the address the device was given last time.
+     *
+     * It used to name nothing here, on the grounds that a lease can move and
+     * naming it would churn the certificate. True - but it left the most common
+     * way anyone reaches the device, typing its IP address, permanently
+     * untrusted: the page can be clicked through, while the video stream cannot,
+     * because a browser refuses a wss:// upgrade to a mismatched certificate and
+     * offers no way to accept it. "Use the hostname instead" is not an answer
+     * when mDNS is exactly what does not work on plenty of networks.
+     *
+     * So the address is recorded when it arrives and named from the next
+     * restart, the same deal the IPv6 addresses get. A lease that genuinely
+     * changes costs one re-issue on the following boot; a reserved or sticky
+     * lease - which is what a KVM usually has - costs nothing after the first.
+     */
+    char stored[16] = {0};
+    nvs_load_ip4(stored, sizeof(stored));
+    if (parse_ip4(stored, tmp)) {
+        snprintf(out, len, "%s", stored);
     }
 }
 
@@ -811,6 +835,21 @@ static void nvs_load_tailnet(char *ip, size_t iplen, char *fqdn, size_t fqdnlen)
     nvs_close(h);
 }
 
+static void nvs_load_ip4(char *out, size_t len)
+{
+    if (!out || !len) {
+        return;
+    }
+    out[0] = '\0';
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    size_t l = len;
+    nvs_get_str(h, NVS_KEY_IP4, out, &l);
+    nvs_close(h);
+}
+
 static void nvs_load_ip6(char *global, size_t glen, char *ula, size_t ulen)
 {
     if (global && glen) {
@@ -865,6 +904,38 @@ bool kvm_tls_set_ip6(const char *global, const char *ula)
     }
     ESP_LOGI(TAG, "IPv6 addresses recorded for the certificate: %s / %s",
              global[0] ? global : "(none)", ula[0] ? ula : "(none)");
+    return true;
+}
+
+bool kvm_tls_set_ip4(const char *ip)
+{
+    if (!ip) {
+        ip = "";
+    }
+    /* A static address is already named from the setting, and is what the leaf
+     * uses; recording the lease as well would only re-issue the certificate for
+     * an address it does not name. */
+    if (!kvm_setting_bool("net_dhcp")) {
+        return false;
+    }
+    char cur[16] = {0};
+    nvs_load_ip4(cur, sizeof(cur));
+    if (strcmp(cur, ip) == 0) {
+        return false; /* unchanged - the served leaf already names it */
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = nvs_set_str(h, NVS_KEY_IP4, ip);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (err != ESP_OK) {
+        return false;
+    }
+    ESP_LOGI(TAG, "IPv4 address recorded for the certificate: %s", ip[0] ? ip : "(none)");
     return true;
 }
 

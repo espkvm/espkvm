@@ -85,6 +85,15 @@ bool kvm_tls_set_tailnet(const char *ip, const char *fqdn);
  *
  * @return true if the stored values changed.
  */
+/**
+ * Record the IPv4 address the device was given by DHCP, so the certificate can
+ * name it from the next restart. Returns true if it changed anything.
+ *
+ * A no-op when the address is static: that one is named from the setting
+ * already, and is known before the network is even up.
+ */
+bool kvm_tls_set_ip4(const char *ip);
+
 bool kvm_tls_set_ip6(const char *global, const char *ula);
 
 /**

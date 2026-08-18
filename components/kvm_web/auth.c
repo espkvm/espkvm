@@ -763,14 +763,29 @@ void kvm_auth_register(httpd_handle_t server)
  *    leaves the line free long enough for this window. Also found the hard
  *    way, while trying to make the reset easier to test.
  *
- * The button is the chip's boot strapping pin too. Holding it through a reset
- * changes the strapping byte the ROM reads (0x30f becomes 0x20f on this
- * board), which is harmless here - it still boots from flash - and means the
- * button may simply be held down through the whole sequence.
+ * The button is the chip's boot strapping pin too, and this is the part to get
+ * right when telling anyone how to use it: HOLD IT AFTER THE RESET, NOT
+ * THROUGH IT.
  *
- * Only the password is cleared. Wiping the network settings too would take a
- * device that is merely locked and make it unreachable, which is the opposite
- * of a recovery.
+ * The window is polled in software, seconds into start-up, so holding the
+ * button through the reset itself buys nothing - and on a board where that pin
+ * is the ROM's download strap it costs everything. On the ESP32-P4 Function EV
+ * board, BOOT held while RST is pressed is the documented way into
+ * firmware-download mode: the ROM stops there, the app never runs, this window
+ * never opens, and the panel sits frozen on its last frame looking like a dead
+ * device. (Verified on hardware; a plain reset gets back out.) The Waveshare
+ * P4-ETH is the board that made this look harmless - there the strapping byte
+ * merely goes 0x30f -> 0x20f and it still boots from flash.
+ *
+ * So: reset, release, then press and hold. Every operator-facing string says
+ * it in that order for a reason.
+ *
+ * What it clears is every setting that can lock the console away: the
+ * password, a static address that does not exist on this network, an operator
+ * TLS certificate that no longer matches, and a WiFi mode whose network is
+ * gone. Nothing else - the credentials and the way in, not the configuration.
+ * Wiping the rest would take a device that is merely locked and make it blank,
+ * which is the opposite of a recovery.
  */
 #define RESET_WINDOW_MS 8000
 #define RESET_HOLD_MS 1500
@@ -809,7 +824,7 @@ static bool password_stored(void)
     return present;
 }
 
-void kvm_auth_check_reset_button(void)
+void kvm_auth_check_reset_button(kvm_auth_reset_ui_cb_t ui)
 {
     /* A board with no reachable button (Kconfig set to -1) has no reset. */
     if (KVM_BOARD_BUTTON_GPIO < 0) {
@@ -837,16 +852,32 @@ void kvm_auth_check_reset_button(void)
     /* Let the pull-up settle before believing the first reading. */
     vTaskDelay(pdMS_TO_TICKS(20));
 
-    ESP_LOGW(TAG, "hold the button now (%d s) to clear the password", RESET_HOLD_MS / 1000);
+    /* Rounded up, not truncated: RESET_HOLD_MS / 1000 printed "1 s" for a
+     * 1.5 s hold, which is an instruction to let go too early. */
+    ESP_LOGW(TAG, "hold the button now (%d s) to clear the password and restore the network",
+             (RESET_HOLD_MS + 999) / 1000);
 
     int held_ms = 0;
+    int shown_pct = -1;
+    if (ui) {
+        ui(-1, NULL); /* the window is open and nothing is held yet */
+    }
     for (int elapsed = 0; elapsed < RESET_WINDOW_MS; elapsed += RESET_POLL_MS) {
         if (gpio_get_level(KVM_BOARD_BUTTON_GPIO) == 0) {
             held_ms += RESET_POLL_MS;
+            /* In tenths: a panel redraw costs far more than this loop does, so
+             * only say something when the number on it would actually change. */
+            const int pct = (held_ms * 100 / RESET_HOLD_MS / 10) * 10;
+            if (ui && pct != shown_pct) {
+                shown_pct = pct;
+                ui(pct > 100 ? 100 : pct, NULL);
+            }
             if (held_ms >= RESET_HOLD_MS) {
                 ESP_LOGW(TAG, "button held at start-up: clearing the password, reverting to DHCP");
                 /* The format string of a log macro has to be a literal. */
-                if (auth_clear() == ESP_OK) {
+                const bool cleared = auth_clear() == ESP_OK;
+                bool link_reset = false;
+                if (cleared) {
                     ESP_LOGW(TAG, "password cleared - the default one works again");
                 } else {
                     ESP_LOGE(TAG, "password could not be cleared");
@@ -858,6 +889,33 @@ void kvm_auth_check_reset_button(void)
                 if (kvm_setting_set_int("net_dhcp", 1) == ESP_OK) {
                     ESP_LOGW(TAG, "network reverted to DHCP");
                 }
+                /*
+                 * And back onto the wired link. A WiFi network that moved,
+                 * changed its passphrase or simply is not there any more locks
+                 * the device away exactly as a forgotten password does, and it
+                 * is worse than a wrong static address: a WiFi mode holds
+                 * Ethernet down, so plugging a cable in does nothing and the
+                 * panel just reads "no link". Nothing else can undo it - the
+                 * only way to change the setting is the console this is
+                 * locking you out of. Two comments and the setting's own help
+                 * have promised this since the mode was added; the code did
+                 * not do it.
+                 */
+#if CONFIG_KVM_ETH_ENABLE
+                if (kvm_setting_int("net_mode") != KVM_NET_ETHERNET &&
+                    kvm_setting_set_int("net_mode", KVM_NET_ETHERNET) == ESP_OK) {
+                    ESP_LOGW(TAG, "connection reverted to Ethernet");
+                    link_reset = true;
+                }
+#elif CONFIG_KVM_WIFI
+                /* No wired port on this board, so recovering "to Ethernet"
+                 * would recover to nothing. The hotspot is the way back in. */
+                if (kvm_setting_int("net_mode") != KVM_NET_WIFI_AP &&
+                    kvm_setting_set_int("net_mode", KVM_NET_WIFI_AP) == ESP_OK) {
+                    ESP_LOGW(TAG, "connection reverted to the hotspot");
+                    link_reset = true;
+                }
+#endif
                 /* And drop any operator-supplied TLS certificate: a wrong one
                  * (expired, or a name that no longer matches) is another way to
                  * lock oneself out of the console, recovered here the same way.
@@ -866,9 +924,23 @@ void kvm_auth_check_reset_button(void)
                     (void)kvm_tls_byo_clear();
                     ESP_LOGW(TAG, "operator TLS certificate cleared");
                 }
+                /* One line, for a panel the size of a coin: the link is the
+                 * surprising half - that the password went back to the default
+                 * is what holding the button is for. */
+                if (ui) {
+                    ui(100, !cleared          ? "reset failed"
+                            : link_reset      ? "password + link"
+                                              : "password cleared");
+                }
                 break;
             }
         } else {
+            /* Let go early and the gauge empties, which is the feedback that
+             * teaches the gesture: it is a hold, not a press. */
+            if (ui && shown_pct >= 0) {
+                shown_pct = -1;
+                ui(-1, NULL);
+            }
             held_ms = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(RESET_POLL_MS));

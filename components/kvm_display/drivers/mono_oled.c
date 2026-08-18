@@ -318,8 +318,25 @@ static void render_splash(mono_oled_t *m, const kvm_display_status_t *st)
     }
 }
 
+/* A notice, on 128x64: title, one line under it, and the progress as a bar -
+ * the rectangular equivalent of the round panel's rim gauge. */
+static void render_notice(mono_oled_t *m, const kvm_display_status_t *st)
+{
+    memset(m->fb, 0, sizeof(m->fb));
+    fb_text_center(m, 1, st->notice);
+    fb_text_center(m, 3, st->notice_detail);
+    if (st->notice_pct >= 0) {
+        fb_bar(m, 14, 40, 100, 8, st->notice_pct / 100.0f);
+    }
+}
+
 esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status)
 {
+    if (status->notice[0]) {
+        m->splash = 0;
+        render_notice(m, status);
+        return flush(m);
+    }
     if (m->splash > 0) {
         m->splash--;
         render_splash(m, status);

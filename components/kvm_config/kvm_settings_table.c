@@ -300,8 +300,9 @@ static const kvm_setting_t s_settings[] = {
         .help = "The device uses one link at a time. \"ethernet\": the wired port. "
                 "\"wifi\": join the network below (Ethernet is left down). \"ap\": the "
                 "device makes its own WiFi hotspot for setup where there is no "
-                "network to join. If WiFi is unreachable, hold the reset button to "
-                "return to Ethernet.",
+                "network to join. If WiFi is unreachable: reset the board, then hold "
+                "the button for two seconds - that returns it to Ethernet, and "
+                "clears the password too. Hold it AFTER the reset, not through it.",
         .min = 0, .max = ENUM_MAX(s_netmode_choices), .def = 0, .choices = s_netmode_choices,
         .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
@@ -605,8 +606,8 @@ static const kvm_setting_t s_settings[] = {
         .help = "Drive a small display that shows the IP, link, capture status and "
                 "health. An I2C OLED (SSD1306/SH1106) shares the capture chip's I2C "
                 "and is auto-detected with no extra pins; a round SPI LCD (GC9A01) "
-                "uses the SPI pins set at build time. Off by default; does nothing "
-                "when no panel is connected.",
+                "uses the GPIOs set below, after you pick it as the display type. "
+                "Off by default; does nothing when no panel is connected.",
         .def = 0, .requires_cap = -1,
     },
     {
@@ -641,7 +642,10 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "disp_dc", .section = "display", .type = KVM_VT_INT, .title = "LCD DC",
         .help = "Data/command GPIO for the GC9A01.",
-        .min = -1, .max = 54, .def = 45, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        /* Not 45: on the Function EV board that pin carries SD_PWRn unless a
+         * resistor is moved, so a panel wired there never sees clean levels and
+         * stays dark. 26 is free on every board we support. */
+        .min = -1, .max = 54, .def = 26, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
     {

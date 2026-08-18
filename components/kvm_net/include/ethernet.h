@@ -18,6 +18,23 @@ esp_err_t ethernet_init(void);
 void kvm_net_advertise(const char *hostname);
 
 /**
+ * Told the IPv4 address the device just got, so it can be named in the TLS
+ * certificate. Returns true if that was news (the recorder logs it).
+ *
+ * A callback rather than a direct call because the address is learned down here
+ * in the network layer and the certificate lives up in the web layer, which
+ * already depends on this one.
+ */
+typedef bool (*kvm_net_ip4_identity_cb_t)(const char *ip);
+void kvm_net_set_ip4_identity_cb(kvm_net_ip4_identity_cb_t cb);
+
+/**
+ * Hand a freshly-acquired IPv4 address to that callback, off the event task.
+ * Called by whichever link came up; safe to call with no callback registered.
+ */
+void kvm_net_record_ip4(const char *ip);
+
+/**
  * Current Ethernet link state. @p up is set to whether the cable is up, @p mbps
  * to the negotiated speed (10 or 100, 0 when down). Either pointer may be NULL.
  */

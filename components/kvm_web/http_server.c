@@ -168,6 +168,28 @@ static esp_err_t api_pins_get(httpd_req_t *req)
         pins_add_reserved(r, 37, "Console UART TX");
         pins_add_reserved(r, 38, "Console UART RX");
 #endif
+#if CONFIG_KVM_WIFI
+        /* The SDIO link to the WiFi co-processor. These are held by esp-hosted
+         * rather than by anything of ours, which is exactly why they were missing
+         * here: nothing in our own config mentions them, so the console offered
+         * them as free pins and picking one silently killed WiFi. */
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MIN, "WiFi co-processor CLK");
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MIN, "WiFi co-processor CMD");
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D0_GPIO_RANGE_MIN, "WiFi co-processor D0");
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN, "WiFi co-processor D1");
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN, "WiFi co-processor D2");
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN, "WiFi co-processor D3");
+        pins_add_reserved(r, CONFIG_ESP_HOSTED_HOST_RESET_GPIO, "WiFi co-processor reset");
+        /*
+         * GPIO 45 carries SD_PWRn on the Function EV board. Our firmware never
+         * drives it (the slot is always powered, so KVM_SD_PWR_GPIO is -1), but the
+         * net is still attached to the pin unless a resistor is moved - so anything
+         * else wired there fights the SD power circuit and never reaches a clean
+         * logic level. Found the hard way: it was this driver's default DC pin, and
+         * a panel on it stayed dark.
+         */
+        pins_add_reserved(r, 45, "SD_PWRn (needs a resistor move to free)");
+#endif
     }
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

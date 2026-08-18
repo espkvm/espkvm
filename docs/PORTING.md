@@ -65,4 +65,7 @@ lane rate. Change them only if you know why.
 - **Strapping pins.** The Waveshare BOOT button doubles as a boot strapping pin
   and shares GPIO 35 with the Ethernet interface, which is why the password
   reset reads it once at start-up and hands the pin back. A different button pin
-  without those constraints is simpler, not harder.
+  without those constraints is simpler, not harder. Check what your board's
+  button does to the ROM: if it is the download strap (as on the Function EV),
+  holding it through a reset enters download mode and the recovery window never
+  runs - which is why the gesture is documented as reset first, then hold.

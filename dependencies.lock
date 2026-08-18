@@ -133,6 +133,13 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.0
+  espressif/qrcode:
+    component_hash: 31e70991ce22f28d73a4386417fc9c0993f61e1aab1832474fd9e3db8da9dcbd
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.2.0
   espressif/tinyusb:
     component_hash: a72b7d67472914ab76309340fd50d578b31e310963d45ad0f81144bde3314752
     dependencies:
@@ -166,7 +173,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.0.1
+    version: 6.2.0
 direct_dependencies:
 - espressif/cjson
 - espressif/esp_h264
@@ -175,8 +182,9 @@ direct_dependencies:
 - espressif/esp_wifi_remote
 - espressif/mdns
 - espressif/mqtt
+- espressif/qrcode
 - espressif/tinyusb
 - idf
-manifest_hash: 0230e32fb71c58cc807bb2b197b85a7fcc406d3d31b1d97dec3cdfeb27480a48
+manifest_hash: acdf92749200bd0331ad66ca55711303b398b15919f96059bc85cea7f1b51d67
 target: esp32p4
 version: 3.0.0

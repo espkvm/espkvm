@@ -122,7 +122,32 @@ Each of these cost real time. They are recorded so they are not rediscovered.
   button cannot be read at all. The password reset therefore reads it once,
   early in start-up, and only a power-on or EN reset makes that reading
   possible. Holding the button through a reset changes the strapping byte
-  (0x30f becomes 0x20f); the board still boots from flash.
+  (0x30f becomes 0x20f); the Waveshare still boots from flash.
+- **The recovery hold goes AFTER the reset, not through it - the boards differ.**
+  The Waveshare tolerates the button being held down across the whole sequence,
+  which made it look like the gesture to document. It is not. On the ESP32-P4
+  Function EV board, BOOT held while RST is pressed is Espressif's documented
+  way into firmware-download mode: the ROM stops there, the app never runs, the
+  reset window never opens, and the LCD holds its last frame - which reads
+  exactly like a hung board. Verified on hardware; a plain RST press gets back
+  out, nothing is damaged. The window is polled in software seconds into
+  start-up, so holding through the reset never bought anything anyway. Reset,
+  release, then hold.
+- **Internal RAM is the scarce resource, not PSRAM - and "out of memory" will
+  point you at the wrong one.** The P4 here has 32 MB of PSRAM and about half a
+  megabyte of internal RAM, shared by TLS sessions, USB, lwIP, mDNS, the SD card
+  and the hardware encoders' working buffers. The H.264 encoder failing with
+  "No memory for reference frame" was diagnosed for most of a day as a PSRAM
+  problem; the log line that ended it printed both heaps and read
+  `PSRAM 14330 KB free, largest block 14080 KB`. Print internal and PSRAM, free
+  and largest block, before theorising about a leak.
+- **A PSRAM buffer that is DMA-capable but not cache-aligned makes SPI copy the
+  whole thing into internal RAM.** `MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM` is not
+  enough: without cache-line alignment the driver falls back to
+  `spicommon_dma_setup_priv_buffer()`, a private internal copy the size of the
+  transfer. The round LCD's 115 KB framebuffer did this once a second and took
+  the video encoder down with it. Use `esp_cache_get_alignment()` +
+  `heap_caps_aligned_alloc()`, and keep single transfers small anyway.
 - **macOS will not click through two pointer collections in one HID interface.**
   The composite pointer carried an absolute mouse and a relative mouse in a
   single USB interface, each with its own buttons. macOS moved the cursor and

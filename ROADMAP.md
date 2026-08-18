@@ -25,12 +25,14 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - A second board build target (Espressif ESP32-P4 Function EV Board)
 - WiFi on boards with an ESP32-C6 (station or the device's own access point) - one link at a time, with a rescue hotspot and captive portal so a device whose network is out of range is still set up from a phone
 - Faster H.264 on rev 3.x silicon - native YUV422 capture fed straight to the encoder; 1080p went from ~15 to ~22 fps
+- IPv6 alongside IPv4, autoconfigured from the router's advertisements, with the certificate naming the addresses
+- A status screen on the device itself (I2C OLED or round SPI LCD) - link, address, capture and health without a browser; on the round LCD also a scannable code for joining the rescue hotspot, and a ring that fills while the recovery button is held
 
 ## Planned
 
 - **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser
-- **IPv6**
 - **More supported boards**
+- **One-click rollback to an earlier release** - the console already boots the other slot; this adds the published history to fall further back
 
 ## Under consideration
 

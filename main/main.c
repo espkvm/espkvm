@@ -224,6 +224,30 @@ static void report_pending_capabilities(void)
     kvm_ts_apply();
 }
 
+/*
+ * The start-up reset window, on the panel.
+ *
+ * A hold-to-confirm gesture with no feedback is indistinguishable from a dead
+ * device: you press, nothing happens, and there is no way to tell whether the
+ * button is wired, whether the window is open, or how long "hold it" means.
+ * That is exactly how someone whose WiFi network has vanished meets this
+ * firmware, so the panel narrates the whole gesture - that the window is open,
+ * how far the hold has got, and what it ended up clearing.
+ */
+static bool s_reset_fired;
+
+static void reset_button_notice(int pct, const char *done)
+{
+    if (done) {
+        s_reset_fired = true;
+        kvm_display_notice("RECOVERY", done, 100, 8000);
+    } else if (pct < 0) {
+        kvm_display_notice("RECOVERY", "hold the button", -1, 0);
+    } else {
+        kvm_display_notice("RECOVERY", "keep holding", pct, 0);
+    }
+}
+
 void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -247,6 +271,34 @@ void app_main(void)
      * is ready before the web server can accept a power command. */
     ESP_ERROR_CHECK(kvm_atx_init());
 
+    /*
+     * Before anything reads the network settings: the button shares its pin
+     * with the Ethernet interface, so this is the only moment it can be read
+     * without cost. Holding it now clears a forgotten password and puts the
+     * link settings back somewhere reachable - which is why it has to run
+     * ahead of the read below rather than after it, as it used to. Reverting a
+     * setting that had already been latched into a local only took effect a
+     * reboot later, so the recovery boot itself still came up unreachable.
+     */
+    /*
+     * The panel first, so the button below has something to report on.
+     *
+     * It used to start after capture, because the I2C OLEDs hang off the
+     * capture chip's bus and cannot attach before it exists. They still cannot:
+     * the task simply retries and picks them up a few seconds later, once
+     * capture_start() has made the bus. What moving this buys is the SPI panel,
+     * which owns its pins and comes up immediately - and so is on and showing
+     * something during the reset window, which is the one moment a locked-out
+     * device has no other way to answer.
+     */
+    kvm_display_init();
+
+    kvm_auth_check_reset_button(reset_button_notice);
+    /* Leave the outcome up for its few seconds; take the prompt down at once. */
+    if (!s_reset_fired) {
+        kvm_display_notice_clear();
+    }
+
     /* The active link, read early because it decides whether the microSD may mount
      * (below) - the WiFi co-processor and the card share one SD host controller. */
     kvm_wifi_announce(); /* show the Connection switcher/settings in every mode */
@@ -269,13 +321,6 @@ void app_main(void)
     }
 
     /*
-     * Before the network: the button shares its pin with the Ethernet
-     * interface, so this is the only moment it can be read without cost.
-     * Holding it now clears a forgotten password.
-     */
-    kvm_auth_check_reset_button();
-
-    /*
      * The recovery path first: bring up the network and the web server, then
      * confirm the image the moment they answer. Everything past this point can
      * fail or hang without stranding the device - the operator can always reach
@@ -287,6 +332,9 @@ void app_main(void)
      * address they learn to the TLS layer, through the same kind of callback the
      * tailnet identity uses (a direct call would be a dependency cycle). */
     kvm_ipv6_set_identity_cb(kvm_tls_set_ip6);
+    /* Same deal for the IPv4 address when it comes from DHCP: learned by
+     * whichever link comes up, named by the certificate from the next restart. */
+    kvm_net_set_ip4_identity_cb(kvm_tls_set_ip4);
 
     /*
      * One link at a time (net_mode): Ethernet, WiFi station, or WiFi AP. Ethernet
@@ -351,10 +399,6 @@ void app_main(void)
 
     ESP_LOGI(TAG, "boot: capture");
     capture_start();
-
-    /* Optional status OLED. Starts after capture so the shared I2C bus exists;
-     * the task self-detects a panel and does nothing when none is wired. */
-    kvm_display_init();
 
     report_pending_capabilities();
     kvm_caps_log();

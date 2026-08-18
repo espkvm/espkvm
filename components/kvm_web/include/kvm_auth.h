@@ -26,12 +26,28 @@ extern "C" {
 esp_err_t kvm_auth_init(void);
 
 /**
+ * How the start-up reset window is going, for whatever the board can show it
+ * on. Called from the polling loop, so it must return promptly and must not
+ * assume any particular subsystem is up yet.
+ *
+ * @param pct  -1 while the window is open and the button is not down, else
+ *             0..100 of the hold still needed to trigger the reset
+ * @param done NULL until the reset fires, then a short line saying what it did
+ */
+typedef void (*kvm_auth_reset_ui_cb_t)(int pct, const char *done);
+
+/**
  * Watch the board button for a few seconds and clear the password if it is
  * held. Call early in start-up, before the network is brought up: the pin is
  * shared with the Ethernet interface, and claiming it later takes the network
  * down with it.
+ *
+ * @param ui optional progress sink, or NULL. Without one the gesture is silent,
+ *           which is how it shipped and why nobody could tell whether their
+ *           press had registered: the window is the one moment a headless
+ *           device has something to say and no network to say it over.
  */
-void kvm_auth_check_reset_button(void);
+void kvm_auth_check_reset_button(kvm_auth_reset_ui_cb_t ui);
 
 /** Whether a request must carry a valid session to be served at all. */
 bool kvm_auth_required(void);

@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "esp_app_desc.h"
@@ -50,6 +51,86 @@ static const kvm_display_driver_t *const s_drivers[] = {
 
 #define RENDER_TICK_MS 1000 /* how often the driver is handed fresh telemetry */
 
+/*
+ * The notice: a caller-owned takeover of the panel, written from another task.
+ *
+ * It is deliberately a value rather than a callback into the caller - the
+ * display task must never run someone else's code while it holds the panel, and
+ * a caller in a tight polling loop (the reset button) must never be slowed down
+ * by an SPI write. So the writer drops a small struct and moves on, and the task
+ * repaints when it next wakes - immediately, because the write pokes it.
+ */
+static struct {
+    char title[sizeof(((kvm_display_status_t *)0)->notice)];
+    char detail[sizeof(((kvm_display_status_t *)0)->notice_detail)];
+    int8_t pct;
+    bool active;
+    int64_t expires_us; /* 0 = no expiry */
+} s_notice;
+static SemaphoreHandle_t s_notice_lock;
+static TaskHandle_t s_task;
+
+void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t ttl_ms)
+{
+    if (!s_notice_lock) {
+        return; /* the feature is off, or this ran before kvm_display_init() */
+    }
+    if (pct > 100) {
+        pct = 100;
+    } else if (pct < 0) {
+        pct = -1;
+    }
+
+    xSemaphoreTake(s_notice_lock, portMAX_DELAY);
+    /* Repaint only on a real change: the reset button calls this every 50 ms,
+     * and a full round-LCD frame is 115 KB over SPI. */
+    const bool changed = !s_notice.active || s_notice.pct != (int8_t)pct ||
+                         strcmp(s_notice.title, title ? title : "") != 0 ||
+                         strcmp(s_notice.detail, detail ? detail : "") != 0;
+    snprintf(s_notice.title, sizeof(s_notice.title), "%s", title ? title : "");
+    snprintf(s_notice.detail, sizeof(s_notice.detail), "%s", detail ? detail : "");
+    s_notice.pct = (int8_t)pct;
+    s_notice.active = true;
+    s_notice.expires_us = ttl_ms ? esp_timer_get_time() + (int64_t)ttl_ms * 1000 : 0;
+    xSemaphoreGive(s_notice_lock);
+
+    if (changed && s_task) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
+void kvm_display_notice_clear(void)
+{
+    if (!s_notice_lock) {
+        return;
+    }
+    xSemaphoreTake(s_notice_lock, portMAX_DELAY);
+    const bool was = s_notice.active;
+    s_notice.active = false;
+    xSemaphoreGive(s_notice_lock);
+    if (was && s_task) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
+/** Copy the live notice into @p st, dropping it if its TTL has run out. */
+static void take_notice(kvm_display_status_t *st)
+{
+    if (!s_notice_lock) {
+        return;
+    }
+    xSemaphoreTake(s_notice_lock, portMAX_DELAY);
+    if (s_notice.active && s_notice.expires_us && esp_timer_get_time() > s_notice.expires_us) {
+        s_notice.active = false;
+    }
+    if (s_notice.active) {
+        snprintf(st->notice, sizeof(st->notice), "%s", s_notice.title);
+        snprintf(st->notice_detail, sizeof(st->notice_detail), "%s", s_notice.detail);
+        st->notice_pct = s_notice.pct;
+    }
+    xSemaphoreGive(s_notice_lock);
+}
+
 static const kvm_display_driver_t *pick_driver(void)
 {
     /* disp_type is an enum; its value is the choice index, and the choices are
@@ -57,6 +138,48 @@ static const kvm_display_driver_t *pick_driver(void)
     const size_t n = sizeof(s_drivers) / sizeof(s_drivers[0]);
     const int idx = (int)kvm_setting_int("disp_type");
     return (idx >= 0 && (size_t)idx < n) ? s_drivers[idx] : s_drivers[0];
+}
+
+/*
+ * Build the Wi-Fi join string a phone camera understands. The format is fixed:
+ *   WIFI:T:<WPA|nopass>;S:<ssid>;P:<pass>;;
+ *
+ * Inside it, the five characters \ ; , : and " are structural, so any of them
+ * appearing in an SSID or passphrase has to be backslash-escaped or the scanner
+ * reads the field as ending early. Our own hotspot name never contains one, but
+ * the passphrase is the operator's, and a stray semicolon there would otherwise
+ * produce a QR code that silently joins the wrong network name.
+ *
+ * An "open" hotspot is not the same string with an empty password - it uses
+ * T:nopass and omits P: entirely, which is what the format expects and what
+ * phones actually act on.
+ */
+static void escape_qr_field(char *out, size_t cap, const char *in)
+{
+    size_t o = 0;
+    for (const char *p = in; *p && o + 2 < cap; p++) {
+        if (*p == '\\' || *p == ';' || *p == ',' || *p == ':' || *p == '"') {
+            out[o++] = '\\';
+        }
+        out[o++] = *p;
+    }
+    out[o] = '\0';
+}
+
+static void build_join_qr(char *out, size_t cap, const char *ssid, const char *pass)
+{
+    char e_ssid[sizeof(((kvm_display_status_t *)0)->ssid) * 2];
+    escape_qr_field(e_ssid, sizeof(e_ssid), ssid);
+
+    /* Matches wifi.c: a passphrase shorter than WPA2's minimum is not used at
+     * all, and the hotspot comes up open - so the code must say so too. */
+    if (pass && strlen(pass) >= 8) {
+        char e_pass[132];
+        escape_qr_field(e_pass, sizeof(e_pass), pass);
+        snprintf(out, cap, "WIFI:T:WPA;S:%s;P:%s;;", e_ssid, e_pass);
+    } else {
+        snprintf(out, cap, "WIFI:T:nopass;S:%s;;", e_ssid);
+    }
 }
 
 static void gather(kvm_display_status_t *st)
@@ -76,6 +199,9 @@ static void gather(kvm_display_status_t *st)
                                           : "Ethernet");
     if (w.ssid[0]) {
         snprintf(st->ssid, sizeof(st->ssid), "%s", w.ssid);
+    }
+    if (st->ap_mode && w.ssid[0]) {
+        build_join_qr(st->join_qr, sizeof(st->join_qr), w.ssid, kvm_setting_str("ap_pass"));
     }
 
     esp_netif_t *nif = esp_netif_get_default_netif();
@@ -112,6 +238,9 @@ static void gather(kvm_display_status_t *st)
 
     const esp_app_desc_t *app = esp_app_get_description();
     snprintf(st->version, sizeof(st->version), "%s", app ? app->version : "?");
+
+    st->notice_pct = -1;
+    take_notice(st);
 }
 
 static void display_task(void *arg)
@@ -171,7 +300,10 @@ static void display_task(void *arg)
             fails = 0;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(RENDER_TICK_MS));
+        /* Sleep out the tick, but let a notice cut it short: waiting on the
+         * notification rather than the clock is what makes a progress ring
+         * follow a button in real time instead of at 1 Hz. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(RENDER_TICK_MS));
     }
 }
 
@@ -179,15 +311,34 @@ void kvm_display_init(void)
 {
     /* Pinned to core 1: the H.264 encoder saturates core 0, and the display's
      * blocking I2C writes must not fight it there or they starve and time out. */
-    if (xTaskCreatePinnedToCore(display_task, "kvm_disp", 4096, NULL, tskIDLE_PRIORITY + 2, NULL,
+    s_notice_lock = xSemaphoreCreateMutex();
+    if (!s_notice_lock) {
+        ESP_LOGW(TAG, "no memory for the notice lock; notices will be dropped");
+    }
+    if (xTaskCreatePinnedToCore(display_task, "kvm_disp", 4096, NULL, tskIDLE_PRIORITY + 2, &s_task,
                                 1) != pdPASS) {
         ESP_LOGW(TAG, "could not start the display task");
+        s_task = NULL;
     }
 }
 
 #else /* !CONFIG_KVM_ENABLE_DISPLAY */
 
 void kvm_display_init(void)
+{
+}
+
+/* Callers say what is happening and do not care whether a panel exists; a build
+ * with no display support swallows it rather than making every call site ask. */
+void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t ttl_ms)
+{
+    (void)title;
+    (void)detail;
+    (void)pct;
+    (void)ttl_ms;
+}
+
+void kvm_display_notice_clear(void)
 {
 }
 

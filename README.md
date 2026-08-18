@@ -395,11 +395,15 @@ first boot, and asks for a password before it will do anything. The password is
 stored as a salted PBKDF2 hash, sessions are HttpOnly cookies held in memory -
 so a reboot signs everyone out - and repeated failures pay a growing delay.
 
-A forgotten password is cleared by holding the board button through a power-on
-or reset: physical presence is the credential, because whoever can hold that
-button can also unplug the machine this device is attached to. Only the password
-is erased; the network settings stay, since wiping those would make a locked
-device unreachable rather than recovered.
+A forgotten password is cleared with the board button: reset the board, then
+press and hold the button for two seconds while the panel (or the log) asks you
+to. Hold it *after* the reset, not through it - on boards where that button is
+also the ROM's download strap, holding it through a reset drops the chip into
+firmware-download mode instead. Physical presence is the credential, because
+whoever can hold that button can also unplug the machine this device is attached
+to. The same gesture also puts the network back somewhere reachable - DHCP, the
+wired link, and no operator TLS certificate - since a WiFi network that has
+vanished locks a device away exactly as a forgotten password does.
 
 **Heat.** The chip is watched, and if it ever gets hot the frame rate is halved
 and then encoding stops - but the keyboard, the mouse and the web interface keep
