@@ -46,6 +46,8 @@
 #include "kvm_wg.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
+#include "kvm_display.h"
+#include "kvm_log.h"
 #include "kvm_settings.h"
 #include "kvm_storage.h"
 #include "kvm_thermal.h"
@@ -559,8 +561,20 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
     }
     ESP_LOGW(TAG, "firmware update: %d bytes into %s", req->content_len, target->label);
 
+    /*
+     * Say so on the panel, if there is one.
+     *
+     * An update is the longest thing this device does with nothing to show for
+     * it, and whoever started it may be looking at the box rather than at the
+     * browser - which has just been asked to give up its video connection for
+     * the duration. The screen is the one place that can answer "is it doing
+     * anything?" without a network.
+     */
+    kvm_display_notice("UPDATE", "receiving", 0, 30000);
+
     char chunk[2048];
     int received = 0;
+    int shown = -1;
     while (received < req->content_len) {
         const int want = (int)sizeof(chunk) < (req->content_len - received)
                              ? (int)sizeof(chunk)
@@ -573,6 +587,7 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
         }
         if (n <= 0) {
             esp_ota_abort(ota);
+            kvm_display_notice("UPDATE", "upload lost", -1, 10000);
             ESP_LOGE(TAG, "update aborted after %d of %d bytes (recv %d)", received,
                      req->content_len, n);
             return send_json_error(req, "400 Bad Request", "upload was cut short");
@@ -580,16 +595,26 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
         err = esp_ota_write(ota, chunk, (size_t)n);
         if (err != ESP_OK) {
             esp_ota_abort(ota);
+            kvm_display_notice("UPDATE", "write failed", -1, 10000);
             ESP_LOGE(TAG, "esp_ota_write: %s", esp_err_to_name(err));
             return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
         }
         received += n;
+        /* In twentieths: the notice repaints only on a change, but there is no
+         * reason to hand it 850 identical percentages to throw away. */
+        const int pct = (int)((int64_t)received * 100 / req->content_len);
+        if (pct / 5 != shown) {
+            shown = pct / 5;
+            kvm_display_notice("UPDATE", "receiving", pct, 30000);
+        }
     }
 
+    kvm_display_notice("UPDATE", "verifying", 100, 30000);
     err = esp_ota_end(ota);
     if (err != ESP_OK) {
         /* Most often the image is not a valid application: a truncated upload
          * or the wrong file entirely. */
+        kvm_display_notice("UPDATE", "bad image", -1, 10000);
         ESP_LOGE(TAG, "esp_ota_end: %s", esp_err_to_name(err));
         return send_json_error(req, "400 Bad Request",
                                err == ESP_ERR_OTA_VALIDATE_FAILED ? "not a valid firmware image"
@@ -601,12 +626,45 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
         return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
     }
 
+    kvm_display_notice("UPDATE", "restarting", 100, 20000);
     ESP_LOGW(TAG, "update written to %s, restarting", target->label);
     /* Arm the reboot before replying, so it fires even if the send below blocks or
      * the connection is already gone (issue #13). */
     restart_soon(1000);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"written\",\"restarting\":true}");
+}
+
+/*
+ * The device's own log, as a plain text file.
+ *
+ * Behind the login, because it carries the network's name, the addresses and the
+ * MAC - not secrets (a value marked KVM_SF_SECRET must never reach a log line)
+ * but not for strangers either. It is offered as a download rather than a page
+ * because its destination is a bug report.
+ *
+ * The copy is taken in PSRAM: 12 KB out of internal memory is 12 KB the video
+ * encoder may want, and this endpoint is not worth that.
+ */
+static esp_err_t api_system_log_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    const size_t cap = kvm_log_capacity() + 1;
+    char *buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        buf = malloc(cap);
+    }
+    if (!buf) {
+        return send_json_error(req, "503 Service Unavailable", "no memory for the log");
+    }
+    kvm_log_read(buf, cap);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"espkvm-log.txt\"");
+    const esp_err_t err = httpd_resp_sendstr(req, buf);
+    free(buf);
+    return err;
 }
 
 /*
@@ -2648,6 +2706,23 @@ static esp_err_t redirect_to_https(httpd_req_t *req, httpd_err_code_t err)
     return httpd_resp_send(req, NULL, 0);
 }
 
+/*
+ * Register one route, and say so when it does not fit.
+ *
+ * esp_http_server returns ESP_ERR_HTTPD_HANDLERS_FULL and moves on; the route
+ * then simply does not exist, with nothing in the log to say why. That silence
+ * has cost this project two debugging sessions - once the video WebSocket, once
+ * the input one - so it ends here.
+ */
+static void register_route(httpd_handle_t h, const httpd_uri_t *u)
+{
+    const esp_err_t err = httpd_register_uri_handler(h, u);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "route %s NOT registered: %s - raise max_uri_handlers", u->uri,
+                 esp_err_to_name(err));
+    }
+}
+
 static httpd_handle_t start_redirect_server(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -2714,15 +2789,20 @@ httpd_handle_t http_server_start(void)
     cfg.lru_purge_enable = true;
     cfg.max_open_sockets = 12;
     /*
-     * Must exceed the total number of registered handlers: registration of the
-     * ones past the limit fails silently, and since /video and /ws are
-     * registered last, an overflow drops exactly the WebSocket endpoints - which
-     * looks like a mysterious 404 on wss (no video, no input) while every REST
-     * route still works. Count them when adding a route; keep headroom.
-     * ~33 are registered now (REST + auth + the two WebSockets + the agent
-     * endpoints); 40 leaves room.
+     * Must exceed the total number of registered handlers, and this has now bitten
+     * twice. Registration past the limit fails silently, and /video and /ws are
+     * registered last, so an overflow drops exactly the WebSocket endpoints: video
+     * and input die with a 404 on wss while every REST route still answers, which
+     * looks like anything but a table that is one entry too small.
+     *
+     * The count, as of writing: 31 in api_uris, 4 from kvm_auth_register(), and 10
+     * standalone (the console files, /cert.pem, /stream, /video, /ws) = 45. Adding
+     * the log endpoint took it from 44 to 45 and cost the keyboard.
+     *
+     * The check below now logs a failed registration rather than swallowing it, so
+     * the next person gets a line instead of a mystery - but keep headroom anyway.
      */
-    cfg.max_uri_handlers = 44;
+    cfg.max_uri_handlers = 56;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -2859,6 +2939,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/wifi/scan", .method = HTTP_POST, .handler = api_wifi_scan_post},
         {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = api_wifi_scan_get},
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
+        {.uri = "/api/v1/system/log", .method = HTTP_GET, .handler = api_system_log_get},
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
         {.uri = "/api/v1/system/boot-slot", .method = HTTP_POST, .handler = api_system_boot_slot_post},
@@ -2883,7 +2964,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/hid/type", .method = HTTP_POST, .handler = api_hid_type_post},
     };
     for (size_t i = 0; i < sizeof(api_uris) / sizeof(api_uris[0]); i++) {
-        httpd_register_uri_handler(h, &api_uris[i]);
+        register_route(h, &api_uris[i]);
     }
 
     /* Before anything else is registered: a request that arrives while the
@@ -2898,7 +2979,7 @@ httpd_handle_t http_server_start(void)
         .is_websocket = true,
         .ws_pre_handshake_cb = ws_pre_handshake,
     };
-    httpd_register_uri_handler(h, &u_video);
+    register_route(h, &u_video);
 
     httpd_uri_t u_ws = {
         .uri = "/ws",
@@ -2908,7 +2989,7 @@ httpd_handle_t http_server_start(void)
         .is_websocket = true,
         .ws_pre_handshake_cb = ws_pre_handshake,
     };
-    httpd_register_uri_handler(h, &u_ws);
+    register_route(h, &u_ws);
 
     /* AP mode: turn unmatched requests (the OS connectivity probe) into the
      * captive landing so the "sign in to network" sheet pops on join. The console

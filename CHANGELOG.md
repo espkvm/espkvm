@@ -5,6 +5,30 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.25.0] - 2026-08-18
+
+### Fixed
+- **Keyboard and mouse worked again after the log endpoint took their route.**
+  The web server has a fixed table of routes; registration past the end fails
+  silently, and the input WebSocket is registered last, so adding one endpoint
+  cost the whole control channel while every other page still answered. The
+  table is bigger now, and a route that does not fit says so in the log instead
+  of vanishing.
+
+### Added
+- **The device keeps its own log, and the console can hand it to you.** A ring in
+  RTC memory that a restart does not clear - so the log of a boot that failed is
+  still readable after the device has come back up on something that works, which
+  is the one case a serial cable used to be the only answer to. Diagnostics &rarr;
+  Download the log. It holds no passwords or keys; it does name your network,
+  addresses and MAC, and the console says so where you download it.
+- **The update shows itself on the status screen.** Percentage while the image
+  arrives, then verifying, then restarting - and what went wrong if it did.
+  An update is the longest thing the device does with nothing to show for it,
+  and the console has just been asked to give up its video connection for the
+  duration, so whoever is standing at the box has somewhere to look. Works on
+  the mono OLED as well as the round LCD: by then the panel is attached.
+
 ## [0.24.0] - 2026-08-18
 
 ### Added

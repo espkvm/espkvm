@@ -330,6 +330,10 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },
+    /* KVM_SF_SECRET means write-only over the API - and never in a log line.
+     * The console hands the device log to anyone signed in, and people paste it
+     * into public bug reports; a passphrase that reaches ESP_LOG is published.
+     * See components/kvm_log. */
     {
         .key = "net_fallback", .section = "network", .type = KVM_VT_ENUM,
         .title = "If WiFi can't connect",

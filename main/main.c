@@ -13,6 +13,7 @@
 
 #include "capture.h"
 #include "kvm_display.h"
+#include "kvm_log.h"
 #include "ethernet.h"
 #include "wifi.h"
 #include "http_server.h"
@@ -250,6 +251,10 @@ static void reset_button_notice(int pct, const char *done)
 
 void app_main(void)
 {
+    /* First, so everything below is captured. What the bootloader and the ROM
+     * printed before this is already gone - it exists only on the wire. */
+    kvm_log_init();
+
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());

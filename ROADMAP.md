@@ -26,6 +26,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - WiFi on boards with an ESP32-C6 (station or the device's own access point) - one link at a time, with a rescue hotspot and captive portal so a device whose network is out of range is still set up from a phone
 - Faster H.264 on rev 3.x silicon - native YUV422 capture fed straight to the encoder; 1080p went from ~15 to ~22 fps
 - IPv6 alongside IPv4, autoconfigured from the router's advertisements, with the certificate naming the addresses
+- A log kept on the device, surviving a restart and downloadable from the console - so a report of something that failed at boot can carry the evidence
 - A status screen on the device itself (I2C OLED or round SPI LCD) - link, address, capture and health without a browser; on the round LCD also a scannable code for joining the rescue hotspot, and a ring that fills while the recovery button is held
 
 ## Planned
