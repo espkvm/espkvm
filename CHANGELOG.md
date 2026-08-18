@@ -5,6 +5,15 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.25.1] - 2026-08-18
+
+### Added
+- **Every boot now says how the last one ended** - power on, a reset by hand, a
+  panic, a watchdog, or a brownout - and which slot is running and whether it is
+  confirmed yet. When an update is rolled back there is otherwise nothing left
+  to say why: by the time anyone looks, the old firmware is running again. These
+  are four very different faults and the chip already knows which one it was.
+
 ## [0.25.0] - 2026-08-18
 
 ### Fixed

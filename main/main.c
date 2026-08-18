@@ -9,6 +9,7 @@
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 
 #include "capture.h"
@@ -249,11 +250,59 @@ static void reset_button_notice(int pct, const char *done)
     }
 }
 
+/*
+ * How the last run ended, and what we are running now.
+ *
+ * Two lines that cost nothing and answer the question the log alone cannot. An
+ * update that gets rolled back leaves no trace of WHY the new image never
+ * confirmed itself: by the time anyone looks, the old firmware is running and
+ * the failed boot is over. But the chip still knows how that boot ended - a
+ * panic, the task watchdog, a brownout, or a plain reset by hand are four very
+ * different bugs, and the reset reason separates them for free.
+ *
+ * Printed on every boot rather than only after an update, because a device that
+ * quietly reboots in the night is worth knowing about too.
+ */
+static void log_boot_reason(void)
+{
+    const char *why;
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: why = "power on"; break;
+    case ESP_RST_EXT: why = "reset pin"; break;
+    case ESP_RST_SW: why = "software restart"; break;
+    case ESP_RST_PANIC: why = "PANIC in the previous run"; break;
+    case ESP_RST_INT_WDT: why = "interrupt watchdog"; break;
+    case ESP_RST_TASK_WDT: why = "task watchdog"; break;
+    case ESP_RST_WDT: why = "another watchdog"; break;
+    case ESP_RST_BROWNOUT: why = "BROWNOUT - the supply dipped"; break;
+    case ESP_RST_SDIO: why = "SDIO"; break;
+    case ESP_RST_DEEPSLEEP: why = "deep sleep"; break;
+    default: why = "unknown"; break;
+    }
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    const char *state_name = "unknown";
+    if (running && esp_ota_get_state_partition(running, &state) == ESP_OK) {
+        switch (state) {
+        case ESP_OTA_IMG_NEW: state_name = "new"; break;
+        case ESP_OTA_IMG_PENDING_VERIFY: state_name = "awaiting confirmation"; break;
+        case ESP_OTA_IMG_VALID: state_name = "confirmed"; break;
+        case ESP_OTA_IMG_INVALID: state_name = "marked bad"; break;
+        case ESP_OTA_IMG_ABORTED: state_name = "aborted"; break;
+        default: break;
+        }
+    }
+    ESP_LOGW(TAG, "boot: after %s; running %s (%s)", why, running ? running->label : "?",
+             state_name);
+}
+
 void app_main(void)
 {
     /* First, so everything below is captured. What the bootloader and the ROM
      * printed before this is already gone - it exists only on the wire. */
     kvm_log_init();
+    log_boot_reason();
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
