@@ -169,6 +169,11 @@ target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`.
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="50%"><img src="docs/board-poe.jpg" alt="Waveshare ESP32-P4-WIFI6-POE-ETH board"></td>
+<td width="50%" valign="top">
+
 **[Waveshare ESP32-P4-WIFI6-POE-ETH](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm)**
 &mdash; *built from the schematic, not yet run on one*
 
@@ -183,6 +188,10 @@ Waveshare confirmed (August 2026) that these boards ship rev 1.3 today, with rev
 prints `Chip rev:`. The two revisions need different images and neither runs on
 the other's silicon, so a rev 3.x board wants the `-rev3` build instead. A
 product code does not tell you which chip is inside; ask the seller.
+
+</td>
+</tr>
+</table>
 
 ### Companion boards
 
