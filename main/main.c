@@ -345,6 +345,11 @@ void app_main(void)
      * something during the reset window, which is the one moment a locked-out
      * device has no other way to answer.
      */
+    /* The I2C panels have no pins of their own - they hang off the capture chip's
+     * bus, which used to mean they could not attach until capture started, long
+     * after the button window below had closed. The bus itself needs nothing from
+     * the capture chip, so it is made here and capture takes the same handle. */
+    (void)capture_i2c_bus_init();
     kvm_display_init();
 
     kvm_auth_check_reset_button(reset_button_notice);

@@ -5,6 +5,20 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.27.0] - 2026-08-19
+
+### Fixed
+- **The status display now comes up in the first seconds of a boot.** An I2C OLED
+  shares the capture chip's bus, and that bus was only made once capture started -
+  so the panel stayed dark for the first fourteen seconds. That covered the whole
+  password-reset window, which is exactly when someone is standing at the device
+  looking at it.
+
+### Added
+- **The hotspot's password on a mono OLED.** A 128x64 panel is too small for a
+  scannable join code, so it prints the network's key as text instead - enough to
+  type it into a phone. The round LCD keeps showing the QR code.
+
 ## [0.26.0] - 2026-08-19
 
 ### Added

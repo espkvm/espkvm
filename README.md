@@ -10,6 +10,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/espkvm/espkvm" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/ESP--IDF-v6.0.1-blue" alt="ESP-IDF v6.0.1">
   <img src="https://img.shields.io/badge/target-ESP32--P4-informational" alt="Target: ESP32-P4">
+  <br>
+  <a href="https://t.me/espkvm"><img src="https://img.shields.io/badge/Telegram-%40espkvm-26A5E4?logo=telegram&logoColor=white" alt="Telegram: @espkvm"></a>
+  <a href="https://x.com/espkvm"><img src="https://img.shields.io/badge/X-%40espkvm-000000?logo=x&logoColor=white" alt="X: @espkvm"></a>
 </p>
 
 An IP-KVM built from an ESP32-P4 and a Toshiba TC358743 HDMI-to-CSI bridge. It
@@ -235,7 +238,9 @@ power LED without a direct electrical connection. Wiring is in
 **I2C OLED (SSD1306 / SH1106)**
 
 A 0.96&Prime; 128&times;64 mono OLED on four wires (VCC, GND, SCL, SDA). It shares
-the capture chip's I2C bus, needs no pins of its own, and is auto-detected.
+the capture chip's I2C bus, needs no pins of its own, and is auto-detected. In
+hotspot mode it prints the network name and its password, so a phone can join
+from what is on the glass.
 
 </td>
 <td valign="top">
@@ -244,7 +249,8 @@ the capture chip's I2C bus, needs no pins of its own, and is auto-detected.
 
 A 1.28&Prime; 240&times;240 round SPI LCD, e.g. the Waveshare module. The cheap
 1.5&Prime; GC9A01A modules work too. Wire its SPI pins to any free GPIOs and pick
-them in the console.
+them in the console. In hotspot mode it shows a QR code a phone camera can join
+from.
 
 </td>
 </tr>
@@ -523,6 +529,11 @@ among them - pick the language in the player.
 Also picked up and translated internationally - French, Greek, Spanish, Russian,
 Chinese, Japanese, Thai and German.
 
+It has also started turning up as a reference point when other devices in the
+category are written about, rather than only as a story of its own:
+[PC de Mano](https://www.pcdemano.com/sc/internet/44120/) names it alongside the
+Sipeed NanoKVM in a review of the USBridge-KVM 2.0 (in Spanish).
+
 I also wrote up the project's origin story on
 [Habr](https://habr.com/ru/articles/1069442/) - *ESP-KVM: how I built an IP-KVM
 on the ESP32-P4, and what I tripped over along the way* (the article is in
@@ -575,6 +586,9 @@ ESP-KVM is free and open source. The easiest way to help is to
 others find the project. If it saved you a trip to a dead machine and you want to say
 thanks, you can [buy me a coffee](https://buymeacoffee.com/dexif) - entirely optional,
 and contributions of code, issues and ideas are just as welcome.
+
+Release notes and work in progress go out on
+[Telegram](https://t.me/espkvm) and [X](https://x.com/espkvm).
 
 ## Licence
 

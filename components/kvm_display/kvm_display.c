@@ -201,7 +201,13 @@ static void gather(kvm_display_status_t *st)
         snprintf(st->ssid, sizeof(st->ssid), "%s", w.ssid);
     }
     if (st->ap_mode && w.ssid[0]) {
-        build_join_qr(st->join_qr, sizeof(st->join_qr), w.ssid, kvm_setting_str("ap_pass"));
+        const char *pass = kvm_setting_str("ap_pass");
+        build_join_qr(st->join_qr, sizeof(st->join_qr), w.ssid, pass);
+        /* Matches wifi.c and the QR: below WPA2's minimum the hotspot comes up
+         * open, and there is no passphrase to show. */
+        if (pass && strlen(pass) >= 8) {
+            snprintf(st->ap_pass, sizeof(st->ap_pass), "%s", pass);
+        }
     }
 
     esp_netif_t *nif = esp_netif_get_default_netif();

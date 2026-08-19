@@ -39,6 +39,13 @@ void capture_status_get(kvm_video_status_t *out);
  * lines can be probed and driven without any dedicated pins. NULL before the
  * capture hardware has been brought up.
  */
+/**
+ * Create the I2C bus the capture chip and the status OLED share, if it does not
+ * exist yet. Safe to call more than once; call it early if anything other than
+ * the capture path needs the bus before capture starts.
+ */
+esp_err_t capture_i2c_bus_init(void);
+
 i2c_master_bus_handle_t capture_i2c_bus(void);
 
 #ifdef __cplusplus

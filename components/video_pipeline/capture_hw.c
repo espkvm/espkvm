@@ -46,6 +46,37 @@ static isp_proc_handle_t s_isp_bypass;
 static capture_ctx_t s_cap;
 static i2c_master_bus_handle_t s_i2c_bus; /* shared with an optional status OLED */
 
+/*
+ * Make the I2C bus, once, whoever asks first.
+ *
+ * It used to be created in the middle of bringing the capture chip up, which
+ * meant the status OLED - which shares this bus and has no pins of its own -
+ * could not attach until capture had started, some fourteen seconds into a
+ * boot. Everything the panel exists to show before that was therefore invisible
+ * on an OLED: most of all the reset-button window, which closes at nine seconds.
+ *
+ * Nothing about the bus itself needs the capture chip: it is two pins and a
+ * peripheral. So it is made on demand and the capture path takes the same
+ * handle when it gets there.
+ */
+esp_err_t capture_i2c_bus_init(void)
+{
+    if (s_i2c_bus) {
+        return ESP_OK;
+    }
+    const i2c_master_bus_config_t cfg = {
+        .i2c_port = I2C_NUM_0,
+        .sda_io_num = KVM_BOARD_TC358743_I2C_SDA_GPIO,
+        .scl_io_num = KVM_BOARD_TC358743_I2C_SCL_GPIO,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .intr_priority = 0,
+        .trans_queue_depth = 0,
+        .flags = {.enable_internal_pullup = 1},
+    };
+    return i2c_new_master_bus(&cfg, &s_i2c_bus);
+}
+
 i2c_master_bus_handle_t capture_i2c_bus(void)
 {
     return s_i2c_bus;
@@ -344,19 +375,9 @@ capture_ctx_t *capture_hw_init_start(void)
 
     tc358743_resetn_pulse();
 
-    i2c_master_bus_handle_t i2c_bus = NULL;
-    i2c_master_bus_config_t i2c_bus_cfg = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = KVM_BOARD_TC358743_I2C_SDA_GPIO,
-        .scl_io_num = KVM_BOARD_TC358743_I2C_SCL_GPIO,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .intr_priority = 0,
-        .trans_queue_depth = 0,
-        .flags = {.enable_internal_pullup = 1},
-    };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus));
-    s_i2c_bus = i2c_bus; /* publish for the optional OLED sharing this bus */
+    /* Usually already made - the display asks for it seconds before this. */
+    ESP_ERROR_CHECK(capture_i2c_bus_init());
+    i2c_master_bus_handle_t i2c_bus = s_i2c_bus;
 
     /* A missing capture card must not take the whole device down: without it the
      * KVM still serves HID, and the web UI explains what is wrong. */

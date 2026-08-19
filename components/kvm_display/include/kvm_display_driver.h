@@ -61,6 +61,18 @@ typedef struct {
     char join_qr[256];
 
     /**
+     * The hotspot's passphrase, plain, or "" when the hotspot is open or is not
+     * the active link. For panels too small to carry a scannable code - a
+     * 128x64 OLED would need about forty modules across and has room for
+     * fourteen - which leaves reading it off the glass and typing it.
+     *
+     * Printing a password on a screen is exactly as safe as the hotspot it
+     * belongs to: it is there so that whoever is standing at the device can get
+     * in, and standing at the device is already the credential.
+     */
+    char ap_pass[64];
+
+    /**
      * A notice that outranks everything else on the panel: while @c notice is
      * non-empty a driver must draw it and nothing else, ignoring its own screen
      * rotation. See kvm_display_notice().

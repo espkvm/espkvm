@@ -195,6 +195,19 @@ static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_
         fb_text(m, 4, buf);
         if (st->ap_mode) {
             fb_text(m, 5, "http://192.168.4.1");
+            /* No room for a code here, so the credentials go on as text - this
+             * is the screen someone reads while joining the hotspot from a
+             * phone, and the alternative is that they cannot join at all. */
+            if (st->ap_pass[0]) {
+                /* Its own buffer: a passphrase can be 63 characters, far past
+                 * the shared one. Only about twenty fit on the glass anyway -
+                 * fb_text clips - but the string is built whole and truthfully. */
+                char key[72];
+                snprintf(key, sizeof(key), "key %s", st->ap_pass);
+                fb_text(m, 6, key);
+            } else {
+                fb_text(m, 6, "open network");
+            }
         } else if (st->hostname[0]) {
             snprintf(buf, sizeof(buf), "%s.local", st->hostname);
             fb_text(m, 5, buf);
