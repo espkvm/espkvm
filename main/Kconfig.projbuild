@@ -53,9 +53,48 @@ menu "ESP-KVM"
             depends on KVM_ENABLE_DISPLAY
             default 2
             help
-                SPI peripheral index for the round GC9A01 LCD. Its GPIO pins are set
-                at runtime in Settings -> Display, not here. Only used when the
+                SPI peripheral index for the round GC9A01 LCD. Only used when the
                 display type is GC9A01.
+
+        # The panel's five GPIOs stay runtime settings - the operator solders the
+        # wires and picks the pins in the console. These only choose what the
+        # console offers before anyone touches them, per board, because "free" is
+        # a different set of pins on every one of them. A device that has already
+        # been configured keeps what it was given: a default is only consulted
+        # when nothing is stored.
+        config KVM_DISP_SCLK_GPIO
+            int "Round LCD default SCLK GPIO"
+            depends on KVM_ENABLE_DISPLAY
+            range -1 ENV_GPIO_RANGE_MAX
+            default 20
+
+        config KVM_DISP_MOSI_GPIO
+            int "Round LCD default MOSI GPIO"
+            depends on KVM_ENABLE_DISPLAY
+            range -1 ENV_GPIO_RANGE_MAX
+            default 21
+
+        config KVM_DISP_CS_GPIO
+            int "Round LCD default CS GPIO"
+            depends on KVM_ENABLE_DISPLAY
+            range -1 ENV_GPIO_RANGE_MAX
+            default 22
+
+        config KVM_DISP_DC_GPIO
+            int "Round LCD default DC GPIO"
+            depends on KVM_ENABLE_DISPLAY
+            range -1 ENV_GPIO_RANGE_MAX
+            default 26
+            help
+                Not 45 on the Function EV board: that pin carries SD_PWRn, so a
+                panel wired there never sees a clean level and stays dark, with
+                nothing in the log to say why.
+
+        config KVM_DISP_RST_GPIO
+            int "Round LCD default RST GPIO"
+            depends on KVM_ENABLE_DISPLAY
+            range -1 ENV_GPIO_RANGE_MAX
+            default 33
 
         config KVM_ENABLE_HTTPS
             bool "HTTPS and authentication"

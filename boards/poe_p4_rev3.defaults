@@ -1,0 +1,19 @@
+# Waveshare ESP32-P4-WIFI6-POE-ETH on revision 3.x silicon
+#
+# The PoE board's rev 3.x twin. Build it with:
+#   idf.py -B build.poe_rev3 -D SDKCONFIG=build.poe_rev3/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/poe_p4.defaults;boards/poe_p4_rev3.defaults" build
+#
+# Everything about the board is in poe_p4.defaults; this only moves the silicon
+# revision and the update slug, so the two stay in step when pins change.
+#
+# WHICH ONE DO I WANT? Read the boot log. "Chip rev: v3.x" - this image;
+# anything else - the plain p4-poe image. This one will not start on older
+# silicon: the bootloader refuses an image that declares a higher minimum
+# revision, and the board waits, unharmed, until the other image is flashed.
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# Its own slug, so an update never swaps this device onto the slower build.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-poe-rev3/manifest.json"

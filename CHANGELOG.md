@@ -5,6 +5,29 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.26.0] - 2026-08-19
+
+### Added
+- **The round LCD's pins now default per board.** Which GPIOs are free is not the
+  same on every board, so the console offered five numbers that were right for
+  one of them and wrong for the rest. The NANO's come from @DaveDavenport, who
+  worked out which pins that board can actually spare. A device that has already
+  been set up keeps its own values - a default is only read when nothing is
+  stored.
+- **Builds for rev 3.x silicon, beside the existing ones.** The two ESP32-P4
+  revisions need different images and neither will start on the other's chip -
+  the header carries a minimum *and* a maximum. Espressif is still ramping rev
+  3.x up, and a product code does not say which chip is in the box, so both are
+  published: `p4-eth` and `p4-eth-rev3`, `p4-poe` and `p4-poe-rev3`. Check the
+  boot log, which prints `Chip rev:`. On rev 3.x you also get the faster capture
+  path and a writable microSD.
+- **A build for the Waveshare ESP32-P4-WIFI6-POE-ETH.** The first supported board
+  that takes PoE, so a KVM in a rack needs one cable instead of two. Its Ethernet,
+  microSD, WiFi co-processor and button turned out to sit on the same GPIOs as the
+  boards already supported, so the overlay is mostly inherited. Configured from the
+  published schematic and not yet run on one - the same footing the NANO and
+  Guition targets started from.
+
 ## [0.25.1] - 2026-08-18
 
 ### Added

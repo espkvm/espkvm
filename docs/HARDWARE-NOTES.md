@@ -133,6 +133,18 @@ Each of these cost real time. They are recorded so they are not rediscovered.
   out, nothing is damaged. The window is polled in software seconds into
   start-up, so holding through the reset never bought anything anyway. Reset,
   release, then hold.
+- **The two ESP32-P4 silicon revisions need separate images, in both
+  directions.** A build for pre-3.0 declares max chip rev 1.99 in its image
+  header; a build for rev 3.x declares min 3.0. Neither starts on the other's
+  chip - it is not "works, only slower". Read straight out of the headers:
+  `min_rev=1.0 max_rev=1.99` against `min_rev=3.0 max_rev=3.99`. The bootloader
+  refuses the image and the board waits in the loader until something it can run
+  is flashed over USB; nothing is damaged. This is why every pre-3.0 board target
+  has a `-rev3` twin.
+  Waveshare confirmed (2026-08) that the ESP32-P4-ETH ships rev 1.3 today, that
+  rev 3.x is still ramping up at Espressif with volume expected around October
+  2026, and that **a product code does not identify the revision** - batches
+  differ, so ask the seller. Expect the same board to arrive as either chip.
 - **Internal RAM is the scarce resource, not PSRAM - and "out of memory" will
   point you at the wrong one.** The P4 here has 32 MB of PSRAM and about half a
   megabyte of internal RAM, shared by TLS sessions, USB, lwIP, mDNS, the SD card

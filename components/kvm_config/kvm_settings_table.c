@@ -628,19 +628,19 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "disp_sclk", .section = "display", .type = KVM_VT_INT, .title = "LCD SCLK / CLK",
         .help = "SPI clock GPIO for the GC9A01. Ignored by the I2C OLEDs.",
-        .min = -1, .max = 54, .def = 20, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_SCLK_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
     {
         .key = "disp_mosi", .section = "display", .type = KVM_VT_INT, .title = "LCD MOSI / DIN",
         .help = "SPI data GPIO for the GC9A01.",
-        .min = -1, .max = 54, .def = 21, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_MOSI_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
     {
         .key = "disp_cs", .section = "display", .type = KVM_VT_INT, .title = "LCD CS",
         .help = "Chip-select GPIO for the GC9A01.",
-        .min = -1, .max = 54, .def = 22, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_CS_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
     {
@@ -649,13 +649,13 @@ static const kvm_setting_t s_settings[] = {
         /* Not 45: on the Function EV board that pin carries SD_PWRn unless a
          * resistor is moved, so a panel wired there never sees clean levels and
          * stays dark. 26 is free on every board we support. */
-        .min = -1, .max = 54, .def = 26, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_DC_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
     {
         .key = "disp_rst", .section = "display", .type = KVM_VT_INT, .title = "LCD RST",
         .help = "Reset GPIO for the GC9A01. -1 (None) if RST is tied to 3V3.",
-        .min = -1, .max = 54, .def = 33, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_RST_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
     },
     {

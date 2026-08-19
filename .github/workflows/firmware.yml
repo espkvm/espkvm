@@ -53,6 +53,22 @@ jobs:
           - id: p4-guition
             build_dir: build.guition
             sdkconfig_defaults: sdkconfig.defaults;boards/guition_p4.defaults
+          # Waveshare ESP32-P4-WIFI6-POE-ETH - the first board here that takes
+          # PoE. Configured from its published schematic; not yet run on one.
+          - id: p4-poe
+            build_dir: build.poe
+            sdkconfig_defaults: sdkconfig.defaults;boards/poe_p4.defaults
+          # The same two Waveshare boards on rev 3.x silicon. Espressif is still
+          # ramping that revision up (volume expected around October 2026) and a
+          # product code does not tell you which one is in the box, so both have
+          # to be published side by side. The plain images run on either chip;
+          # these are faster and refuse to start on the older one.
+          - id: p4-eth-rev3
+            build_dir: build.eth_rev3
+            sdkconfig_defaults: sdkconfig.defaults;boards/p4eth_rev3.defaults
+          - id: p4-poe-rev3
+            build_dir: build.poe_rev3
+            sdkconfig_defaults: sdkconfig.defaults;boards/poe_p4.defaults;boards/poe_p4_rev3.defaults
     steps:
       - uses: actions/checkout@v4
         with:

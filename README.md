@@ -169,6 +169,21 @@ target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`.
 </tr>
 </table>
 
+**[Waveshare ESP32-P4-WIFI6-POE-ETH](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm)**
+&mdash; *built from the schematic, not yet run on one*
+
+The first supported board that takes **PoE**, so a KVM in a rack needs one cable
+instead of two. Same IP101 Ethernet, same microSD wiring and the same ESP32-C6
+over SDIO as the boards above, on the same pins; 32 MB PSRAM, 32 MB flash, and a
+full-size USB-A port for the target. Build overlay: `boards/poe_p4.defaults`.
+
+It ships built for pre-3.0 silicon, which is most likely what is in the box:
+Waveshare confirmed (August 2026) that these boards ship rev 1.3 today, with rev
+3.x still ramping up at Espressif. **Check the boot log before flashing** - it
+prints `Chip rev:`. The two revisions need different images and neither runs on
+the other's silicon, so a rev 3.x board wants the `-rev3` build instead. A
+product code does not tell you which chip is inside; ask the seller.
+
 ### Companion boards
 
 <table>
@@ -218,14 +233,29 @@ the capture chip's I2C bus, needs no pins of its own, and is auto-detected.
 
 **Round colour LCD (GC9A01)**
 
-A 1.28&Prime; 240&times;240 round SPI LCD, e.g. the Waveshare module. Wire its SPI
-pins to any free GPIOs and pick them in the console.
+A 1.28&Prime; 240&times;240 round SPI LCD, e.g. the Waveshare module. The cheap
+1.5&Prime; GC9A01A modules work too. Wire its SPI pins to any free GPIOs and pick
+them in the console.
 
 </td>
 </tr>
 </table>
 
 Both are off by default &mdash; turn the display on in Settings and choose its type.
+
+The LCD needs five free GPIOs, and which ones are free depends on the board - so
+each build already offers the right ones for its board, and you only change them
+if you wired it differently. What is offered:
+
+| Board | SCLK | MOSI | CS | DC | RST |
+|---|---|---|---|---|---|
+| ESP32-P4 Function EV | 20 | 21 | 22 | 26 | 33 |
+| Waveshare ESP32-P4-NANO | 22 | 5 | 32 | 33 | 36 |
+
+On the Function EV board, **do not use GPIO 45 for DC** &mdash; it carries SD_PWRn,
+so the panel gets no clean logic level and stays dark with nothing in the log.
+The NANO pins come from [@DaveDavenport](https://github.com/DaveDavenport), who
+tested them.
 
 **Cables:** a 15-pin CSI ribbon between the two boards, HDMI from the target,
 and USB-C from the board's OTG port to the target. A microSD card if you want
@@ -476,6 +506,11 @@ docs/             what the hardware actually does
 - [Open Source For You](https://www.opensourceforu.com/2026/07/microcontroller-enables-remote-device-access/) - *Microcontroller Enables Remote Device Access*
 - [Solid State Bytes](https://ssbytes.org/p/a-raspberry-pi-that-boots-straight-into-ai-an-esp32-p4-kvm-and-more) - *A Raspberry Pi That Boots Straight Into AI, an ESP32-P4 KVM, and More*
 
+On video: **Wels** covered it in
+[5 Minutos de Miercoles #22](https://youtu.be/nw-8a1GmJLE?t=342), from 5:42.
+The original is in Spanish and YouTube carries dubbed audio tracks, English
+among them - pick the language in the player.
+
 Also picked up and translated internationally - French, Greek, Spanish, Russian,
 Chinese, Japanese, Thai and German.
 
@@ -485,7 +520,9 @@ on the ESP32-P4, and what I tripped over along the way* (the article is in
 Russian).
 
 Waveshare, the maker of the capture adapter, links ESP-KVM from its
-[HDMI to CSI adapter wiki](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter).
+[HDMI to CSI adapter wiki](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter),
+and from the documentation for its
+[ESP32-P4-WIFI6-POE-ETH board](https://docs.waveshare.com/ESP32-P4-WIFI6-POE-ETH/Resources-And-Documents).
 
 ## Credits
 

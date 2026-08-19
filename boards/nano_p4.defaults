@@ -77,3 +77,14 @@ CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 # default is probed; if the reset never triggers, set the board's button GPIO, or
 # -1 if there is no reachable button:
 # CONFIG_KVM_BUTTON_GPIO=35
+
+# --- status display ---------------------------------------------------------
+# Defaults for the round GC9A01 LCD, so its pins are already right in the
+# console instead of being five numbers to look up. Tested on this board by
+# DaveDavenport, who worked out which GPIOs are actually free here - they are
+# not the ones the other boards use.
+CONFIG_KVM_DISP_SCLK_GPIO=22
+CONFIG_KVM_DISP_MOSI_GPIO=5
+CONFIG_KVM_DISP_CS_GPIO=32
+CONFIG_KVM_DISP_DC_GPIO=33
+CONFIG_KVM_DISP_RST_GPIO=36

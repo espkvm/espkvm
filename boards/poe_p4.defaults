@@ -1,0 +1,69 @@
+# Waveshare ESP32-P4-WIFI6-POE-ETH
+#
+# Deltas from the Waveshare ESP32-P4-ETH build (sdkconfig.defaults). Build it with:
+#   idf.py -B build.poe -D SDKCONFIG=build.poe/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/poe_p4.defaults" build
+#
+# Why this board is worth a target: it is the only one so far that takes PoE, so
+# a KVM in a rack needs one cable instead of two. Waveshare also link this
+# project from the board's own documentation page, so people arrive with it in
+# hand and expect it to work.
+#
+# Read off the published schematic (ESP32-P4-WIFI6-POE-ETH-Schematic.pdf), and
+# the pleasant surprise is how little differs: Ethernet, microSD, the WiFi
+# co-processor and the button all sit on the same GPIOs as the boards we already
+# support, so almost everything here is inherited rather than declared.
+#   Ethernet (IP101G): TX_EN 49, TXD0 34, TXD1 35, CRS_DV 28, RXD0 29, RXD1 30,
+#                      MDC 31, MDIO 52, REF_CLK 50 - identical to the P4-ETH.
+#   microSD: CLK 43, CMD 44, D0 39, D1 40, D2 41, D3 42 - identical to the
+#            Function EV board, and the slot has a real power gate (below).
+#   ESP32-C6 over SDIO: 14-19, with C6_CHIP_PU driven from GPIO 54 through a 0R.
+#   BOOT button: GPIO 35, which is also Ethernet TXD1 - the same sharing that
+#   makes the password reset read the pin once at start-up and hand it back.
+#
+# NOT YET VERIFIED ON HARDWARE. Configured from the schematic and published as a
+# build so owners can try it, the same way the NANO and Guition targets started.
+
+# --- flash and partitions ---------------------------------------------------
+# 32 MB, like the P4-ETH, so the base defaults already fit. Nothing to say here.
+
+# --- silicon revision -------------------------------------------------------
+# Left at the base build's pre-3.0 setting, which is very likely also the truth
+# here: every Waveshare P4 board we have seen carries rev 1.3 silicon, and both
+# the NANO and the Guition turned out pre-3.0 when someone finally tested them -
+# after we had guessed otherwise. The schematic does not name a revision.
+#
+# There is no forgiving choice here, which is worth knowing: the revisions are
+# fenced off in BOTH directions. A pre-3.0 image declares max chip rev 1.99 and a
+# rev-3 image declares min 3.0, so each refuses to start on the other's silicon.
+# It is not "slower but working" - it is a board that sits in the bootloader.
+#
+# So a rev 3.x board needs the p4-poe-rev3 image, which CI publishes beside this
+# one; there it also gets the faster capture path (UYVY straight into the
+# encoder, ~22 fps at 1080p instead of ~15) and a writable microSD. These two
+# lines are the whole difference, kept here for a local build:
+# CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+# CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-poe/manifest.json"
+
+# --- WiFi co-processor ------------------------------------------------------
+# An ESP32-C6-MINI-1 on the same SDIO pins the Function EV board uses, so the
+# same esp-hosted configuration applies - including the guard against its eager
+# constructor init, which otherwise races the microSD for the SD host.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- microSD ----------------------------------------------------------------
+# Unlike the Function EV board, the card slot really is power-gated: GPIO 45
+# drives an AO3401 P-channel MOSFET feeding SD1_VDD, so it is active LOW and the
+# firmware can cycle a card that has wedged.
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# --- console ----------------------------------------------------------------
+# USB-C carries UART for flashing, and the serial-JTAG is the console.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

@@ -1,0 +1,36 @@
+# Waveshare ESP32-P4-ETH on revision 3.x silicon
+#
+# The same board as the default build, for the batches that carry a rev 3.x chip.
+# Build it with:
+#   idf.py -B build.eth_rev3 -D SDKCONFIG=build.eth_rev3/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/p4eth_rev3.defaults" build
+#
+# Why a separate image instead of one that adapts: the capture tract is chosen at
+# compile time, down to the size of the frame ring (RGB888 is three bytes per
+# pixel, YUV422 two), so a single binary would have to carry both paths and size
+# its buffers for the larger. Two images cost a few minutes of CI and nothing at
+# run time.
+#
+# WHICH ONE DO I WANT? Read the boot log: it prints "Chip rev: v1.3" or
+# "Chip rev: v3.x". Take the plain p4-eth image unless it says v3. Flashing this
+# one onto older silicon does not damage anything, but the bootloader refuses to
+# start it - the image declares a minimum revision - and the board sits there
+# until you flash the other image over USB.
+#
+# Waveshare told us (2026-08) that the ESP32-P4-ETH ships v1.3 today, that rev
+# 3.x is still ramping up at Espressif with volume expected around October, and
+# that A PRODUCT CODE DOES NOT IDENTIFY THE REVISION - batches differ. So this
+# will stop being an exotic build at some point, and both have to exist.
+
+# --- silicon revision -------------------------------------------------------
+# What this buys on rev 3.x: the capture chip's UYVY goes straight into the
+# encoder with no conversion pass (1080p goes from ~15 to ~22 fps), and the
+# microSD becomes writable - the write timeout is an erratum of the older chip.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- updates ----------------------------------------------------------------
+# Its own slug, so a device that runs this image is offered this image again.
+# Sharing the p4-eth manifest would hand it a pre-3.0 build on the next update
+# and quietly lose the speed it was flashed for.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-eth-rev3/manifest.json"
