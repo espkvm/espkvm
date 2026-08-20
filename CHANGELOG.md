@@ -5,6 +5,16 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.27.1] - 2026-08-20
+
+### Fixed
+- **The PoE and rev 3.x images now get their manifests.** They have been built and
+  attached to every release since 0.26.0, but the step that publishes the manifests
+  still carried the list of four boards it was written with. So those three images
+  shipped with an update check pointing at a URL that was not there, and the
+  browser flasher had nothing to offer them from. Nothing in the firmware itself
+  changed in this release.
+
 ## [0.27.0] - 2026-08-19
 
 ### Fixed
