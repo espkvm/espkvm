@@ -20,8 +20,9 @@ static const char *const s_codec_choices[] = {"mjpeg", "h264"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "custom"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
 static const char *const s_engage_choices[] = {"click", "hover"};
-/* Only layouts with a verified character table; see web/src/layouts.ts. */
-static const char *const s_layout_choices[] = {"en_us", "ru_ru"};
+/* Must match the layout ids in web/src/layouts.ts. New ones go on the end:
+   the value is stored as an index, so reordering would move everyone's setting. */
+static const char *const s_layout_choices[] = {"en_us", "ru_ru", "cs_cz", "uk_ua", "lt_lt"};
 static const char *const s_media_choices[] = {"auto", "cdrom", "disk"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
 static const char *const s_side_choices[] = {"left", "right"};
