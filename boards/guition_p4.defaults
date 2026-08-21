@@ -86,3 +86,7 @@ CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 # CONFIRM: the BOOT button GPIO (used for the physical password reset). Set the
 # board's button GPIO, or -1 if there is no reachable button:
 # CONFIG_KVM_BUTTON_GPIO=35
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_GUITION=y

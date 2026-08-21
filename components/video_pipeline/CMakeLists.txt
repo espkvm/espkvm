@@ -6,6 +6,7 @@ idf_component_register(
         "capture_loop.c"
         "capture_mjpeg.c"
         "capture_h264.c"
+        "capture_screentext.c"
         "h264_probe.c"
         "video_frame.c"
     INCLUDE_DIRS "include"
@@ -15,6 +16,7 @@ idf_component_register(
         kvm_config
     PRIV_REQUIRES
         kvm_board
+        kvm_screentext
         espressif__esp_h264
         esp_driver_ppa
         esp_driver_gpio

@@ -115,6 +115,26 @@ capture_ctx_t *capture_hw_init_start(void);
  */
 esp_err_t capture_hw_apply_mode(capture_ctx_t *c, uint32_t hres, uint32_t vres);
 
+/*
+ * Offer the frame about to be encoded to the text-screen reader. Cheap and
+ * silent unless the mode is a character grid and the picture has settled; see
+ * capture_screentext.c. Capture task only.
+ */
+void capture_screentext_tick(capture_ctx_t *c, const void *frame);
+
+/* Drop what was read: the picture it came from is gone (signal lost). */
+void capture_screentext_forget(void);
+
+/*
+ * Read the screen with no viewer connected, for the watch. Cheap and silent
+ * unless the operator asked for a watch and the target is showing text.
+ * Capture task only.
+ */
+void capture_screentext_idle(capture_ctx_t *c);
+
+/* Subscribe to the settings the watch depends on. Call once, before capture. */
+void capture_screentext_init(void);
+
 /**
  * After HDMI loss (host sleep): stop CSI, HDMI HPD cycle, re-kick TC358743 MIPI, P4 bridge regs, esp_cam start.
  * Safe to call from the capture task when frames have stalled; throttled by the caller.

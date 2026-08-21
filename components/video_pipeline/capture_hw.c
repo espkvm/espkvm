@@ -388,10 +388,9 @@ capture_ctx_t *capture_hw_init_start(void)
         ESP_LOGE(CAPTURE_LOG_TAG, "TC358743 probe failed: %s", esp_err_to_name(probe_err));
         return NULL;
     }
-    /* "custom" is not implemented yet and falls back to the full list. */
+    /* The setting's choices are in the same order as the driver's enum. */
     const int32_t edid_choice = kvm_setting_int("edid_prof");
-    (void)tc358743_set_edid_profile(s_cap.tc, edid_choice == 1 ? TC358743_EDID_1080P30
-                                                              : TC358743_EDID_FULL);
+    (void)tc358743_set_edid_profile(s_cap.tc, (tc358743_edid_profile_t)edid_choice);
 
     probe_err = tc358743_init_streaming(s_cap.tc);
     if (probe_err != ESP_OK) {
@@ -624,6 +623,10 @@ static void capture_monitor_task(void *arg)
             if (had_signal) {
                 ESP_LOGW(CAPTURE_LOG_TAG, "HDMI signal lost (SYS_STATUS=0x%02x)", t.sys_status);
                 had_signal = false;
+                /* Whatever was read off the screen describes a picture that is
+                 * gone. Keeping it would let the console offer a copy of a
+                 * screen the target is no longer showing. */
+                capture_screentext_forget();
             }
             continue;
         }

@@ -31,6 +31,7 @@
 #include "mqtt_client.h"
 
 #include "capture.h"
+#include "screentext_store.h"
 #include "ethernet.h"
 #include "kvm_atx.h"
 #include "kvm_caps.h"
@@ -45,6 +46,10 @@ static SemaphoreHandle_t s_mtx;         /* guards s_client across apply/publish 
 static esp_mqtt_client_handle_t s_client;
 static volatile bool s_connected;
 static esp_timer_handle_t s_timer;
+static esp_timer_handle_t s_alert_timer;
+
+/* How soon after a phrase appears on the screen Home Assistant hears about it. */
+#define ALERT_POLL_US (2 * 1000 * 1000)
 
 /* All derived once per apply() and only read afterwards, so no extra locking. */
 static char s_node[8];         /* last three MAC bytes, e.g. "a1b2c3" */
@@ -74,6 +79,26 @@ static void pub(const char *topic, const char *payload, int retain)
 
 /* ---- state --------------------------------------------------------------- */
 
+/*
+ * Copy @p src into @p dst with the two characters JSON cannot carry escaped.
+ *
+ * The phrase in an alert is whatever the operator typed - a Windows path, or a
+ * quoted button name - and one unescaped quote does not just break that field:
+ * Home Assistant fails to parse the whole retained payload, and every sensor on
+ * the device goes unavailable at once.
+ */
+static void json_escape(char *dst, size_t cap, const char *src)
+{
+    size_t o = 0;
+    for (const char *p = src; *p && o + 2 < cap; p++) {
+        if (*p == '"' || *p == '\\') {
+            dst[o++] = '\\';
+        }
+        dst[o++] = (*p == '\n' || *p == '\r') ? ' ' : *p;
+    }
+    dst[o] = '\0';
+}
+
 static void build_state(char *b, size_t n)
 {
     kvm_video_status_t v;
@@ -95,16 +120,21 @@ static void build_state(char *b, size_t n)
     const unsigned t_dec = (unsigned)((t < 0 ? -t : t) * 10.0f) % 10u;
     const unsigned long long uptime = (unsigned long long)(esp_timer_get_time() / 1000000);
     const unsigned psram_kb = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+    char alert[SCREENTEXT_ALERT_MAX];
+    const bool alerting = screentext_alert_get(alert, sizeof(alert), NULL);
+    char alert_json[SCREENTEXT_ALERT_MAX * 2];
+    json_escape(alert_json, sizeof(alert_json), alerting ? alert : "");
 
     snprintf(b, n,
              "{\"tempC\":%d.%u,\"thermal\":\"%s\",\"viewers\":%d,\"signal\":\"%s\","
              "\"resolution\":\"%s\",\"fps\":%u.%02u,\"codec\":\"%s\",\"kbps\":%u,"
-             "\"usb\":\"%s\",\"power\":\"%s\",\"uptime\":%llu,\"psramKb\":%u}",
+             "\"usb\":\"%s\",\"power\":\"%s\",\"uptime\":%llu,\"psramKb\":%u,"
+             "\"screenAlert\":\"%s\",\"screenText\":\"%s\"}",
              t_int, t_dec, kvm_thermal_state_name(kvm_thermal_state()), viewers,
              v.signal ? "ON" : "OFF", res, (unsigned)(v.fps_x100 / 100),
              (unsigned)(v.fps_x100 % 100), codec, (unsigned)v.kbps,
              usb_hid_ready() ? "ON" : "OFF", a.have_led ? (a.power_on ? "ON" : "OFF") : "OFF",
-             uptime, psram_kb);
+             uptime, psram_kb, alerting ? "ON" : "OFF", alert_json);
 }
 
 static void publish_state(void)
@@ -112,9 +142,27 @@ static void publish_state(void)
     if (!s_connected) {
         return;
     }
-    char body[320];
+    char body[576];
     build_state(body, sizeof(body));
     pub(s_state_topic, body, 1);
+}
+
+/*
+ * The state timer runs every mqtt_interval seconds, which is right for a
+ * temperature and much too slow for "the target just printed kernel panic". So
+ * a second timer watches only the alert's sequence number - a mutexed read of
+ * one integer - and publishes the state the moment it moves.
+ */
+static void alert_cb(void *arg)
+{
+    (void)arg;
+    static uint32_t s_seen;
+    uint32_t seq = 0;
+    screentext_alert_get(NULL, 0, &seq);
+    if (seq != s_seen) {
+        s_seen = seq;
+        publish_state();
+    }
 }
 
 static void timer_cb(void *arg)
@@ -183,6 +231,10 @@ static void publish_discovery(void)
                  "diagnostic");
     disco_sensor("sensor", "psram", "Free PSRAM", "{{ value_json.psramKb }}", NULL, "kB", NULL,
                  "diagnostic");
+    disco_sensor("binary_sensor", "alert", "Screen alert", "{{ value_json.screenAlert }}",
+                 "problem", NULL, "mdi:message-alert", NULL);
+    disco_sensor("sensor", "alerttext", "Screen alert text", "{{ value_json.screenText }}", NULL,
+                 NULL, "mdi:text-recognition", "diagnostic");
     disco_sensor("binary_sensor", "signal", "HDMI signal", "{{ value_json.signal }}", NULL, NULL,
                  "mdi:hdmi-port", NULL);
     disco_sensor("binary_sensor", "usb", "Target USB", "{{ value_json.usb }}", "connectivity", NULL,
@@ -280,6 +332,12 @@ esp_err_t kvm_mqtt_init(void)
     if (!s_timer) {
         const esp_timer_create_args_t args = {.callback = timer_cb, .name = "mqtt_pub"};
         esp_err_t err = esp_timer_create(&args, &s_timer);
+        if (err == ESP_OK && !s_alert_timer) {
+            const esp_timer_create_args_t aargs = {.callback = alert_cb, .name = "mqtt_alert"};
+            if (esp_timer_create(&aargs, &s_alert_timer) == ESP_OK) {
+                esp_timer_start_periodic(s_alert_timer, ALERT_POLL_US);
+            }
+        }
         if (err != ESP_OK) {
             return err;
         }

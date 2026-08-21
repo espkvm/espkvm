@@ -166,6 +166,9 @@ void capture_loop_run(capture_ctx_t *c)
          * frame period.
          */
         if (video_frame_viewer_count() == 0) {
+            /* Nobody to encode for - but a watch set to look for words on the
+             * screen exists for exactly this state, so give it the frame. */
+            capture_screentext_idle(c);
             continue;
         }
 
@@ -220,6 +223,11 @@ void capture_loop_run(capture_ctx_t *c)
         void *src = c->fb[hidx];
 
         ESP_ERROR_CHECK(esp_cache_msync(src, c->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C));
+
+        /* The frame is held and in cache: the one moment it can be read as text
+         * without paying for either. Costs a few hundred reads unless this is a
+         * text mode that has stopped moving. */
+        capture_screentext_tick(c, src);
 
         esp_err_t ee = codec->encode(c, src, force_publish);
         if (ee == ESP_OK) {

@@ -49,7 +49,7 @@ Useful for what it does today, and honest about the rest.
 | MJPEG streaming | works |
 | H.264 streaming | works; needs HTTPS in the browser (see below) |
 | Keyboard, absolute and relative pointer, media keys | works |
-| Pasting text with a keyboard layout | works |
+| Pasting text with a keyboard layout | works; US English, Russian, Czech, Ukrainian and Lithuanian. Characters the layout cannot produce are reported rather than guessed at |
 | Use from a phone or tablet (touch trackpad and on-screen keyboard) | works |
 | Multiple viewers, one in control at a time with takeover | works |
 | User-defined key macros | works |
@@ -60,9 +60,11 @@ Useful for what it does today, and honest about the rest.
 | Login, and a physical password reset | works |
 | Thermal protection | works |
 | Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
+| Reading a text screen as text (BIOS, boot loader, console) | works; select and copy with the mouse, or copy the whole screen. Character modes only &mdash; a graphical UEFI setup is a picture and is not read. Screens up to 1024x768 are read as they come; wider ones, up to 1080p, are read while you ask for them |
+| Watching the screen for words while nobody is looking | works; off by default. Give it phrases (`no boot device`, `kernel panic`) and it alerts in the log and in Home Assistant when one appears |
 | Guessing the target's OS from how it enumerates USB | works |
 | Wake-on-LAN (magic packet to the target's MAC) | works |
-| WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; ESP32-P4 Function EV board only (the Waveshare board has no radio). One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
+| WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; verified on the ESP32-P4 Function EV. Also built for the NANO, Guition and PoE boards, which carry the same co-processor; the Waveshare ESP32-P4-ETH has no radio at all. One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
 | Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306/SH1106, auto-detected on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
@@ -252,6 +254,10 @@ A 1.28&Prime; 240&times;240 round SPI LCD, e.g. the Waveshare module. The cheap
 them in the console. In hotspot mode it shows a QR code a phone camera can join
 from.
 
+Settings &rarr; Pins draws the board's expansion header the way it is printed,
+with what holds each pin, so a free GPIO can be found where the wire actually
+goes rather than in a list of numbers.
+
 </td>
 </tr>
 </table>
@@ -259,8 +265,9 @@ from.
 Both are off by default &mdash; turn the display on in Settings and choose its type.
 
 The LCD needs five free GPIOs, and which ones are free depends on the board - so
-each build already offers the right ones for its board, and you only change them
-if you wired it differently. What is offered:
+a build offers a set that is known to work there, and you only change them if you
+wired it differently. Boards that nobody has checked yet offer the Function EV
+set. What is offered:
 
 | Board | SCLK | MOSI | CS | DC | RST |
 |---|---|---|---|---|---|
@@ -273,8 +280,12 @@ The NANO pins come from [@DaveDavenport](https://github.com/DaveDavenport), who
 tested them.
 
 **Cables:** a 15-pin CSI ribbon between the two boards, HDMI from the target,
-and USB-C from the board's OTG port to the target. A microSD card if you want
-boot-from-image.
+and a cable from the board's USB 2.0 OTG-HS port to the target. Which connector
+that is depends on the board: on the Waveshare ESP32-P4-ETH the OTG-HS is on the
+**MX1.25 header**, not on a USB socket, so it needs an MX1.25-to-USB-A cable; the
+Function EV, NANO and Guition boards put it on a USB-C port, and the PoE board on
+a full-size USB-A. The board's other USB-C is the serial bridge for flashing. A
+microSD card if you want boot-from-image.
 
 <sub>Board and module photos (c) their makers, taken from product pages and used
 only to identify the hardware. ESP-KVM is not affiliated with
@@ -298,8 +309,10 @@ Or flash straight from the browser - Chrome or Edge, nothing to install - at
 including the serial-port and driver notes for Linux, macOS and Windows, are in
 [docs/FLASHING.md](docs/FLASHING.md).
 
-Then connect Ethernet, HDMI from the target, and the USB-C OTG port to the
-target. The device announces itself over mDNS: open **https://espkvm.local/**.
+Then connect Ethernet, HDMI from the target, and the board's USB 2.0 OTG-HS port
+to the target (see **Cables** above - on the Waveshare ESP32-P4-ETH that port is
+the MX1.25 header, not the USB-C socket). The device announces itself over mDNS:
+open **https://espkvm.local/**.
 
 The device is its own certificate authority - it generates a CA on first boot
 and signs its own certificate with it - so the browser warns the first time.
@@ -339,6 +352,56 @@ on someone else's machine, offered to whoever finds it.
 After that the cable is only needed if something goes badly wrong - updates are
 installed from the console itself.
 
+## If it does not work
+
+Five things account for most of it, and each has a way to tell it apart from
+the others without a multimeter.
+
+**The target never sees a keyboard or a mouse.** Check which connector the cable
+is in. On the Waveshare ESP32-P4-ETH the USB-C socket is only the CH343 serial
+bridge, for flashing and the console log; the USB 2.0 OTG-HS that presents the
+keyboard and mouse is the small 4-pin **MX1.25 header** next to it, marked `USB`
+on the silkscreen. No cable from that USB-C socket will ever be seen by the
+target, whichever of its ports you use. The Function EV, NANO and Guition boards
+put the same port on a USB-C, and the PoE board on a full-size USB-A - see
+**Cables** above. To confirm it from the device rather than by eye, open
+`https://espkvm.local/api/v1/system/usbprobe`: an empty trace means the target
+has never enumerated the KVM at all, which is exactly what a cable to the serial
+port looks like.
+
+**The picture works but the keyboard does not.** The browser needs a real secure
+context for the input channel, and a self-signed certificate does not give one
+until it is trusted. Accepting the warning is enough to sign in and watch MJPEG,
+and not enough for anything on a WebSocket. Install the device's CA and reach it
+by name - Quick start says how.
+
+**The picture never starts and the console keeps saying it is reconnecting.**
+That is the same cause seen from the other side: H.264 arrives over a WebSocket
+and is decoded by WebCodecs, and neither runs without a trusted certificate. To
+tell it apart from a capture problem in one step, set **Settings -> Video ->
+Stream codec** to `mjpeg`, which is plain HTTP requests and needs none of that.
+If the picture appears, it is the certificate.
+
+**No signal, or the target only shows its screen once it has booted.** The KVM
+holds HDMI hotplug low until it has loaded its EDID and started capture, and
+that is a good ten seconds after it powers on. A machine that looks for a monitor
+during its own POST and finds none may decide it has no external screen and
+never enable the output. Power the KVM first, or replug HDMI once the KVM is up.
+If the picture arrives but the source refuses a mode, try a capped **EDID
+profile** in Settings -> Video.
+
+**A pin you picked in Settings does nothing.** It may not be a pin at all: the
+P4 has 55 GPIOs and a board brings out maybe half of them. **Settings -> Pins**
+draws the board's expansion header the way it is printed, with what holds each
+pin, so a free GPIO can be found where the wire actually goes. Some pins are also
+spoken for by hardware the firmware does not drive - on the Function EV, GPIO 45
+carries the microSD power net whether or not we use it.
+
+Flashing problems - the port not appearing, drivers, permissions - are in
+[docs/FLASHING.md](docs/FLASHING.md). Anything else: the device keeps its own log
+across a restart, and **Diagnostics -> Download the log** is the fastest way to
+show what happened.
+
 ## Building from source
 
 The web console lives in a submodule ([espkvm/console](https://github.com/espkvm/console)),
@@ -374,29 +437,33 @@ switching from an 800x600 firmware screen to a 1080p desktop is followed
 without intervention. Encoding is done by hardware - the JPEG engine, or the
 H.264 encoder with the PPA converting colour on the way in.
 
-Measured at 1080p on this hardware:
+Measured at 1080p, on both silicon revisions:
 
 | | MJPEG | H.264 |
 |---|---|---|
-| Frame rate | 20 fps | 5-7 fps |
+| Frame rate, Waveshare ESP32-P4-ETH (rev v1.3) | 20 fps | ~7 fps |
+| Frame rate, Function EV (rev v3.2) | 23 fps | 22-24 fps |
 | Idle screen | 0 kbit/s (unchanged frames are dropped) | 170 kbit/s |
 | Screen in motion | 8.5 Mbit/s | ~500 kbit/s |
+| Chip temperature at full load | 46 &deg;C (rev v1.3) | 34 &deg;C (rev v3.2) |
 
-H.264 is therefore not the faster option; it is the one that fits down a narrow
-link. Browsers decode it through WebCodecs, which they expose on secure pages
-only - over plain HTTP no browser can play it, however new. Turn HTTPS on and
-it works; the console says exactly that when it cannot.
+Browsers decode H.264 through WebCodecs, which they expose on secure pages only
+- over plain HTTP no browser can play it, however new. Turn HTTPS on and it
+works; the console says exactly that when it cannot.
 
-**Those are this board's numbers, not the ceiling.** The chip here is revision
-v1.3, and below revision 3.0 the CSI receiver cannot deliver YUV420 while the
-H.264 encoder refuses RGB - so every frame detours through the pixel
-accelerator to change colour space, which is 76 ms of the 145 ms a 1080p frame
-costs. Revision 3.0 and later removes that detour: the capture path can hand
-the encoder what it wants directly. That is untested here for want of the
-silicon, but it rests on a revision check in Espressif's own driver rather than
-on hope - see [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md). There is room
-on our side too: the conversion and the encode run one after the other in the
-same task where they could overlap.
+**The gap between those two rows is the silicon.** Below revision 3.0 the CSI
+receiver cannot deliver YUV420 while the H.264 encoder refuses RGB, so every
+frame detours through the pixel accelerator to change colour space - measured at
+~104 ms of the ~150 ms a 1080p frame costs. On revision 3.x the detour is gone:
+capture hands the encoder native YUV422 and it takes it as it is. That was a
+prediction resting on a revision check in Espressif's own driver, and it held
+when the board arrived - H.264 went from ~7 to 22-24 fps at 1080p, 28 fps at
+720p, as fast as MJPEG at a fraction of the bandwidth, and the chip runs cooler
+doing it. The measurements are in
+[docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
+
+On the older silicon the conversion and the encode now overlap rather than
+running one after the other, which is where its remaining headroom went.
 
 **Input.** A composite USB HID device: a boot-protocol keyboard that firmware
 screens understand, an absolute pointer so a click lands where it was aimed
@@ -424,16 +491,38 @@ explanation, rather than hidden or left to fail silently. `GET
 **Virtual media.** A disk image is presented to the target as a USB drive it can
 boot from - a rescue system, an installer, a live image. The console lists what
 is available and lets you pick which one the target sees, from two places at
-once. Images on a **microSD card** are served read-only: this board reads the
-card reliably but cannot write it at a useful speed, so the card is prepared in
-an ordinary reader (format it FAT32, up to 4 GB per file, a FAT32 limit). A small
-image can also live in the **device's own flash** - a 4 MB partition, enough for
+once. Whether images on a **microSD card** can be written depends on the chip:
+below revision 3.0 the SD controller reads the card reliably but its writes time
+out, so there the card is read-only and prepared in an ordinary reader (format it
+FAT32, up to 4 GB per file, a FAT32 limit). On rev 3.x silicon the card is
+writable and the console can upload to it. A small image can also live in the
+**device's own flash** - a 4 MB partition, enough for
 iPXE, memtest or a DOS floppy, and no card needed. Flash writes are reliable
 here, so that one can be uploaded from the browser (or written over the cable
 with `tools/fetch-rescue.sh`, which fetches netboot.xyz by default). The flash
 partition ships empty; adopting the partition table that carries it is a one-time
 full flash (the browser flasher does it), after which the image updates over the
 network.
+
+**Reading the screen.** When the target is in a character mode - a BIOS setup, a
+UEFI boot menu, memtest, a Linux console - the device reads the screen back as
+text, and the console lets it be selected with the mouse or copied whole. This
+is not OCR: a text screen is drawn by a character generator, so each cell is
+looked up in the font's shapes and either matches exactly or comes back marked
+unreadable - a `�`, never a guess and never a quiet blank. There is no
+"recognised with errors" to act on by mistake. The fonts that matter are known:
+the 8x16 one a legacy BIOS draws with, the slightly different 8x16 one a Linux
+console draws with, and the 8x19 one a UEFI console draws with. So a 720x400
+setup screen, a 1024x768 boot menu and a Linux virtual console all read. It
+costs one pass over the frame, only in character modes, and only once the
+picture has stopped moving; a firmware that paints its setup as a picture, with
+a proportional font, has no grid and is left alone.
+
+The same reading can be left running with nobody connected. Give the device a
+phrase to watch for and it keeps looking with the console closed - which is the
+state a KVM is bought for, since the machine that falls over does it at three in
+the morning. An alert is raised when the phrase appears and cleared when it
+goes; both edges reach the log, and Home Assistant if MQTT is on.
 
 **Security.** The device serves HTTPS with a certificate it issues itself on
 first boot, and asks for a password before it will do anything. The password is
@@ -454,8 +543,9 @@ vanished locks a device away exactly as a forgotten password does.
 and then encoding stops - but the keyboard, the mouse and the web interface keep
 running. A KVM that stops accepting keystrokes because it is warm has failed at
 the job it was bought for, at exactly the moment someone is using it to fix
-something. On this board it does not come up in practice: 1080p at full rate
-settles around 46 C in open air, against thresholds of 70 and 85.
+something. In practice it does not come up: 1080p at full rate settles
+around 46 C in open air on rev v1.3 and 34 C on rev v3.2, against thresholds of
+70 and 85 C.
 
 **Updates.** Two app slots and automatic rollback: an image that fails to come
 up returns the device to the one that worked - which matters on a device that
@@ -465,7 +555,7 @@ fetching, and the device never reaches out to the internet on its own.
 
 ## Interface
 
-A Vue 3 console served from the device as a single gzipped file of about 50 KB,
+A Vue 3 console served from the device as a single gzipped file of about 65 KB,
 with no external fonts, scripts or requests: the device has to work on a network
 with no way out.
 
@@ -478,15 +568,24 @@ Everything the console does is available over HTTP.
 | `GET /api/capabilities` | what this device can do, and why it cannot do the rest |
 | `GET /api/v1/settings`, `PUT` | settings, validated and applied as a whole |
 | `GET /api/v1/settings/schema` | title, range and help text for every setting |
-| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers |
+| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, and whether this mode can be read as text |
+| `GET /api/v1/screen/text` | the screen as characters when the target is in a text mode; 204 when it is showing a picture |
 | `GET /api/v1/system/usbprobe` | the target's USB enumeration fingerprint and the OS guessed from it |
 | `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active |
 | `POST /api/v1/storage/upload`, `/rescue`, `/delete` | manage the virtual-media images |
 | `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
 | `POST /api/v1/power/click`, `/hold`, `/reset` | ATX: tap power, hold power for a hard off, tap reset |
+| `GET /api/v1/video/frame.jpg` | one frame as a JPEG; 409 while H.264 is selected |
+| `POST /api/v1/hid/key`, `/type`, `/move`, `/click` | the keyboard and pointer, for automation. Off until the agent API is enabled in Settings &rarr; Security |
 | `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, Ethernet link, ATX power state |
+| `GET /api/v1/system/log` | the device's own log, as a file |
 | `POST /api/v1/system/update` | firmware image, written to the spare slot |
+| `POST /api/v1/system/boot-slot` | boot the other slot on the next restart |
 | `POST /api/v1/system/restart` | restart, for settings that need one |
+| `POST /api/v1/settings/reset` | put every setting back to its default |
+| `GET /api/v1/tls`, `PUT`/`DELETE /api/v1/tls/cert` | install your own certificate and key, or go back to the self-signed one |
+| `POST`/`GET /api/v1/wifi/scan` | start a scan, then read what it found (boards with an ESP32-C6) |
+| `GET /api/v1/pins` | the board's expansion header, and which GPIOs it leaves free |
 | `GET /api/v1/auth/session` | whether a login is required, and who is signed in |
 | `POST /api/v1/auth/login`, `/logout`, `/password` | the session, and changing the password |
 | `GET /stream` | MJPEG as `multipart/x-mixed-replace`; answers 409 while H.264 is selected |
@@ -503,12 +602,22 @@ components/
   kvm_hid/        composite USB HID
   kvm_storage/    microSD and on-flash rescue image, virtual media
   kvm_config/     settings registry and capability registry
+  kvm_screentext/ reading a text-mode screen back as characters
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
   kvm_net/        Ethernet, WiFi (station/AP + rescue hotspot, captive portal),
-                  IPv6, mDNS, Wake-on-LAN, WireGuard tunnel
+                  IPv6, mDNS, Wake-on-LAN, and the VPN clients (WireGuard,
+                  or Tailscale through third_party/microlink)
+  kvm_atx/        power and reset buttons, power-LED sensing
+  kvm_display/    the optional status screen (I2C OLED, round SPI LCD)
+  kvm_log/        the log kept in RTC memory across a restart
+  kvm_mqtt/       Home Assistant discovery and state
   kvm_board/      pin map
-web/              the console (Vue 3 + TypeScript + Vite)
-boards/           per-board build overlays (Waveshare, Function EV)
+  esp_tinyusb/    vendored, patched for the mass-storage path
+third_party/
+  microlink/      submodule: the native Tailscale client
+web/              the console (Vue 3 + TypeScript + Vite), a submodule
+boards/           per-board build overlays - Function EV, NANO, Guition, PoE,
+                  and the rev 3.x twins
 tools/            toolchain setup, EDID generation, hardware probes
 docs/             what the hardware actually does
 ```
@@ -520,6 +629,7 @@ docs/             what the hardware actually does
 - [Circuit Rocks](https://blog.circuit.rocks/esp-kvm-turns-an-esp32-p4-into-a-45-open-source-ip-kvm) - *ESP-KVM Turns an ESP32-P4 Into a $45 Open-Source IP KVM*
 - [Open Source For You](https://www.opensourceforu.com/2026/07/microcontroller-enables-remote-device-access/) - *Microcontroller Enables Remote Device Access*
 - [Solid State Bytes](https://ssbytes.org/p/a-raspberry-pi-that-boots-straight-into-ai-an-esp32-p4-kvm-and-more) - *A Raspberry Pi That Boots Straight Into AI, an ESP32-P4 KVM, and More*
+- [EdigE](http://edige.xyz/news/esp32-p4-hdmi-ip-kvm) - *An ESP32-P4 turned into a real IP-KVM with HDMI, H.264, USB HID and boot images* (in Russian, and it goes into the capture path and the frame budget rather than only the feature list)
 
 On video: **Wels** covered it in
 [5 Minutos de Miercoles #22](https://youtu.be/nw-8a1GmJLE?t=342), from 5:42.

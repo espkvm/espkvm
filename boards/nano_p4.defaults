@@ -88,3 +88,7 @@ CONFIG_KVM_DISP_MOSI_GPIO=5
 CONFIG_KVM_DISP_CS_GPIO=32
 CONFIG_KVM_DISP_DC_GPIO=33
 CONFIG_KVM_DISP_RST_GPIO=36
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_NANO=y

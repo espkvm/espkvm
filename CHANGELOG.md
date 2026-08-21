@@ -5,6 +5,73 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.28.0] - 2026-08-21
+
+### Added
+- **The device can watch the screen when nobody is.** Give it a phrase or two -
+  `no boot device`, `kernel panic` - and it reads the screen once a second with
+  the console closed, raising an alert the moment one of them appears and
+  clearing it when it goes. Both edges go in the log, and Home Assistant gets a
+  "Screen alert" sensor with the matched text, published within two seconds
+  rather than at the next state interval. Off by default; while it is off, and
+  whenever the target is not showing text, it costs nothing - the resolution is
+  checked before the frame is touched at all.
+- **EDID profiles that cap the target's resolution.** Alongside the full mode
+  list there are now `720p` and `1024x768`, which advertise everything up to that
+  and prefer it, in both halves of the EDID - the extension block is the usual
+  place a source looks for 1080p, so a cap that only trimmed the first block
+  would not be a cap at all. A smaller picture encodes faster and costs less bandwidth, which
+  on pre-3.0 silicon is the difference between 7 fps and something a person can
+  work in. Text modes stay on offer in every profile, so a BIOS still arrives as
+  text. This replaces the `custom` choice, which never did anything but fall back
+  to the full list - a device set to it comes up on `720p`, so check the setting
+  if you had picked it.
+- **The Pins tab shows the board's expansion header, not just a list of GPIOs.**
+  A GPIO number says nothing about where to put a wire, and half of the chip's
+  pins never reach a connector, so the tab now draws the header as it is printed
+  on the board - two columns, pin numbers down the middle where the board has
+  them - with what holds each pin. The old list of every usable GPIO is still
+  there, one click away, because it answers the other question: what is free.
+
+  Pinouts are in for the Waveshare ESP32-P4-ETH, PoE and NANO boards, the
+  Espressif Function EV and the Guition ESP32-P4-M3-Dev. They come from the
+  vendors' own diagrams, and the tab says so - check yours against the silkscreen
+  before wiring anything.
+
+- **The screen can be read back as text when the target is showing text.** A BIOS
+  setup, a UEFI boot menu, memtest, a Linux console: press Select and sweep the
+  mouse over the picture as if it were a page, or press Copy and take the whole
+  screen. Until now the only way to get a serial number or an error code off a
+  BIOS screen was to type it out by hand.
+
+  It is not OCR, and that is the point. A text screen is drawn by a character
+  generator - a fixed grid, a fixed bitmap per character - so each cell is looked
+  up in a table of the shapes the font has. Either a cell matches and the
+  character is certain, or it comes back as `�` and you can see exactly which
+  characters were not read; there is no "recognised with errors" to catch you out
+  later. It costs one pass over the frame, only in character modes, and only once
+  the picture has stopped moving - a firmware that paints its setup as a picture
+  has no grid and is left alone.
+
+  Three fonts are known: the 8x16 one a legacy BIOS draws with, the 8x16 one a
+  Linux console draws with - which is a different font, differing in five
+  printable characters including f and v - and the 8x19 one a UEFI console draws
+  with. So a 720x400 setup screen reads, and so do a 1024x768 UEFI boot menu and
+  a Linux virtual console, with the text area centred the way a firmware console
+  centres it.
+
+  Narrow screens are read as they come. A wide one - a UEFI console filling a
+  1080p display is 240 characters across - is read only while you are asking for
+  it, because looking at every settled 1080p frame on the off chance it is text
+  costs four times as much and would nearly always find a desktop. Press Select
+  or Copy and it reads that screen too; the first reading takes about a second,
+  because a picture has to hold still before it can be read.
+- **Three more layouts for pasting text: Czech, Ukrainian and Lithuanian.**
+  Pasting types text out as keystrokes, so it has to know where each character
+  sits on the target's keyboard. A character the chosen layout cannot type is
+  reported rather than guessed at. The tables are now checked on every push -
+  against each other, and against the X keyboard database.
+
 ## [0.27.1] - 2026-08-20
 
 ### Fixed

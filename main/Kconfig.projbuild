@@ -136,6 +136,32 @@ menu "ESP-KVM"
         comment "Defaults are for the Waveshare ESP32-P4-ETH."
         comment "Change these, and the Ethernet pins under Network, to port to another board."
 
+        choice KVM_BOARD
+            prompt "Which board this image is for"
+            default KVM_BOARD_WAVESHARE_ETH
+            help
+                Names the board and picks its expansion header layout, which is
+                what the console's Pins tab draws so an operator can see where a
+                wire actually goes. Everything else about a board is the pins
+                below; this only decides what to call it and which header it has.
+
+                A board whose header is not described here still works - the Pins
+                tab just falls back to listing every usable GPIO.
+
+            config KVM_BOARD_WAVESHARE_ETH
+                bool "Waveshare ESP32-P4-ETH"
+            config KVM_BOARD_WAVESHARE_POE
+                bool "Waveshare ESP32-P4-WIFI6-POE-ETH"
+            config KVM_BOARD_WAVESHARE_NANO
+                bool "Waveshare ESP32-P4-NANO"
+            config KVM_BOARD_GUITION
+                bool "Guition ESP32-P4-M3-Dev"
+            config KVM_BOARD_FUNCEV
+                bool "Espressif ESP32-P4 Function EV"
+            config KVM_BOARD_OTHER
+                bool "Something else"
+        endchoice
+
         config KVM_I2C_SDA_GPIO
             int "TC358743 I2C SDA"
             range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX

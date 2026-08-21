@@ -28,6 +28,9 @@ build.*/
 
 # ESP-IDF specific build outputs
 *.bin
+# ...except the character generator font the screen-text reader is built from:
+# it is source, not a build product.
+!components/kvm_screentext/fonts/*.bin
 *.elf
 *.map
 flasher_args.json # Generated in build directory
@@ -100,3 +103,6 @@ version.txt
 # Device CA certificates downloaded from a running unit (e.g. via /cert.pem) -
 # a per-device trust anchor, never part of the source tree.
 *-ca.pem
+
+# Local Claude Code settings (per-machine permissions, not project config)
+.claude/settings.local.json

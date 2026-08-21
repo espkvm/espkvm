@@ -17,3 +17,7 @@ CONFIG_ESP32P4_REV_MIN_300=y
 
 # Its own slug, so an update never swaps this device onto the slower build.
 CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-poe-rev3/manifest.json"
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_POE=y

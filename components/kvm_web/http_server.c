@@ -37,6 +37,8 @@
 #include "cJSON.h"
 
 #include "capture.h"
+#include "screentext.h"
+#include "screentext_store.h"
 #include "ethernet.h"
 #include "kvm_ipv6.h"
 #include "wifi.h"
@@ -45,6 +47,7 @@
 #include "kvm_ts.h"
 #include "kvm_wg.h"
 #include "kvm_auth.h"
+#include "kvm_board_header.h"
 #include "kvm_caps.h"
 #include "kvm_display.h"
 #include "kvm_log.h"
@@ -125,6 +128,40 @@ static void pins_add_reserved(cJSON *arr, int pin, const char *use)
 }
 
 /*
+ * One column of a header, top to bottom.
+ *
+ * A pin is either a GPIO (`gpio`, and the console already knows what holds it)
+ * or it is not (`label`: 3V3, GND, a co-processor's pin, NC). `note` carries
+ * whatever an operator has to know before putting a wire there.
+ */
+static void pins_add_column(cJSON *parent, const char *key, const kvm_board_pin_t *pins,
+                            uint8_t rows)
+{
+    if (!pins) {
+        return;
+    }
+    cJSON *arr = cJSON_AddArrayToObject(parent, key);
+    if (!arr) {
+        return;
+    }
+    for (uint8_t i = 0; i < rows; i++) {
+        cJSON *o = cJSON_CreateObject();
+        if (!o) {
+            return;
+        }
+        if (pins[i].gpio >= 0) {
+            cJSON_AddNumberToObject(o, "gpio", pins[i].gpio);
+        } else {
+            cJSON_AddStringToObject(o, "label", pins[i].label);
+        }
+        if (pins[i].note) {
+            cJSON_AddStringToObject(o, "note", pins[i].note);
+        }
+        cJSON_AddItemToArray(arr, o);
+    }
+}
+
+/*
  * The GPIO map the console needs for its pin pickers and the Pins tab: the usable
  * range, and which pins the board's fixed peripherals hold (with labels). Pins
  * assigned to editable settings are known to the console already (they are
@@ -193,9 +230,132 @@ static esp_err_t api_pins_get(httpd_req_t *req)
         pins_add_reserved(r, 45, "SD_PWRn (needs a resistor move to free)");
 #endif
     }
+
+    /*
+     * And where those GPIOs actually are. A GPIO number tells an operator
+     * nothing about where to put a wire, and half of them do not leave the
+     * package on any given board, so the console draws the expansion header the
+     * way it is printed - when the board is one we have a pinout for.
+     */
+    cJSON_AddStringToObject(root, "board", kvm_board_name());
+    size_t header_count = 0;
+    const kvm_board_header_t *headers = kvm_board_headers(&header_count);
+    if (headers) {
+        cJSON_AddBoolToObject(root, "headerVerified", kvm_board_header_verified());
+        cJSON *hs = cJSON_AddArrayToObject(root, "headers");
+        for (size_t i = 0; hs && i < header_count; i++) {
+            cJSON *h = cJSON_CreateObject();
+            if (!h) {
+                break;
+            }
+            cJSON_AddStringToObject(h, "name", headers[i].name);
+            cJSON_AddBoolToObject(h, "numbered", headers[i].numbered);
+            pins_add_column(h, "left", headers[i].left, headers[i].rows);
+            pins_add_column(h, "right", headers[i].right, headers[i].rows);
+            cJSON_AddItemToArray(hs, h);
+        }
+    }
+
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return send_json_owned(req, out);
+}
+
+/*
+ * GET /api/v1/screen/text - what the screen says, when it says it in text.
+ *
+ * Present only while the target is in a character mode and the picture has
+ * settled: a BIOS, a boot loader, a console. Everything else answers 204, which
+ * the console reads as "there is nothing to copy" rather than an error - it is
+ * the normal state of a machine that has finished booting.
+ *
+ * The grid comes with the reading so the console can lay a selectable text layer
+ * over the video without guessing where the cells are.
+ */
+static esp_err_t api_screen_text_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+
+    /* Asking is what unlocks a wide mode: the device reads narrow ones by
+     * itself, and a 1080p console only while somebody wants it. */
+    screentext_request();
+
+    /* A 240x68 grid is 33 KB and the text off it another 49; both are big,
+     * short-lived and never touched by an interrupt, so they belong in PSRAM
+     * rather than in the internal heap the TLS sessions live in. */
+    screentext_grid_t *grid = heap_caps_malloc(sizeof(*grid), MALLOC_CAP_SPIRAM);
+    if (!grid) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    uint32_t age_ms = 0;
+
+    /*
+     * Wait for the first reading of a mode nothing was reading a moment ago.
+     *
+     * A narrow mode is already being read every time the picture settles, so
+     * whatever is on file is current and there is nothing to wait for. A wide
+     * one was being skipped until the request above, so answering "no text"
+     * straight away would answer about a screen nobody had looked at - and the
+     * operator pressing Copy would be told there is nothing to copy while the
+     * scan they just triggered was still coming. One picture has to settle
+     * (300 ms) and be read, so wait about a second, then give up honestly.
+     */
+    kvm_video_status_t vs;
+    capture_status_get(&vs);
+    const bool wakes_on_ask = vs.signal && screentext_mode_supported(vs.hres, vs.vres) &&
+                              !screentext_mode_unprompted(vs.hres, vs.vres);
+    for (int waited = 0; !screentext_latest(grid, &age_ms); waited += 100) {
+        if (!wakes_on_ask || waited >= 1200) {
+            free(grid);
+            httpd_resp_set_status(req, "204 No Content");
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            return httpd_resp_send(req, NULL, 0);
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    /* Three bytes per cell is the worst case: the box-drawing characters a BIOS
+     * frames its panes with are three bytes of UTF-8 each. */
+    const size_t cap = (size_t)grid->cols * grid->rows * 3u + grid->rows + 1u;
+    char *text = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    if (!text) {
+        free(grid);
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    screentext_to_utf8(grid, text, cap);
+
+    cJSON *o = cJSON_CreateObject();
+    if (o) {
+        cJSON_AddNumberToObject(o, "cols", grid->cols);
+        cJSON_AddNumberToObject(o, "rows", grid->rows);
+        cJSON_AddNumberToObject(o, "cellWidth", grid->cell_w);
+        cJSON_AddNumberToObject(o, "cellHeight", grid->cell_h);
+        /* Where the grid sits in the frame, and how big that frame was. A UEFI
+         * console centres its text rather than filling the screen, so an overlay
+         * that assumes the grid starts at 0,0 is off by the margin. */
+        cJSON_AddNumberToObject(o, "originX", grid->x0);
+        cJSON_AddNumberToObject(o, "originY", grid->y0);
+        cJSON_AddNumberToObject(o, "width", grid->width);
+        cJSON_AddNumberToObject(o, "height", grid->height);
+        cJSON_AddNumberToObject(o, "confidence", grid->confidence);
+        cJSON_AddNumberToObject(o, "ageMs", (double)age_ms);
+        cJSON_AddStringToObject(o, "text", text);
+        /* What the watch found on this screen, if it was asked to look. */
+        char alert[SCREENTEXT_ALERT_MAX];
+        if (screentext_alert_get(alert, sizeof(alert), NULL)) {
+            cJSON_AddStringToObject(o, "alert", alert);
+        }
+    }
+    free(text);
+    free(grid);
+    if (!o) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    char *json = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    return send_json_owned(req, json);
 }
 
 static esp_err_t api_settings_get(httpd_req_t *req)
@@ -270,13 +430,23 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
         break;
     }
 
-    char body[320];
+    /* Whether this mode could be read as characters at all - the same test the
+     * scanner itself applies, so the console never has to keep its own copy of
+     * the rule. It kept one, and the two drifted: the console still recognised
+     * only 80 columns of 8x16 long after the scanner learned the 128-column
+     * UEFI console, and greyed out Select and Copy on a screen the device could
+     * read perfectly well. This says nothing about whether text is on file now
+     * - that is what /api/v1/screen/text answers - only that asking is worth it. */
+    const bool text_mode = st.signal && screentext_mode_supported(st.hres, st.vres);
+
+    char body[384];
     int n = snprintf(body, sizeof(body),
                      "{\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"fps\":%u.%02u,\"skippedFps\":%u.%02u,\"kbps\":%u,"
                      "\"encodeUs\":%u,\"ppaUs\":%u,\"encoderBusyPct\":%u,"
                      "\"modeChanges\":%u,\"sysStatus\":%u,\"viewers\":%d,"
-                     "\"wsClients\":%u,\"imgClients\":%d,\"codec\":\"%s\"}",
+                     "\"wsClients\":%u,\"imgClients\":%d,\"codec\":\"%s\","
+                     "\"textMode\":%s}",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
                      st.interlaced ? "true" : "false", (unsigned)(st.fps_x100 / 100u),
                      (unsigned)(st.fps_x100 % 100u), (unsigned)(st.skipped_fps_x100 / 100u),
@@ -284,7 +454,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)st.encode_us, (unsigned)st.ppa_us, (unsigned)st.encoder_busy_pct,
                      (unsigned)st.mode_changes, (unsigned)st.sys_status,
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
-                     s_stream_workers, codec);
+                     s_stream_workers, codec, text_mode ? "true" : "false");
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
     }
@@ -2958,6 +3128,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/storage/rescue", .method = HTTP_POST, .handler = api_storage_rescue_post},
         /* Agent / CUA surface: a still frame and HID primitives over plain REST. */
         {.uri = "/api/v1/video/frame.jpg", .method = HTTP_GET, .handler = api_video_frame_get},
+        {.uri = "/api/v1/screen/text", .method = HTTP_GET, .handler = api_screen_text_get},
         {.uri = "/api/v1/hid/move", .method = HTTP_POST, .handler = api_hid_move_post},
         {.uri = "/api/v1/hid/click", .method = HTTP_POST, .handler = api_hid_click_post},
         {.uri = "/api/v1/hid/key", .method = HTTP_POST, .handler = api_hid_key_post},

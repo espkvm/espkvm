@@ -29,6 +29,38 @@ permissions:
   contents: read
 
 jobs:
+  # The screen-text scanner is plain C over a pixel buffer, so its tests run
+  # here in a second rather than needing a board and a target sitting in its
+  # BIOS. It is a table lookup against a font: exactly the kind of thing that
+  # breaks quietly, and the kind that a host test catches for free.
+  screentext:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: components/kvm_screentext/test/run.sh
+
+  # The paste tables: self-consistent (no two characters on one key), and right
+  # (every character where the real layout puts it). Both are the kind of
+  # mistake that types the wrong character into somebody's BIOS and reports
+  # nothing, so they are checked on every push rather than by eye.
+  layouts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: web
+      - run: node tools/check_layouts.mjs
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xkb-data
+        # --require-xkb: without it the script skips itself where the database is
+        # missing, which is right on a developer's machine and useless here - a
+        # check that silently passes is worse than no check.
+      - run: python3 tools/check_layouts_xkb.py --require-xkb
+
   build:
     runs-on: ubuntu-latest
     strategy:

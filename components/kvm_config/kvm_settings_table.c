@@ -17,7 +17,7 @@
 #define ENUM_MAX(arr) ((int)(sizeof(arr) / sizeof((arr)[0]) - 1))
 
 static const char *const s_codec_choices[] = {"mjpeg", "h264"};
-static const char *const s_edid_choices[] = {"full", "1080p30", "custom"};
+static const char *const s_edid_choices[] = {"full", "1080p30", "720p", "1024x768"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
 static const char *const s_engage_choices[] = {"click", "hover"};
 /* Must match the layout ids in web/src/layouts.ts. New ones go on the end:
@@ -76,11 +76,34 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "edid_prof", .section = "video", .type = KVM_VT_ENUM,
         .title = "EDID profile",
-        .help = "What the capture card claims to be. \"full\" advertises the common "
-                "modes from 640x480 up; switch to \"1080p30\" if a source refuses to "
-                "output a picture.",
+        .help = "What this device claims to be, as a monitor - the target picks its "
+                "output mode from what is offered here. \"full\" advertises the common "
+                "modes from 640x480 up to 1920x1080@30. \"720p\" and \"1024x768\" stop "
+                "lower, which is often what you want: a smaller picture encodes faster "
+                "and costs less bandwidth. \"1080p30\" offers that one mode alone, for a "
+                "source that refuses a list. Text modes stay on offer either way, so a "
+                "BIOS still comes through as text.",
         .min = 0, .max = ENUM_MAX(s_edid_choices), .def = 0, .choices = s_edid_choices,
         .requires_cap = KVM_CAP_VIDEO, .flags = KVM_SF_REBOOT,
+    },
+    {
+        .key = "scr_watch", .section = "video", .type = KVM_VT_BOOL,
+        .title = "Watch the screen for words",
+        .help = "Read a text screen even when nobody is looking, and raise an alert "
+                "when it says one of the phrases below. This is the case a KVM is "
+                "bought for - a machine that fell over at three in the morning - so it "
+                "keeps working with the console closed. Costs one pass over the frame "
+                "a second, and only while the target is showing text.",
+        .def = 0, .requires_cap = KVM_CAP_VIDEO,
+    },
+    {
+        .key = "scr_match", .section = "video", .type = KVM_VT_STR,
+        .title = "Phrases to watch for",
+        .help = "Comma-separated, matched without regard to case, anywhere on a line - "
+                "for example: no boot device, kernel panic, press F1 to continue. An "
+                "alert is raised the moment one appears and cleared when it goes; the "
+                "log records both, and Home Assistant gets a sensor if MQTT is on.",
+        .def_str = "", .max_len = 127, .requires_cap = KVM_CAP_VIDEO,
     },
 
     /* ---- input ---------------------------------------------------------- */

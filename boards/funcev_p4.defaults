@@ -77,3 +77,7 @@ CONFIG_KVM_GC9A01_SPI_HOST=2
 # is readable without a UART adapter - and GPIO 37/38 that the UART console would
 # use become free pins.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_FUNCEV=y

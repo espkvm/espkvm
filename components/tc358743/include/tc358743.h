@@ -26,8 +26,10 @@ typedef struct tc358743 tc358743_t;
 
 /** Which mode list the bridge advertises to the source over DDC. */
 typedef enum {
-    TC358743_EDID_FULL = 0,    /**< 640x480 up to 1920x1080@30 */
-    TC358743_EDID_1080P30 = 1, /**< single mode, for sources that reject the full list */
+    TC358743_EDID_FULL = 0,     /**< 640x480 up to 1920x1080@30 */
+    TC358743_EDID_1080P30 = 1,  /**< single mode, for sources that reject the full list */
+    TC358743_EDID_720P = 2,     /**< the same list without 1080p, 1280x720 preferred */
+    TC358743_EDID_1024X768 = 3, /**< everything up to 1024x768, which is preferred */
 } tc358743_edid_profile_t;
 
 /** Input timing as measured by the bridge, plus the link state that qualifies it. */

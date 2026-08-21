@@ -9,6 +9,7 @@ idf_component_register(
         esp_https_server
     PRIV_REQUIRES
         video_pipeline
+        kvm_screentext
         kvm_hid
         kvm_config
         kvm_storage

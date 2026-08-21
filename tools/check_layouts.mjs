@@ -1,5 +1,5 @@
 /*
- * Validate the paste layout tables in web/src/layouts.js.
+ * Validate the paste layout tables in web/src/layouts.ts.
  *
  *     node tools/check_layouts.mjs
  *
@@ -9,7 +9,30 @@
  * across 33 Cyrillic letters is exactly the kind of review that misses one.
  */
 
-import { LAYOUTS } from "../web/src/layouts.js";
+/* The console is TypeScript, so the table is compiled to a temporary module
+   first. esbuild comes with the console's own dependencies (npm ci in web/). */
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const out = mkdtempSync(join(tmpdir(), "espkvm-layouts-"));
+const bundle = join(out, "layouts.mjs");
+try {
+  execFileSync(
+    join(here, "..", "web", "node_modules", ".bin", "esbuild"),
+    [join(here, "..", "web", "src", "layouts.ts"), "--format=esm", `--outfile=${bundle}`,
+     "--log-level=error"],
+    { stdio: "inherit" },
+  );
+} catch {
+  console.error("could not build web/src/layouts.ts - run `npm ci` in web/ first");
+  process.exit(2);
+}
+const { LAYOUTS } = await import(pathToFileURL(bundle).href);
+rmSync(out, { recursive: true, force: true });
 
 const RU_ALPHABET = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
 const EN_ALPHABET = "abcdefghijklmnopqrstuvwxyz";
@@ -74,6 +97,14 @@ function checkRanges(id, map) {
       fail(`${id}: ${JSON.stringify(ch)} has modifier ${entry.mod}`);
     }
   }
+}
+
+/* Machine-readable dump, for check_layouts_xkb.py. */
+if (process.argv.includes("--json")) {
+  const out = {};
+  for (const [id, layout] of Object.entries(LAYOUTS)) out[id] = layout.map;
+  process.stdout.write(JSON.stringify(out));
+  process.exit(0);
 }
 
 for (const [id, layout] of Object.entries(LAYOUTS)) {

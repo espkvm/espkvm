@@ -652,10 +652,25 @@ static void hpd_set(tc358743_t *d, bool on)
  */
 static void edid_write_builtin(tc358743_t *d)
 {
-    const uint8_t *bin = (d->edid_profile == TC358743_EDID_1080P30) ? tc358743_edid_1080p30
-                                                                   : tc358743_edid_full;
-    ESP_LOGI(TAG, "EDID profile: %s",
-             (d->edid_profile == TC358743_EDID_1080P30) ? "1080p30 only" : "full mode list");
+    const uint8_t *bin = tc358743_edid_full;
+    const char *what = "full mode list";
+    switch (d->edid_profile) {
+    case TC358743_EDID_1080P30:
+        bin = tc358743_edid_1080p30;
+        what = "1080p30 only";
+        break;
+    case TC358743_EDID_720P:
+        bin = tc358743_edid_720p;
+        what = "up to 720p";
+        break;
+    case TC358743_EDID_1024X768:
+        bin = tc358743_edid_1024x768;
+        what = "up to 1024x768";
+        break;
+    default:
+        break;
+    }
+    ESP_LOGI(TAG, "EDID profile: %s", what);
     const uint16_t edid_len = TC358743_EDID_TOTAL_LEN;
     wr8(d, EDID_LEN1, edid_len & 0xff);
     wr8(d, EDID_LEN2, edid_len >> 8);

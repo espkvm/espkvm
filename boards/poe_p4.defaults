@@ -67,3 +67,7 @@ CONFIG_KVM_SD_PWR_GPIO=45
 # --- console ----------------------------------------------------------------
 # USB-C carries UART for flashing, and the serial-JTAG is the console.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_POE=y

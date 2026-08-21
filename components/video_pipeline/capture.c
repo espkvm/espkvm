@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 
 #include "capture_priv.h"
+#include "screentext_store.h"
 
 /*
  * Telemetry lives here rather than in the capture task so the HTTP layer can
@@ -163,6 +164,11 @@ static void camera_task(void *arg)
 
 void capture_start(void)
 {
+    /* Before the task starts: the store is written from the capture task and
+     * cleared from the monitor task, so it cannot be built lazily by whichever
+     * gets there first. */
+    screentext_store_init();
+    capture_screentext_init();
     capture_mjpeg_bind_settings();
     const uint32_t cam_stack = 10240;
     xTaskCreatePinnedToCore(camera_task, "cam", cam_stack, NULL, 5, NULL, 0);
