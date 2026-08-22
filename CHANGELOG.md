@@ -5,6 +5,18 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.29.0] - 2026-08-22
+
+### Added
+- **You can watch an update happen now.** It takes over the console: the steps,
+  the one it is on, and a fan of rays filling as it goes. Writing the image and
+  restarting have nothing to measure, so those fill against how long they
+  usually take and then turn into a sweep instead of sitting full. Restarting
+  from Settings and switching the network show the same.
+- **And the console says which version came back.** A restart ends the session,
+  so an update that rolled back used to look exactly like one that worked. Now
+  it says "came back on 0.28.0, not 0.29.0". Asked for by @petrn (#23).
+
 ## [0.28.1] - 2026-08-22
 
 ### Fixed

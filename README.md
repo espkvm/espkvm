@@ -561,7 +561,7 @@ fetching - the device never reaches the internet on its own.
 
 ## Interface
 
-A Vue 3 console served from the device as a single gzipped file of about 65 KB,
+A Vue 3 console served from the device as a single gzipped file of about 70 KB,
 with no external fonts, scripts or requests: the device has to work on a network
 with no way out.
 
