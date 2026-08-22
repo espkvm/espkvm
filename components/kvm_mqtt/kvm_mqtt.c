@@ -137,14 +137,27 @@ static void build_state(char *b, size_t n)
              uptime, psram_kb, alerting ? "ON" : "OFF", alert_json);
 }
 
+/*
+ * The state payload does not go on the stack.
+ *
+ * It is published from the esp_timer task, which runs on about 3.5 KB, and the
+ * payload grew to 576 bytes when the screen alert joined it - on top of what
+ * build_state() already needs for the alert and its escaped copy. A state
+ * message is one at a time anyway, so it lives in one static buffer under the
+ * lock that already serialises publishing.
+ */
 static void publish_state(void)
 {
     if (!s_connected) {
         return;
     }
-    char body[576];
+    static char body[576];
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
     build_state(body, sizeof(body));
-    pub(s_state_topic, body, 1);
+    if (s_client) {
+        esp_mqtt_client_publish(s_client, s_state_topic, body, 0, 1, 1);
+    }
+    xSemaphoreGive(s_mtx);
 }
 
 /*

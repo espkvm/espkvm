@@ -5,6 +5,25 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.28.1] - 2026-08-22
+
+### Fixed
+- **An update that starts and then dies no longer leaves a device you cannot
+  reach.** The bootloader can undo an update that never comes up, but that
+  protection ends the moment the new image confirms itself - which it does as
+  soon as the console answers, because from there it can be re-flashed. Anything
+  the firmware starts after that point was outside it, so a crash in, say, the
+  MQTT or capture path left a confirmed image failing over and over, and
+  power-cycling changed nothing: every boot failed the same way.
+
+  The device now counts crashes that never got anywhere. Four in a row without
+  once staying up for a minute, and it starts the other slot instead. Presses of
+  the reset button and power cuts do not count - only real crashes - so nobody
+  gets a downgrade for being impatient. Reported by @petrn (#22).
+- **The MQTT state payload no longer sits on the timer task's stack.** It grew to
+  576 bytes in 0.28.0 when the screen alert joined it, on a task that runs on
+  about 3.5 KB. It lives in one static buffer now.
+
 ## [0.28.0] - 2026-08-21
 
 ### Added

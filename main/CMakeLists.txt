@@ -14,4 +14,5 @@ idf_component_register(
         kvm_storage
         kvm_display
         app_update
+        esp_timer
 )

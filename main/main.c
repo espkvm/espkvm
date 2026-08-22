@@ -7,9 +7,11 @@
 #include <string.h>
 #include <strings.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 #include "capture.h"
@@ -297,12 +299,109 @@ static void log_boot_reason(void)
              state_name);
 }
 
+/*
+ * The last defence against an image that starts and then dies.
+ *
+ * The bootloader's own rollback covers the window before an update confirms
+ * itself, and confirm_ota_image() closes that window as soon as the web server
+ * answers - deliberately, because by then the device can be reached and
+ * re-flashed. Everything the firmware starts after that point (USB, capture,
+ * MQTT, the display) is therefore outside rollback's reach: a crash there leaves
+ * a confirmed image failing over and over, and no amount of power-cycling helps,
+ * because every boot fails the same way.
+ *
+ * So count the crashes that never got anywhere. The counter lives in RTC memory,
+ * which a reset - including a panic - runs straight past, and which comes up as
+ * noise after a power cut, hence the magic word. Reach BOOT_GUARD_TRIES without
+ * once staying up for BOOT_GUARD_HEALTHY_MS, and the other slot gets a turn.
+ *
+ * It swaps once. If the other slot is no better, swapping back and forth would
+ * only hide the fault behind an endless reboot; better to sit still in a state
+ * someone can read a log from.
+ */
+#define BOOT_GUARD_MAGIC 0x42473031u /* "BG01" */
+#define BOOT_GUARD_TRIES 4
+#define BOOT_GUARD_HEALTHY_MS 60000
+
+static RTC_NOINIT_ATTR struct {
+    uint32_t magic;
+    uint8_t tries;   /* boots since the last one that stayed up */
+    uint8_t swapped; /* has this guard already handed over to the other slot? */
+} s_boot_guard;
+
+static void boot_guard_healthy(void *arg)
+{
+    (void)arg;
+    if (s_boot_guard.tries || s_boot_guard.swapped) {
+        ESP_LOGI(TAG, "boot guard: this image is up and staying up");
+    }
+    s_boot_guard.tries = 0;
+    s_boot_guard.swapped = 0;
+}
+
+static void boot_guard_check(void)
+{
+    if (s_boot_guard.magic != BOOT_GUARD_MAGIC) {
+        s_boot_guard.magic = BOOT_GUARD_MAGIC;
+        s_boot_guard.tries = 0;
+        s_boot_guard.swapped = 0;
+    }
+
+    /*
+     * Only a crash counts against the image.
+     *
+     * Someone standing at the device with a finger on the reset button is not
+     * evidence of anything, and four impatient presses must never hand them a
+     * downgrade they did not ask for. A brownout is the supply's fault, not the
+     * firmware's, and the restart this guard performs itself is a software one.
+     */
+    switch (esp_reset_reason()) {
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+        s_boot_guard.tries++;
+        break;
+    default:
+        s_boot_guard.tries = 0;
+        break;
+    }
+
+    if (s_boot_guard.tries >= BOOT_GUARD_TRIES && !s_boot_guard.swapped) {
+        const esp_partition_t *other = esp_ota_get_next_update_partition(NULL);
+        esp_ota_img_states_t st = ESP_OTA_IMG_UNDEFINED;
+        if (other && esp_ota_get_state_partition(other, &st) == ESP_OK &&
+            st != ESP_OTA_IMG_INVALID && st != ESP_OTA_IMG_ABORTED &&
+            esp_ota_set_boot_partition(other) == ESP_OK) {
+            s_boot_guard.swapped = 1;
+            s_boot_guard.tries = 0;
+            ESP_LOGE(TAG, "boot guard: %u boots got nowhere - starting %s instead",
+                     (unsigned)BOOT_GUARD_TRIES, other->label);
+            esp_restart();
+        }
+        ESP_LOGE(TAG, "boot guard: %u boots got nowhere and there is no other image to try",
+                 (unsigned)BOOT_GUARD_TRIES);
+    }
+
+    /* Staying up is what counts as working - not reaching any particular line of
+       this file, because the fault may be in something started much later. */
+    const esp_timer_create_args_t args = {
+        .callback = boot_guard_healthy,
+        .name = "boot_guard",
+    };
+    static esp_timer_handle_t s_healthy_timer; /* one per boot, kept, never freed */
+    if (esp_timer_create(&args, &s_healthy_timer) == ESP_OK) {
+        esp_timer_start_once(s_healthy_timer, (uint64_t)BOOT_GUARD_HEALTHY_MS * 1000);
+    }
+}
+
 void app_main(void)
 {
     /* First, so everything below is captured. What the bootloader and the ROM
      * printed before this is already gone - it exists only on the wire. */
     kvm_log_init();
     log_boot_reason();
+    boot_guard_check();
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

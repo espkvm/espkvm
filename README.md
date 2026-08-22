@@ -552,7 +552,9 @@ around 46 C in open air on rev v1.3 and 34 C on rev v3.2, against thresholds of
 70 and 85 C.
 
 **Updates.** Two app slots, with automatic rollback: an image that fails to come
-up puts the device back on the one that worked. That matters here, because this
+up puts the device back on the one that worked. This also holds later, once the
+new image has been accepted: four crashes in a row without one boot staying up,
+and the device starts the other slot by itself. That matters here, because this
 is often the only way to reach the machine it is attached to. The console can
 check for a published build and install it in one click. The browser does the
 fetching - the device never reaches the internet on its own.
