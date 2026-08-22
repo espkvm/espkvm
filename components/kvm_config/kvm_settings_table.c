@@ -26,8 +26,15 @@ static const char *const s_layout_choices[] = {"en_us", "ru_ru", "cs_cz", "uk_ua
 static const char *const s_media_choices[] = {"auto", "cdrom", "disk"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
 static const char *const s_side_choices[] = {"left", "right"};
-/* Must match the driver names in kvm_display.c's driver table. */
-static const char *const s_display_choices[] = {"ssd1306", "sh1106", "gc9a01"};
+/* One line per panel the firmware can drive, controller and size together.
+   Order must match k_panels[] in components/kvm_display/kvm_panels.c: the first
+   three keep the values devices already have stored. */
+static const char *const s_display_choices[] = {
+    "SSD1306 128x64", "SH1106 128x64", "GC9A01 240x240",
+    "SSD1306 128x32", "SSD1306 96x16", "SSD1306 72x40",
+    "SSD1306 64x48",  "SSD1306 64x32", "SH1106 128x32",
+    "SH1106 96x16",   "SH1106 64x48",
+};
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap"};
@@ -640,10 +647,14 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "disp_type", .section = "display", .type = KVM_VT_ENUM,
-        .title = "Display type",
-        .help = "Which panel is wired. SSD1306/SH1106 are 128x64 I2C OLEDs (pick SH1106 "
-                "if the image is shifted by two pixels or wraps). GC9A01 is a 240x240 "
-                "round colour SPI LCD, e.g. the Waveshare 1.28\" module.",
+        .title = "Panel",
+        .help = "Which panel is wired, controller and size together. SSD1306 and SH1106 "
+                "are I2C OLEDs - pick SH1106 if the image is shifted by two pixels or "
+                "wraps. GC9A01 is a round colour SPI LCD, e.g. the Waveshare 1.28\" "
+                "module. None of this can be detected: one chip drives every size and "
+                "reports none of it. A wrong size shows the picture squeezed into part "
+                "of the glass, or every other row missing. Shorter panels show fewer "
+                "status lines.",
         .min = 0, .max = ENUM_MAX(s_display_choices), .def = 0, .choices = s_display_choices, .requires_cap = -1,
     },
     /* GC9A01 SPI pins (the I2C OLEDs need none - they share the capture bus).

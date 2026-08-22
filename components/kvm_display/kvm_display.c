@@ -28,6 +28,7 @@
 #include "kvm_caps.h"
 #include "kvm_display_driver.h"
 #include "kvm_ipv6.h"
+#include "kvm_panels.h"
 #include "kvm_settings.h"
 #include "kvm_thermal.h"
 #include "kvm_ts.h"
@@ -37,8 +38,8 @@
 
 #if CONFIG_KVM_ENABLE_DISPLAY
 
-/* The panels the firmware knows how to drive. Add a driver's extern here and a
- * matching "disp_type" choice to make it selectable. */
+/* The drivers, indexed by kvm_panel_drv_t. A new panel needs a driver here, an
+ * entry in k_panels[] and a matching "disp_type" choice. */
 extern const kvm_display_driver_t kvm_display_ssd1306;
 extern const kvm_display_driver_t kvm_display_sh1106;
 extern const kvm_display_driver_t kvm_display_gc9a01;
@@ -129,15 +130,6 @@ static void take_notice(kvm_display_status_t *st)
         st->notice_pct = s_notice.pct;
     }
     xSemaphoreGive(s_notice_lock);
-}
-
-static const kvm_display_driver_t *pick_driver(void)
-{
-    /* disp_type is an enum; its value is the choice index, and the choices are
-     * kept in the same order as this driver table (see the settings table). */
-    const size_t n = sizeof(s_drivers) / sizeof(s_drivers[0]);
-    const int idx = (int)kvm_setting_int("disp_type");
-    return (idx >= 0 && (size_t)idx < n) ? s_drivers[idx] : s_drivers[0];
 }
 
 /*
@@ -252,16 +244,18 @@ static void gather(kvm_display_status_t *st)
 static void display_task(void *arg)
 {
     (void)arg;
+    const kvm_panel_t *panel = NULL;
     const kvm_display_driver_t *drv = NULL;
     void *ctx = NULL;
     int fails = 0;
 
     for (;;) {
         const bool want = kvm_setting_bool("disp_enable");
-        const kvm_display_driver_t *sel = pick_driver();
+        const kvm_panel_t *sel = kvm_panel_selected();
 
-        /* Drop the panel if switched off or the chosen driver changed. */
-        if (ctx && (!want || sel != drv)) {
+        /* Drop the panel if switched off or another one was picked. Compare
+           panels, not drivers: a new size needs re-initialising too. */
+        if (ctx && (!want || sel != panel)) {
             drv->detach(ctx);
             ctx = NULL;
         }
@@ -269,11 +263,13 @@ static void display_task(void *arg)
             if (drv) {
                 kvm_cap_report(KVM_CAP_DISPLAY, false, "switched off in settings");
                 drv = NULL;
+                panel = NULL;
             }
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
-        drv = sel;
+        panel = sel;
+        drv = s_drivers[sel->drv];
 
         if (!ctx) {
             esp_err_t err = drv->attach(&ctx);

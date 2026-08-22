@@ -5,6 +5,27 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.30.0] - 2026-08-22
+
+### Added
+- **The status OLED no longer has to be 128x64.** SSD1306 panels also work as
+  128x32, 96x16, 72x40, 64x48 and 64x32, and SH1106 as 128x32, 96x16 and 64x48.
+  The display setting lists panels by controller and size together, so pick the
+  line that matches yours: the same chip drives every size and reports none of
+  it, so this is the one thing that cannot be detected. Devices already set up
+  keep the panel they had.
+
+  A shorter panel simply shows fewer lines, and it drops the least useful ones
+  first - the address stays, the uptime goes. A line too long for the glass now
+  steps along a character at a time rather than being cut off, and the screen
+  waits for it before moving on - a clipped address looks like a real one, which
+  is worse than a slow one.
+
+- **The status screens got a proper header.** The screen's name and icon now sit
+  in a reversed bar, with a dot for each of the three screens so it is clear
+  which one is showing and how many there are. On the health screen the readings
+  line up in a column beside their bars.
+
 ## [0.29.0] - 2026-08-22
 
 ### Added

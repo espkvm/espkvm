@@ -66,7 +66,7 @@ Useful for what it does today, and honest about the rest.
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; verified on the ESP32-P4 Function EV. Also built for the NANO, Guition and PoE boards, which carry the same co-processor; the Waveshare ESP32-P4-ETH has no radio at all. One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
-| Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306/SH1106, auto-detected on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
+| Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306 in six sizes, SH1106 in four, found on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
 | VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
 | HDMI audio | not implemented |
@@ -231,7 +231,7 @@ power LED without a direct electrical connection. Wiring is in
 
 <table>
 <tr>
-<td width="50%"><img src="docs/SSD1306.jpg" alt="SSD1306/SH1106 128x64 I2C OLED module"></td>
+<td width="50%"><img src="docs/SSD1306.jpg" alt="SSD1306/SH1106 I2C OLED module"></td>
 <td width="50%"><img src="docs/GC9A01.webp" alt="GC9A01 240x240 round colour SPI LCD module"></td>
 </tr>
 <tr>
@@ -239,10 +239,17 @@ power LED without a direct electrical connection. Wiring is in
 
 **I2C OLED (SSD1306 / SH1106)**
 
-A 0.96&Prime; 128&times;64 mono OLED on four wires (VCC, GND, SCL, SDA). It shares
-the capture chip's I2C bus, needs no pins of its own, and is auto-detected. In
-hotspot mode it prints the network name and its password, so a phone can join
-from what is on the glass.
+A mono OLED on four wires (VCC, GND, SCL, SDA). It shares the capture chip's I2C
+bus and needs no pins of its own. SSD1306 works as 128&times;64, 128&times;32,
+96&times;16, 72&times;40, 64&times;48 and 64&times;32; SH1106 as 128&times;64,
+128&times;32, 96&times;16 and 64&times;48. Under Settings &rarr; Display you pick
+the panel by controller and size in one list, because these controllers cannot
+be asked how big the glass is. The shorter the panel, the fewer status
+lines it shows, and the address is the line it keeps. A line that does not fit
+the width steps along a character at a time, and the screen waits until it has
+been read to the end. In hotspot mode it prints
+the network name and its password, so a phone can join from what is on the
+glass.
 
 </td>
 <td valign="top">

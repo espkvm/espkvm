@@ -13,7 +13,7 @@
  * To add a display:
  *   1. create drivers/<name>/<name>.c that defines a kvm_display_driver_t and
  *      implements attach() / render() / detach();
- *   2. add its extern to the drivers table in kvm_display.c and to the "oled_chip"
+ *   2. add its extern to the drivers table in kvm_display.c and to the "disp_type"
  *      setting's choices.
  * Monochrome I2C OLEDs can reuse drivers/mono_oled.* for the framebuffer, font,
  * layout and bus, so such a driver is only its init sequence and column offset.
@@ -111,7 +111,7 @@ typedef struct {
  * paginates or lays anything out.
  */
 typedef struct {
-    const char *name;  /**< selector value (matches an "oled_chip" choice) + log tag */
+    const char *name;  /**< selector value (matches a "disp_type" choice) + log tag */
     const char *label; /**< human-readable name */
     /**
      * Detect and bring the panel up. Return ESP_ERR_NOT_FOUND when the panel is
