@@ -79,16 +79,16 @@ What is coming next is in the [roadmap](ROADMAP.md).
 <p align="center"><em>The device in Home Assistant &mdash; every value reported live over MQTT, discovered automatically.</em></p>
 
 **Still: do not put this on the public internet.** There is a login now, and
-TLS, but nothing here has been through a security review, and a device that
-holds a keyboard on someone else's machine is worth more to an attacker than
-most things on a network. Keep it on a network you trust, or reach it over a
-VPN &mdash; it has both a built-in WireGuard client and native Tailscale
-(Settings &rarr; VPN; enable one). Tailscale needs no port-forward, gateway or
-VPS: the device joins your tailnet directly and is reachable at its 100.x
-address (or MagicDNS name) from anywhere, with its TLS certificate valid over
-the tailnet, and it relays through the DERP region nearest to it rather than a
-fixed one. WireGuard is a split-tunnel client that generates its own key on the
-device and shows the matching public key in the VPN tab to register on your hub.
+TLS. But nothing here has been through a security review, and a device that
+holds the keyboard of someone else's machine is worth attacking. Keep it on a
+network you trust, or reach it over a VPN. It has two built in, in Settings
+&rarr; VPN.
+
+Tailscale needs no port forward, no gateway and no VPS: the device joins your
+tailnet and answers at its 100.x address, or its MagicDNS name, from anywhere.
+Its certificate is valid there too. WireGuard is a split tunnel - it makes its
+own key on the device and shows the public half in the VPN tab, to register on
+your hub.
 
 ## Hardware
 
@@ -280,12 +280,14 @@ The NANO pins come from [@DaveDavenport](https://github.com/DaveDavenport), who
 tested them.
 
 **Cables:** a 15-pin CSI ribbon between the two boards, HDMI from the target,
-and a cable from the board's USB 2.0 OTG-HS port to the target. Which connector
-that is depends on the board: on the Waveshare ESP32-P4-ETH the OTG-HS is on the
-**MX1.25 header**, not on a USB socket, so it needs an MX1.25-to-USB-A cable; the
-Function EV, NANO and Guition boards put it on a USB-C port, and the PoE board on
-a full-size USB-A. The board's other USB-C is the serial bridge for flashing. A
-microSD card if you want boot-from-image.
+and a cable from the board's USB 2.0 OTG-HS port to the target. Add a microSD
+card if you want boot-from-image.
+
+Which connector the OTG-HS port is depends on the board. The Function EV, NANO
+and Guition put it on USB-C, and the PoE board on a full-size USB-A. On the
+Waveshare ESP32-P4-ETH it is not a USB socket at all but the **MX1.25 header**,
+so that one needs an MX1.25-to-USB-A cable. The other USB-C on any of these
+boards is the serial bridge, for flashing.
 
 <sub>Board and module photos (c) their makers, taken from product pages and used
 only to identify the hardware. ESP-KVM is not affiliated with
@@ -314,36 +316,38 @@ to the target (see **Cables** above - on the Waveshare ESP32-P4-ETH that port is
 the MX1.25 header, not the USB-C socket). The device announces itself over mDNS:
 open **https://espkvm.local/**.
 
-The device is its own certificate authority - it generates a CA on first boot
-and signs its own certificate with it - so the browser warns the first time.
-Accepting the warning is enough to sign in and watch the MJPEG stream. For H.264
-and for the keyboard and mouse, though, the browser needs a real *secure
-context*, which a self-signed certificate does not give until it is trusted: the
-WebSocket channel and the H.264 decoder (WebCodecs) will not run otherwise.
+The device is its own certificate authority. It makes a CA on first boot and
+signs its own certificate with it, so the browser warns you the first time.
+Clicking through that warning is enough to sign in and watch the MJPEG stream.
 
-To trust the device once and clear the warning for good, download its CA -
-**Settings -> Security -> Download CA certificate**, or `http://espkvm.local/cert.pem`
-(served in the clear so you can fetch it before trusting anything) - import it
-into your operating system or browser's **trusted authorities** (not "your
-certificates"), and reach the device by name at **https://espkvm.local**. On a
-static IP the certificate names the address too, so `https://<ip>` works after
-importing; on DHCP use the name.
+H.264, the keyboard and the mouse need more: a real *secure context*, which a
+self-signed certificate does not give until it is trusted. Without it the browser
+runs neither the WebSocket channel nor the H.264 decoder.
 
-The device is dual-stack: on a network that advertises IPv6 it picks up an
-address there as well, with nothing to configure, and `espkvm.local` resolves to
-it. The certificate names those addresses from the next restart, so
-`https://[address]/` is trusted like the v4 literal. Turn it off in
-**Settings -> Network -> IPv6** if the KVM should stay off IPv6.
+To clear the warning for good, trust the device's CA once. Download it from
+**Settings -> Security -> Download CA certificate**, or from
+`http://espkvm.local/cert.pem` - that one is served in the clear, so you can
+fetch it before trusting anything. Import it into your operating system or
+browser as a **trusted authority**, not under "your certificates". Then reach the
+device by name, at **https://espkvm.local**.
+
+On a static IP the certificate names the address as well, so `https://<ip>` works
+once the CA is in. On DHCP, use the name.
+
+The device is dual-stack. On a network that advertises IPv6 it takes an address
+there too, with nothing to configure, and `espkvm.local` resolves to it. From the
+next restart the certificate names those addresses, so `https://[address]/` is
+trusted like the v4 one. There is a switch in **Settings -> Network -> IPv6**.
 
 Tapping the **network icon** in the console footer shows the whole picture: what
 the device is connected by, the name it answers to, its IPv4 address, every IPv6
-address labelled with what it is good for, and the MAC for a DHCP reservation.
-Each is a link and has a Copy button.
+address with what each is good for, and the MAC for a DHCP reservation. Each one
+is a link and has a Copy button.
 
 A network with no IPv4 at all works too. The one thing that cannot follow is
-Wake-on-LAN: the magic packet is an IPv4 broadcast and IPv6 has no broadcast, so
-the console reports it unavailable there rather than pretending. The WireGuard
-and Tailscale tunnels still need a peer reachable over IPv4.
+Wake-on-LAN - the magic packet is an IPv4 broadcast, and IPv6 has none - so the
+console says it is unavailable instead of pretending. The WireGuard and Tailscale
+tunnels still need a peer reachable over IPv4.
 
 Sign in as **admin / admin**. The console will not go any further until that
 password is changed: a KVM left on the password it shipped with is a keyboard
@@ -358,44 +362,41 @@ Five things account for most of it, and each has a way to tell it apart from
 the others without a multimeter.
 
 **The target never sees a keyboard or a mouse.** Check which connector the cable
-is in. On the Waveshare ESP32-P4-ETH the USB-C socket is only the CH343 serial
-bridge, for flashing and the console log; the USB 2.0 OTG-HS that presents the
-keyboard and mouse is the small 4-pin **MX1.25 header** next to it, marked `USB`
-on the silkscreen. No cable from that USB-C socket will ever be seen by the
-target, whichever of its ports you use. The Function EV, NANO and Guition boards
-put the same port on a USB-C, and the PoE board on a full-size USB-A - see
-**Cables** above. To confirm it from the device rather than by eye, open
-`https://espkvm.local/api/v1/system/usbprobe`: an empty trace means the target
-has never enumerated the KVM at all, which is exactly what a cable to the serial
-port looks like.
+is in. On the Waveshare ESP32-P4-ETH the USB-C socket is only the serial bridge,
+for flashing and the log. The port that presents the keyboard and mouse is the
+small 4-pin **MX1.25 header** next to it, marked `USB` on the silkscreen. No
+cable from that USB-C will ever reach the target. The other boards put the same
+port on USB-C or USB-A - see **Cables** above.
 
-**The picture works but the keyboard does not.** The browser needs a real secure
-context for the input channel, and a self-signed certificate does not give one
-until it is trusted. Accepting the warning is enough to sign in and watch MJPEG,
-and not enough for anything on a WebSocket. Install the device's CA and reach it
-by name - Quick start says how.
+To check it from the device instead of by eye, open
+`https://espkvm.local/api/v1/system/usbprobe`. An empty trace means the target
+has never seen the KVM at all, which is exactly what a cable in the serial port
+looks like.
 
-**The picture never starts and the console keeps saying it is reconnecting.**
-That is the same cause seen from the other side: H.264 arrives over a WebSocket
-and is decoded by WebCodecs, and neither runs without a trusted certificate. To
-tell it apart from a capture problem in one step, set **Settings -> Video ->
-Stream codec** to `mjpeg`, which is plain HTTP requests and needs none of that.
-If the picture appears, it is the certificate.
+**The keyboard does not work, or the picture never starts and the console keeps
+reconnecting.** Both are the same cause, seen from two sides: the keyboard, the
+mouse and H.264 all ride a WebSocket, and a browser only opens one on a page it
+considers secure - which a self-signed certificate is not, until it is trusted.
+MJPEG and signing in work anyway, which is why the rest looks fine.
 
-**No signal, or the target only shows its screen once it has booted.** The KVM
-holds HDMI hotplug low until it has loaded its EDID and started capture, and
-that is a good ten seconds after it powers on. A machine that looks for a monitor
-during its own POST and finds none may decide it has no external screen and
-never enable the output. Power the KVM first, or replug HDMI once the KVM is up.
-If the picture arrives but the source refuses a mode, try a capped **EDID
-profile** in Settings -> Video.
+One step tells it apart from a capture fault: set **Settings -> Video -> Stream
+codec** to `mjpeg`, which is plain HTTP. If the picture appears, it is the
+certificate. Install the device's CA and reach it by name - Quick start says how.
 
-**A pin you picked in Settings does nothing.** It may not be a pin at all: the
-P4 has 55 GPIOs and a board brings out maybe half of them. **Settings -> Pins**
-draws the board's expansion header the way it is printed, with what holds each
-pin, so a free GPIO can be found where the wire actually goes. Some pins are also
-spoken for by hardware the firmware does not drive - on the Function EV, GPIO 45
-carries the microSD power net whether or not we use it.
+**No signal, or the target only shows its screen after it has booted.** The KVM
+holds HDMI hotplug low until it has loaded its EDID and started capture, and that
+takes a good ten seconds from power on. A machine that looks for a monitor during
+its own POST, and finds none, may decide it has no external screen and never turn
+the output on. So power the KVM first, or replug HDMI once the KVM is up. If the
+picture arrives but the source refuses a mode, try a capped **EDID profile** in
+Settings -> Video.
+
+**A pin you picked in Settings does nothing.** It may not be a pin at all. The P4
+has 55 GPIOs and a board brings out maybe half. **Settings -> Pins** draws the
+board's expansion header the way it is printed, with what holds each pin, so you
+can find a free one where the wire actually goes. Some pins are also taken by
+hardware the firmware never touches: on the Function EV, GPIO 45 carries the
+microSD power net whether we use it or not.
 
 Flashing problems - the port not appearing, drivers, permissions - are in
 [docs/FLASHING.md](docs/FLASHING.md). Anything else: the device keeps its own log
@@ -447,97 +448,100 @@ Measured at 1080p, on both silicon revisions:
 | Screen in motion | 8.5 Mbit/s | ~500 kbit/s |
 | Chip temperature at full load | 46 &deg;C (rev v1.3) | 34 &deg;C (rev v3.2) |
 
-Browsers decode H.264 through WebCodecs, which they expose on secure pages only
-- over plain HTTP no browser can play it, however new. Turn HTTPS on and it
-works; the console says exactly that when it cannot.
+Browsers decode H.264 through WebCodecs, and they only offer it on a secure page.
+Over plain HTTP no browser can play it, however new - the console says so when it
+cannot.
 
 **The gap between those two rows is the silicon.** Below revision 3.0 the CSI
-receiver cannot deliver YUV420 while the H.264 encoder refuses RGB, so every
-frame detours through the pixel accelerator to change colour space - measured at
-~104 ms of the ~150 ms a 1080p frame costs. On revision 3.x the detour is gone:
-capture hands the encoder native YUV422 and it takes it as it is. That was a
-prediction resting on a revision check in Espressif's own driver, and it held
-when the board arrived - H.264 went from ~7 to 22-24 fps at 1080p, 28 fps at
-720p, as fast as MJPEG at a fraction of the bandwidth, and the chip runs cooler
-doing it. The measurements are in
+receiver cannot produce YUV420, and the H.264 encoder will not take RGB. So every
+frame detours through the pixel accelerator to change colour space, and that
+detour costs ~104 ms of the ~150 ms a 1080p frame takes.
+
+On revision 3.x there is no detour: capture hands the encoder YUV422 and it takes
+it as it is. H.264 went from ~7 to 22-24 fps at 1080p, and 28 at 720p - as fast
+as MJPEG, at a fraction of the bandwidth, and cooler. On the older silicon the
+conversion and the encode at least overlap now instead of running one after the
+other. The measurements are in
 [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
-On the older silicon the conversion and the encode now overlap rather than
-running one after the other, which is where its remaining headroom went.
+**Input.** One composite USB HID device with four parts. A boot-protocol
+keyboard, which firmware screens understand. An absolute pointer, so a click
+lands where it was aimed whatever the target's mouse acceleration is doing. A
+relative pointer, for software that captures the cursor. And the consumer keys.
+Everything is released when the browser goes away, so a dropped connection cannot
+leave a key held down on the target.
 
-**Input.** A composite USB HID device: a boot-protocol keyboard that firmware
-screens understand, an absolute pointer so a click lands where it was aimed
-regardless of the target's mouse acceleration, a relative pointer for software
-that captures the cursor, and consumer keys. Everything is released when the
-browser goes away, so a dropped connection cannot leave a key held down on the
-target.
-
-**Target OS.** How a machine enumerates a USB device is a fingerprint - Windows
+**Target OS.** How a machine enumerates a USB device is a fingerprint. Windows
 asks for a Microsoft OS descriptor, macOS reads each string twice, Linux does
-not - so the console guesses whether the target is Windows, macOS, Linux or
-Android and shows it next to the USB status, with the raw request trace behind a
-click. That guess is what the console follows when it offers OS-specific key
-combinations (the Linux magic-SysRq sequences, Task Manager on Windows) and when
-it labels the Meta key Win, Cmd or Super. A `Target OS` setting overrides it, for
-when the guess is wrong or the target never showed enough to tell; if it reads a
-machine wrong, that trace is what to send so a later build can learn it.
+neither. So the console guesses whether the target is Windows, macOS, Linux or
+Android, and shows it next to the USB status, with the raw trace behind a click.
+
+The guess decides which key combinations the console offers - magic SysRq on
+Linux, Task Manager on Windows - and whether the Meta key is labelled Win, Cmd or
+Super. A `Target OS` setting overrides it when the guess is wrong, or when the
+target never showed enough to tell. If it reads your machine wrong, send that
+trace and a later build can learn it.
 
 **Every feature is optional.** Each one reports whether it is compiled in,
 whether the hardware supports it, and whether it is switched on. A control the
-hardware cannot support is shown disabled, carrying the device's own
-explanation, rather than hidden or left to fail silently. `GET
-/api/capabilities` is that registry.
+hardware cannot support is shown disabled, with the device's own explanation on
+it - not hidden, and not left to fail silently. `GET /api/capabilities` is that
+registry.
 
 **Virtual media.** A disk image is presented to the target as a USB drive it can
 boot from - a rescue system, an installer, a live image. The console lists what
-is available and lets you pick which one the target sees, from two places at
-once. Whether images on a **microSD card** can be written depends on the chip:
-below revision 3.0 the SD controller reads the card reliably but its writes time
-out, so there the card is read-only and prepared in an ordinary reader (format it
-FAT32, up to 4 GB per file, a FAT32 limit). On rev 3.x silicon the card is
-writable and the console can upload to it. A small image can also live in the
-**device's own flash** - a 4 MB partition, enough for
-iPXE, memtest or a DOS floppy, and no card needed. Flash writes are reliable
-here, so that one can be uploaded from the browser (or written over the cable
-with `tools/fetch-rescue.sh`, which fetches netboot.xyz by default). The flash
-partition ships empty; adopting the partition table that carries it is a one-time
-full flash (the browser flasher does it), after which the image updates over the
-network.
+is there and lets you pick which one the target sees. Images live in two places.
+
+A **microSD card** holds the large ones: format it FAT32, up to 4 GB per file.
+Below chip revision 3.0 the card is read-only - that SD controller reads
+reliably, but its writes time out - so prepare it in an ordinary card reader. On
+revision 3.x the card is writable and the console can upload to it.
+
+The **device's own flash** holds one small image, in a 4 MB partition: enough for
+iPXE, memtest or a DOS floppy, with no card at all. Flash writes work on every
+board, so that one uploads from the browser, or over the cable with
+`tools/fetch-rescue.sh` (netboot.xyz by default). It ships empty, and taking the
+partition table that carries it is a one-time full flash - the browser flasher
+does it - after which the image updates over the network.
 
 **Reading the screen.** When the target is in a character mode - a BIOS setup, a
 UEFI boot menu, memtest, a Linux console - the device reads the screen back as
-text, and the console lets it be selected with the mouse or copied whole. This
-is not OCR: a text screen is drawn by a character generator, so each cell is
-looked up in the font's shapes and either matches exactly or comes back marked
-unreadable - a `�`, never a guess and never a quiet blank. There is no
-"recognised with errors" to act on by mistake. The fonts that matter are known:
-the 8x16 one a legacy BIOS draws with, the slightly different 8x16 one a Linux
-console draws with, and the 8x19 one a UEFI console draws with. So a 720x400
-setup screen, a 1024x768 boot menu and a Linux virtual console all read. It
-costs one pass over the frame, only in character modes, and only once the
-picture has stopped moving; a firmware that paints its setup as a picture, with
-a proportional font, has no grid and is left alone.
+text. The console lets you select it with the mouse, or copy the whole screen.
 
-The same reading can be left running with nobody connected. Give the device a
+This is not OCR. A text screen is drawn by a character generator, so each cell is
+looked up in the font's own shapes. It either matches exactly, or it comes back
+as `�`. Never a guess, never a quiet blank, and no "recognised with errors" to
+act on by mistake.
+
+Three fonts are known: the 8x16 a legacy BIOS draws with, the slightly different
+8x16 a Linux console draws with, and the 8x19 a UEFI console draws with. So a
+720x400 setup screen, a 1024x768 boot menu and a Linux console all read. It costs
+one pass over the frame, only in character modes, and only once the picture has
+stopped moving. A firmware that paints its setup as a picture has no grid, and is
+left alone.
+
+The reading can also be left running with nobody connected. Give the device a
 phrase to watch for and it keeps looking with the console closed - which is the
-state a KVM is bought for, since the machine that falls over does it at three in
-the morning. An alert is raised when the phrase appears and cleared when it
-goes; both edges reach the log, and Home Assistant if MQTT is on.
+state a KVM is bought for, because the machine that falls over does it at three
+in the morning. The alert is raised when the phrase appears and cleared when it
+goes. Both edges reach the log, and Home Assistant if MQTT is on.
 
 **Security.** The device serves HTTPS with a certificate it issues itself on
 first boot, and asks for a password before it will do anything. The password is
 stored as a salted PBKDF2 hash, sessions are HttpOnly cookies held in memory -
 so a reboot signs everyone out - and repeated failures pay a growing delay.
 
-A forgotten password is cleared with the board button: reset the board, then
-press and hold the button for two seconds while the panel (or the log) asks you
-to. Hold it *after* the reset, not through it - on boards where that button is
+A forgotten password is cleared with the board button. Reset the board, then
+press and hold the button for two seconds, while the panel or the log asks you
+to. Hold it *after* the reset, not through it: on boards where that button is
 also the ROM's download strap, holding it through a reset drops the chip into
-firmware-download mode instead. Physical presence is the credential, because
-whoever can hold that button can also unplug the machine this device is attached
-to. The same gesture also puts the network back somewhere reachable - DHCP, the
-wired link, and no operator TLS certificate - since a WiFi network that has
-vanished locks a device away exactly as a forgotten password does.
+firmware-download mode instead.
+
+Physical presence is the credential here, because whoever can hold that button
+can also unplug the machine this device is attached to. The same gesture puts the
+network back somewhere reachable - DHCP, the wired link, no operator certificate
+- because a WiFi network that has vanished locks a device away just as a
+forgotten password does.
 
 **Heat.** The chip is watched, and if it ever gets hot the frame rate is halved
 and then encoding stops - but the keyboard, the mouse and the web interface keep
@@ -547,11 +551,11 @@ something. In practice it does not come up: 1080p at full rate settles
 around 46 C in open air on rev v1.3 and 34 C on rev v3.2, against thresholds of
 70 and 85 C.
 
-**Updates.** Two app slots and automatic rollback: an image that fails to come
-up returns the device to the one that worked - which matters on a device that
+**Updates.** Two app slots, with automatic rollback: an image that fails to come
+up puts the device back on the one that worked. That matters here, because this
 is often the only way to reach the machine it is attached to. The console can
-check for a published build and install it in one click; the browser does the
-fetching, and the device never reaches out to the internet on its own.
+check for a published build and install it in one click. The browser does the
+fetching - the device never reaches the internet on its own.
 
 ## Interface
 
@@ -639,8 +643,8 @@ among them - pick the language in the player.
 Also picked up and translated internationally - French, Greek, Spanish, Russian,
 Chinese, Japanese, Thai and German.
 
-It has also started turning up as a reference point when other devices in the
-category are written about, rather than only as a story of its own:
+It has also started turning up as a reference point in reviews of other devices,
+not only as a story of its own:
 [PC de Mano](https://www.pcdemano.com/sc/internet/44120/) names it alongside the
 Sipeed NanoKVM in a review of the USBridge-KVM 2.0 (in Spanish).
 
