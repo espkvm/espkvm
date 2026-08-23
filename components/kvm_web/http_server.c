@@ -36,6 +36,8 @@
 
 #include "cJSON.h"
 
+#include "http_recv.h"
+
 #include "capture.h"
 #include "screentext.h"
 #include "screentext_store.h"
@@ -378,13 +380,17 @@ static esp_err_t api_settings_put(httpd_req_t *req)
     if (!body) {
         return send_json_error(req, "500 Internal Server Error", "out of memory");
     }
-    int got = 0;
+    int got = 0, stalls = 0;
     while (got < req->content_len) {
         int n = httpd_req_recv(req, body + got, (size_t)(req->content_len - got));
+        if (kvm_recv_stalled(n) && ++stalls <= KVM_RECV_MAX_STALLS) {
+            continue;
+        }
         if (n <= 0) {
             free(body);
             return send_json_error(req, "400 Bad Request", "truncated body");
         }
+        stalls = 0;
         got += n;
     }
     body[got] = '\0';
@@ -745,16 +751,25 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
     char chunk[2048];
     int received = 0;
     int shown = -1;
+    int stalls = 0;
     while (received < req->content_len) {
         const int want = (int)sizeof(chunk) < (req->content_len - received)
                              ? (int)sizeof(chunk)
                              : (req->content_len - received);
         const int n = httpd_req_recv(req, chunk, (size_t)want);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+        if (kvm_recv_stalled(n)) {
             /* A gap in a multi-megabyte upload is normal, not a failure: the
-             * sender is simply slower than the socket timeout. */
+             * sender is simply slower than the socket timeout, or the device is
+             * busy enough - live video, usually - to starve the socket. */
+            if (++stalls > KVM_RECV_MAX_STALLS) {
+                esp_ota_abort(ota);
+                kvm_display_notice("UPDATE", "upload lost", -1, 10000);
+                ESP_LOGE(TAG, "update stalled after %d of %d bytes", received, req->content_len);
+                return send_json_error(req, "408 Request Timeout", "the upload went quiet");
+            }
             continue;
         }
+        stalls = 0;
         if (n <= 0) {
             esp_ota_abort(ota);
             kvm_display_notice("UPDATE", "upload lost", -1, 10000);
@@ -1155,7 +1170,7 @@ static void upload_worker_task(void *arg)
             const size_t room = UPLOAD_CHUNK - filled;
             const size_t left = ctx->content_len - received - filled;
             const int n = httpd_req_recv(req, chunk + filled, room < left ? room : left);
-            if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (kvm_recv_stalled(n)) {
                 if (++idle >= UPLOAD_MAX_IDLE) {
                     ESP_LOGE(TAG, "upload stalled after %zu of %zu bytes", received + filled,
                              ctx->content_len);
@@ -1316,14 +1331,20 @@ static esp_err_t api_storage_rescue_post(httpd_req_t *req)
 
     char chunk[2048];
     int received = 0;
+    int stalls = 0;
     while (received < req->content_len) {
         const int want = (int)sizeof(chunk) < (req->content_len - received)
                              ? (int)sizeof(chunk)
                              : (req->content_len - received);
         const int n = httpd_req_recv(req, chunk, (size_t)want);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+        if (kvm_recv_stalled(n)) {
+            if (++stalls > KVM_RECV_MAX_STALLS) {
+                kvm_storage_rescue_write_abort();
+                return send_json_error(req, "408 Request Timeout", "the upload went quiet");
+            }
             continue;
         }
+        stalls = 0;
         if (n <= 0) {
             kvm_storage_rescue_write_abort();
             return send_json_error(req, "400 Bad Request", "upload was cut short");
@@ -1367,13 +1388,17 @@ static cJSON *read_json_body(httpd_req_t *req)
     if (!buf) {
         return NULL;
     }
-    int got = 0;
+    int got = 0, stalls = 0;
     while (got < req->content_len) {
         int n = httpd_req_recv(req, buf + got, (size_t)(req->content_len - got));
+        if (kvm_recv_stalled(n) && ++stalls <= KVM_RECV_MAX_STALLS) {
+            continue;
+        }
         if (n <= 0) {
             free(buf);
             return NULL;
         }
+        stalls = 0;
         got += n;
     }
     buf[got] = '\0';
@@ -2171,13 +2196,17 @@ static esp_err_t api_tls_cert_put(httpd_req_t *req)
     if (!body) {
         return send_json_error(req, "500 Internal Server Error", "out of memory");
     }
-    int got = 0;
+    int got = 0, stalls = 0;
     while (got < req->content_len) {
         int n = httpd_req_recv(req, body + got, (size_t)(req->content_len - got));
+        if (kvm_recv_stalled(n) && ++stalls <= KVM_RECV_MAX_STALLS) {
+            continue;
+        }
         if (n <= 0) {
             free(body);
             return send_json_error(req, "400 Bad Request", "truncated body");
         }
+        stalls = 0;
         got += n;
     }
     body[got] = '\0';
@@ -2802,7 +2831,7 @@ static esp_err_t captive_landing(httpd_req_t *req)
     } else {
         snprintf(console_url, sizeof(console_url), "https://%s.local/", hn);
     }
-    char body[1000];
+    char body[1400];
     int n = snprintf(
         body, sizeof(body),
         "<!doctype html><meta charset=utf-8>"
@@ -2814,10 +2843,15 @@ static esp_err_t captive_landing(httpd_req_t *req)
         "h1{font-size:22px;margin:.2em 0}p{color:#9aa4bf;margin:.4em 0}"
         "a.b{display:inline-block;margin-top:18px;padding:12px 22px;border-radius:10px;"
         "background:#3b82f6;color:#fff;text-decoration:none;font-weight:600}"
-        "a.s{display:block;margin-top:14px;color:#6b7699;font-size:13px}</style>"
+        "a.s{display:block;margin-top:14px;color:#6b7699;font-size:13px}"
+        "p.n{margin-top:18px;font-size:13px;max-width:22em}</style>"
         "<div class=c>"
         "<h1>ESP-KVM</h1><p>Setup hotspot active.</p>"
         "<a class=b href=\"%s\">Open console &rarr;</a>"
+        "<p class=n>This sheet is not a browser and handles the console poorly. "
+        "For anything more than a look, open <b>http://192.168.4.1/</b> in your "
+        "browser - and keep this network when the phone warns it has no "
+        "internet, or it will send the request out the wrong way.</p>"
         "<a class=s href=\"/cert.pem\">Download CA certificate</a></div>",
         console_url);
     if (n <= 0 || n >= (int)sizeof(body)) {

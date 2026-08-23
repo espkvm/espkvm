@@ -5,6 +5,49 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.31.0] - 2026-08-23
+
+### Added
+- **The hotspot shows a join code you can point a phone at.** While the rescue
+  hotspot is up, the panel takes a turn showing the network and its password as
+  a QR code, then a turn showing them as text. It only appears where the glass
+  can hold a code big enough to read: 128x64 shows it at two pixels a module,
+  64x48 and 72x40 at one, and the shorter panels keep the text they had.
+
+### Fixed
+- **An update takes on the first try again.** The chip could fault part-way
+  through its own restart: ESP-IDF switched the cache off while the stack could
+  still be in external RAM, and the reset that followed left the flash as the
+  running firmware had it. The next boot then read the new image wrong and got
+  nowhere, the watchdog reset the board properly a few seconds later, and the old
+  version came back - which is what "the update reverted itself" looked like from
+  outside. ESP-IDF 6.0.2 fixes it and the release is built with it now. Found
+  from a serial log by @petrn (#22).
+- **An upload no longer gives up when the device is busy.** Over HTTPS a quiet
+  stretch on the socket arrives as a raw mbedTLS "nothing yet", not the timeout
+  the code watched for, so it was read as a broken connection and the whole
+  upload was thrown away. Live video can starve a socket for half a minute, so
+  updating with the console open could die at a few percent. A silence is now a
+  silence - in the firmware update, the image and rescue uploads, and every body
+  the server reads.
+- **The console scrolls again inside the phone's hotspot sheet.** Android shows a
+  captive portal in a WebView wrapped in its own pull-to-refresh, and that decides
+  whether to take a downward drag by reading the document's scroll position - not
+  the panel the finger is on. A page sitting at the very top always looked
+  refreshable, so a drag up inside Settings reloaded instead of scrolling, and
+  nothing the page did could argue: the decision is made outside the WebView. The
+  page now rests one pixel down, which is invisible and answers the question the
+  other way.
+- **The hotspot page says what that sheet is.** It is not a browser and handles
+  the console poorly, so the page now points at the address to open properly -
+  and warns that the phone must be told to stay on a network with no internet.
+- **The touch controls no longer paint over the settings.** They carried a
+  stacking order and the panel did not.
+- **The diagnostics and target-OS popups stay on screen on a phone.** They opened
+  beside their button, which is right when the rail is a column down the side and
+  wrong once it is a row across the top - they went up and to the right, off the
+  glass both ways. On a narrow screen they are centred instead.
+
 ## [0.30.0] - 2026-08-22
 
 ### Added

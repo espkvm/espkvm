@@ -8,7 +8,7 @@
   <a href="https://github.com/espkvm/espkvm/actions/workflows/firmware.yml"><img src="https://github.com/espkvm/espkvm/actions/workflows/firmware.yml/badge.svg" alt="Build"></a>
   <a href="https://github.com/espkvm/espkvm/releases/latest"><img src="https://img.shields.io/github/v/release/espkvm/espkvm?sort=semver" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/espkvm/espkvm" alt="License: Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/ESP--IDF-v6.0.1-blue" alt="ESP-IDF v6.0.1">
+  <img src="https://img.shields.io/badge/ESP--IDF-v6.0.2-blue" alt="ESP-IDF v6.0.2">
   <img src="https://img.shields.io/badge/target-ESP32--P4-informational" alt="Target: ESP32-P4">
   <br>
   <a href="https://t.me/espkvm"><img src="https://img.shields.io/badge/Telegram-%40espkvm-26A5E4?logo=telegram&logoColor=white" alt="Telegram: @espkvm"></a>
@@ -247,9 +247,10 @@ the panel by controller and size in one list, because these controllers cannot
 be asked how big the glass is. The shorter the panel, the fewer status
 lines it shows, and the address is the line it keeps. A line that does not fit
 the width steps along a character at a time, and the screen waits until it has
-been read to the end. In hotspot mode it prints
-the network name and its password, so a phone can join from what is on the
-glass.
+been read to the end. In hotspot mode it shows the
+network and its password as a QR code, alternating with the same thing as text,
+so a phone can join from what is on the glass. Panels too short for a readable
+code show only the text.
 
 </td>
 <td valign="top">
@@ -418,7 +419,7 @@ clone):
 
 ```sh
 git clone --recursive https://github.com/espkvm/espkvm
-tools/install-idf.sh                          # ESP-IDF 6.0.1, once
+tools/install-idf.sh                          # ESP-IDF 6.0.2, once
 . tools/env.sh
 cd web && npm ci && npm run build && cd ..    # the console is embedded in the firmware
 idf.py build

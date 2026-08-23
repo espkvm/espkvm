@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source this to get an ESP-IDF 6.0.1 environment for esp32p4:
+# Source this to get an ESP-IDF 6.0.2 environment for esp32p4:
 #   . tools/env.sh
 # Override the IDF location with IDF_INSTALL_DIR if it is not ~/esp/esp-idf.
 

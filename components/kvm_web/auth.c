@@ -20,6 +20,7 @@
 
 #include "kvm_board.h"
 #include "kvm_settings.h"
+#include "http_recv.h"
 #include "kvm_tls.h"
 #include "wifi.h" /* kvm_net_mode_t: AP mode serves the console plain */
 
@@ -531,12 +532,16 @@ static esp_err_t read_body(httpd_req_t *req, char *buf, size_t buf_len)
     if (req->content_len <= 0 || (size_t)req->content_len >= buf_len) {
         return ESP_ERR_INVALID_SIZE;
     }
-    int got = 0;
+    int got = 0, stalls = 0;
     while (got < req->content_len) {
         int n = httpd_req_recv(req, buf + got, (size_t)(req->content_len - got));
+        if (kvm_recv_stalled(n) && ++stalls <= KVM_RECV_MAX_STALLS) {
+            continue;
+        }
         if (n <= 0) {
             return ESP_FAIL;
         }
+        stalls = 0;
         got += n;
     }
     buf[got] = '\0';

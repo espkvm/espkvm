@@ -17,6 +17,7 @@
 #include "font5x7.h"
 #include "icons.h"
 #include "kvm_panels.h"
+#include "qrcode.h"
 #include "logo.h"
 
 #define TAG "mono_oled"
@@ -354,6 +355,81 @@ static void draw_title(mono_oled_t *m, const uint8_t icon[8], const char *name, 
     }
 }
 
+/* Two pixels of light around the code. The standard asks for four modules, but
+   that costs a whole doubling of the scale here - see render_join_qr(). */
+#define QR_MARGIN_PX 2
+
+/* Shortest code the encoder can produce, so the smallest glass that could ever
+   show one. Panels below this never get the page. */
+#define QR_MIN_H (21 + 2 * QR_MARGIN_PX)
+
+typedef struct {
+    mono_oled_t *m;
+    int side;
+} qr_draw_t;
+
+static void qr_paint(esp_qrcode_handle_t qr, void *user_data)
+{
+    qr_draw_t *d = (qr_draw_t *)user_data;
+    mono_oled_t *m = d->m;
+    const int modules = esp_qrcode_get_size(qr);
+    const int box = (m->h < m->w ? m->h : m->w) - 2 * QR_MARGIN_PX;
+    const int scale = box / modules;
+    if (scale < 1) {
+        return;
+    }
+    const int side = modules * scale;
+    const int x0 = (m->w - side) / 2;
+    const int y0 = (m->h - side) / 2;
+    /* Light the glass, then cut the dark modules out of it: a code has to be
+       dark on light, and here "light" is a lit pixel. */
+    memset(m->fb, 0xFF, fb_bytes(m));
+    for (int y = 0; y < modules; y++) {
+        for (int x = 0; x < modules; x++) {
+            if (!esp_qrcode_get_module(qr, x, y)) {
+                continue;
+            }
+            for (int a = 0; a < scale; a++) {
+                for (int b = 0; b < scale; b++) {
+                    fb_px_set(m, x0 + x * scale + a, y0 + y * scale + b, 0);
+                }
+            }
+        }
+    }
+    d->side = side;
+}
+
+/*
+ * The hotspot join code, as large as the glass allows.
+ *
+ * Scale is the whole game: at one pixel per module a 29-module code is about
+ * five millimetres across, which a phone reads only if it can focus that close.
+ * Trimming the quiet zone from the standard's four modules to two pixels is
+ * what buys the second pixel per module on a 64-pixel panel - 58 pixels instead
+ * of 37. The rest of the glass is lit, so the sides give back more zone than
+ * the top and bottom gave up.
+ *
+ * Returns false when not even one pixel per module fits; the caller then shows
+ * the text instead.
+ */
+static bool render_join_qr(mono_oled_t *m, const kvm_display_status_t *st)
+{
+    qr_draw_t draw = {.m = m, .side = 0};
+    esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+    cfg.display_func_with_cb = qr_paint;
+    cfg.user_data = &draw; /* non-NULL is what selects the callback form */
+    cfg.max_qrcode_version = 6;
+    cfg.qrcode_ecc_level = ESP_QRCODE_ECC_LOW;
+    m->scroll_max = 0;
+    return esp_qrcode_generate(&cfg, st->join_qr) == ESP_OK && draw.side > 0;
+}
+
+/** Is there a join code to show, and glass to show it on? */
+static bool qr_page(const mono_oled_t *m, const kvm_display_status_t *st)
+{
+    return st->ap_mode && st->join_qr[0] && m->h >= QR_MIN_H;
+}
+
 static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_t page)
 {
     memset(m->fb, 0, fb_bytes(m));
@@ -579,7 +655,18 @@ esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status)
         render_splash(m, status);
         return flush(m);
     }
-    render_status(m, status, m->screen);
+    /* In hotspot mode the code takes a turn of its own between the network
+       screen and the rest, so a phone gets four seconds at it. */
+    const bool qr = qr_page(m, status);
+    uint8_t page = m->screen;
+    if (qr && page == 1) {
+        if (!render_join_qr(m, status)) {
+            /* No room after all - show the network screen rather than a blank. */
+            render_status(m, status, 0);
+        }
+    } else {
+        render_status(m, status, (qr && page > 1) ? (uint8_t)(page - 1) : page);
+    }
     esp_err_t err = flush(m);
     if (m->scroll < m->scroll_max) {
         m->scroll++;
@@ -587,9 +674,10 @@ esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status)
     /* Move on once the screen has had its dwell and every long row has been
        shown to its end. */
     if (++m->tick >= SCREEN_DWELL_TICKS && m->scroll >= m->scroll_max) {
+        const uint8_t screens = (uint8_t)(STATUS_SCREENS + (qr ? 1 : 0));
         m->tick = 0;
         m->scroll = 0;
-        m->screen = (uint8_t)((m->screen + 1) % STATUS_SCREENS);
+        m->screen = (uint8_t)((m->screen + 1) % screens);
     }
     return err;
 }
