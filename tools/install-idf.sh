@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# One-shot ESP-IDF 6.0.2 install for esp32p4. Idempotent: safe to re-run.
+# One-shot ESP-IDF 6.1-rc1 install for esp32p4. Idempotent: safe to re-run.
 set -euo pipefail
 
-IDF_VERSION="${IDF_VERSION:-v6.0.2}"
+IDF_VERSION="${IDF_VERSION:-v6.1-rc1}"
 IDF_DIR="${IDF_INSTALL_DIR:-$HOME/esp/esp-idf}"
 
 if [ ! -d "$IDF_DIR/.git" ]; then

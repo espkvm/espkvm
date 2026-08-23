@@ -9,12 +9,12 @@ ESP-KVM is an IP-KVM firmware for the **ESP32-P4** with a **TC358743** HDMI-to-C
 capture board: it captures the target's HDMI, presents itself over USB as a
 keyboard, mouse and (read-only) disk, and serves the whole thing to a browser
 over HTTPS. It is a heavily-rewritten fork of jrowny/p4kvm; only the TC358743
-driver and the CSI-bridge programming are inherited. ESP-IDF 6.0.2.
+driver and the CSI-bridge programming are inherited. ESP-IDF 6.1-rc1.
 
 ## Setup, build, flash
 
 ```sh
-. tools/env.sh                    # ESP-IDF 6.0.2 env for esp32p4 (installs via tools/install-idf.sh)
+. tools/env.sh                    # ESP-IDF 6.1-rc1 env for esp32p4 (installs via tools/install-idf.sh)
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 idf.py menuconfig                 # settings live under the "ESP-KVM" menu

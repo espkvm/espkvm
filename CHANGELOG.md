@@ -16,13 +16,16 @@ bumps the patch).
 
 ### Fixed
 - **An update takes on the first try again.** The chip could fault part-way
-  through its own restart: ESP-IDF switched the cache off while the stack could
-  still be in external RAM, and the reset that followed left the flash as the
-  running firmware had it. The next boot then read the new image wrong and got
-  nowhere, the watchdog reset the board properly a few seconds later, and the old
-  version came back - which is what "the update reverted itself" looked like from
-  outside. ESP-IDF 6.0.2 fixes it and the release is built with it now. Found
-  from a serial log by @petrn (#22).
+  through its own restart, and the boot that followed read the new firmware wrong
+  and got nowhere. A few seconds later the watchdog reset the board properly, the
+  old version came back, and from outside it looked like the update had reverted
+  itself. The fault is in ESP-IDF's restart path on chips with external RAM - it
+  never needed an update to happen, a plain restart could do it too - and it is
+  gone in ESP-IDF 6.1, which the releases are built with now. Updating to this
+  version is enough - no cable needed - but the restart that installs it is still
+  done by the old firmware, so if the device comes back on the old version, run
+  the update once more. From this version on it stops happening. Found from a
+  serial log by @petrn (#22).
 - **An upload no longer gives up when the device is busy.** Over HTTPS a quiet
   stretch on the socket arrives as a raw mbedTLS "nothing yet", not the timeout
   the code watched for, so it was read as a broken connection and the whole

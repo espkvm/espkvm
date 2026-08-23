@@ -8,7 +8,7 @@
   <a href="https://github.com/espkvm/espkvm/actions/workflows/firmware.yml"><img src="https://github.com/espkvm/espkvm/actions/workflows/firmware.yml/badge.svg" alt="Build"></a>
   <a href="https://github.com/espkvm/espkvm/releases/latest"><img src="https://img.shields.io/github/v/release/espkvm/espkvm?sort=semver" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/espkvm/espkvm" alt="License: Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/ESP--IDF-v6.0.2-blue" alt="ESP-IDF v6.0.2">
+  <img src="https://img.shields.io/badge/ESP--IDF-v6.1--rc1-blue" alt="ESP-IDF v6.1-rc1">
   <img src="https://img.shields.io/badge/target-ESP32--P4-informational" alt="Target: ESP32-P4">
   <br>
   <a href="https://t.me/espkvm"><img src="https://img.shields.io/badge/Telegram-%40espkvm-26A5E4?logo=telegram&logoColor=white" alt="Telegram: @espkvm"></a>
@@ -419,7 +419,7 @@ clone):
 
 ```sh
 git clone --recursive https://github.com/espkvm/espkvm
-tools/install-idf.sh                          # ESP-IDF 6.0.2, once
+tools/install-idf.sh                          # ESP-IDF 6.1-rc1, once
 . tools/env.sh
 cd web && npm ci && npm run build && cd ..    # the console is embedded in the firmware
 idf.py build

@@ -137,7 +137,7 @@ jobs:
       - name: Build ${{ matrix.board.id }}
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v6.0.2
+          esp_idf_version: v6.1-rc1
           target: esp32p4
           # Both steps belong in the container: git inside it refuses a
           # repository owned by another user (and ESP-IDF then has no version to
