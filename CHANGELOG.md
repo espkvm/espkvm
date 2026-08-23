@@ -5,6 +5,16 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.31.1] - 2026-08-23
+
+### Fixed
+- **The console no longer looks frozen while the device writes an update.** The
+  middle step - the device writing and verifying the image on its own - has no
+  bytes to report and only a clock to go by, and nothing was ticking it. So the
+  animation and the "of about 12s" line sat still for the whole write and only
+  came alive at the reboot. The watch runs its own clock now. Reported by
+  @petrn (#23).
+
 ## [0.31.0] - 2026-08-23
 
 ### Added
