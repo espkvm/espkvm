@@ -5,6 +5,20 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.32.0] - 2026-08-23
+
+### Added
+- **Settings can be saved to a file and loaded back.** Two buttons at the foot of
+  Settings. The file is plain JSON with the firmware version and the board in its
+  header, which covers both of the real cases: keeping a copy of a working
+  configuration before restoring defaults, and bringing a second device up like
+  the first. Passwords and keys are not in it - the device never serves them, so
+  they cannot be - and loading a file leaves the device's own identity alone:
+  hostname and static addresses stay, because two devices answering to one name
+  make two certificates a browser trusts neither of. What a file would change is
+  shown before anything is written, and what was skipped is said afterwards
+  rather than a bare "done".
+
 ## [0.31.1] - 2026-08-23
 
 ### Fixed

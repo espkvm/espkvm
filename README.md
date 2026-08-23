@@ -54,6 +54,7 @@ Useful for what it does today, and honest about the rest.
 | Multiple viewers, one in control at a time with takeover | works |
 | User-defined key macros | works |
 | Settings, capability reporting, diagnostics | works |
+| Settings to a file, and back | works; keep a copy of a working configuration, or bring a second device up like the first. Passwords and keys are never in the file &mdash; the device does not serve them &mdash; and a device's own identity (hostname, static addresses) is left alone when a file is loaded |
 | Firmware update over the network, with rollback | works |
 | HTTPS with a certificate the device issues itself | works; a downloadable CA you can trust to clear the warning and enable H.264 |
 | Bring your own TLS certificate | works; install your own cert and key (Settings, or `PUT /api/v1/tls/cert`), self-signed by default |
