@@ -5,7 +5,7 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.33.0] - 2026-08-24
 
 ### Added
 - **The NANO and the Guition boards get their rev 3.x images.** The ESP32-P4 ships
