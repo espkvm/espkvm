@@ -5,6 +5,14 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Fixed
+- **No scrollbar down the side of the console.** The page is deliberately one
+  pixel taller than the window so Android's captive-portal browser stops
+  swallowing downward drags. On a desktop there is no such gesture, and that
+  pixel drew a scrollbar for nothing. It is given to touch screens only now.
+
 ## [0.34.0] - 2026-08-24
 
 ### Fixed
