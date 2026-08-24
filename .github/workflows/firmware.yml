@@ -353,7 +353,10 @@ jobs:
           done
           jq -n --arg ids "${boards}" --slurpfile known boards/boards.json '
               ($ids | split("\n") | map(select(length > 0))) as $all
-              | $all
+              # boards.json order, not alphabetical: the first card is the one the
+              # flasher selects, and that should be the board most people have.
+              | (($known[0] | map(.id)) + ($all - ($known[0] | map(.id))))
+              | map(select(. as $id | $all | index($id)))
               | map(select(endswith("-rev3") | not))
               | map(. as $id
                     | ($known[0][] | select(.id == $id)) // { id: $id, label: $id }

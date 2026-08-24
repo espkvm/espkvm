@@ -647,6 +647,8 @@ docs/             what the hardware actually does
 - [Circuit Rocks](https://blog.circuit.rocks/esp-kvm-turns-an-esp32-p4-into-a-45-open-source-ip-kvm) - *ESP-KVM Turns an ESP32-P4 Into a $45 Open-Source IP KVM*
 - [Open Source For You](https://www.opensourceforu.com/2026/07/microcontroller-enables-remote-device-access/) - *Microcontroller Enables Remote Device Access*
 - [Solid State Bytes](https://ssbytes.org/p/a-raspberry-pi-that-boots-straight-into-ai-an-esp32-p4-kvm-and-more) - *A Raspberry Pi That Boots Straight Into AI, an ESP32-P4 KVM, and More*
+- [LAB1612](https://1612.it/posts/esp-kvm-ip-kvm-esp32-p4/) - *ESP-KVM: un IP-KVM open source con un solo ESP32-P4, alternativa economica a PiKVM e JetKVM* (in Italian; a comparison against PiKVM and JetKVM, fair about what is still missing here - no security review, and one pair of hands)
+- [SMZDM](https://post.smzdm.com/p/a70dq2ql/) - *一周两条GBA满帧视频、一块59元新板：ESP32-P4终于"能玩了"，但上手前先看这三个问题* (in Chinese; ESP-KVM is one of three ESP32-P4 projects it weighs up, and it repeats this project's own advice to keep the device on a network you trust)
 - [EdigE](http://edige.xyz/news/esp32-p4-hdmi-ip-kvm) - *An ESP32-P4 turned into a real IP-KVM with HDMI, H.264, USB HID and boot images* (in Russian, and it goes into the capture path and the frame budget rather than only the feature list)
 
 On video: **Wels** covered it in
