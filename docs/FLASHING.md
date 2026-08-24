@@ -23,6 +23,23 @@ ESP32-P4 Function EV Board):
 For a first flash from a computer, the **merged** image is the simplest: one file,
 written at offset 0.
 
+### Which revision
+
+The ESP32-P4 exists in two silicon families, and an image built for one **refuses
+to start on the other**. The same product code arrives as either chip, so boards
+that ship as both have a `-rev3` file next to the plain one. Ask the board:
+
+```bash
+esptool --chip esp32p4 -p /dev/ttyACM0 chip-id
+```
+
+It prints something like `Chip type: ESP32-P4 (revision v3.1)`. **v3.x takes the
+`-rev3` file; anything lower takes the plain one.** Picking wrong damages
+nothing - esptool refuses the write ("requires chip revision in range
+[v1.0 - v1.99]"), or, if it did write, the board waits in its boot loader until
+the other file is flashed over USB. Do not reach for `--force`: it writes an
+image the chip will not run.
+
 ---
 
 ## Option 1 - flash from the browser (easiest, nothing to install)

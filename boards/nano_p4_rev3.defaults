@@ -1,0 +1,27 @@
+# Waveshare ESP32-P4-NANO on revision 3.x silicon
+#
+# The NANO's rev 3.x twin. Build it with:
+#   idf.py -B build.nano_rev3 -D SDKCONFIG=build.nano_rev3/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/nano_p4.defaults;boards/nano_p4_rev3.defaults" build
+#
+# Everything about the board is in nano_p4.defaults; this only moves the silicon
+# revision and the update slug, so the two stay in step when pins change.
+#
+# WHICH ONE DO I WANT? Read what esptool or the boot log says about the chip:
+# "revision v3.x" - this image; anything lower - the plain p4-nano image. Neither
+# starts on the other's silicon, because the image header carries a minimum and a
+# maximum revision. Flashing the wrong one damages nothing: the board sits in its
+# bootloader until the right image is flashed over USB.
+#
+# The NANO ships as either. DaveDavenport's is pre-3.0 (2026-08), levrskn's is
+# v3.1 (#24) - same product code, different chip.
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# Its own slug, so an update never swaps this device onto the other family.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-nano-rev3/manifest.json"
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_NANO=y

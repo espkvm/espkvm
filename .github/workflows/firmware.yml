@@ -101,6 +101,15 @@ jobs:
           - id: p4-poe-rev3
             build_dir: build.poe_rev3
             sdkconfig_defaults: sdkconfig.defaults;boards/poe_p4.defaults;boards/poe_p4_rev3.defaults
+          # The NANO and the Guition arrive as either revision under one product
+          # code - a NANO tested here in August was pre-3.0 and one bought a
+          # fortnight later was v3.1 (#24) - so they need both images too.
+          - id: p4-nano-rev3
+            build_dir: build.nano_rev3
+            sdkconfig_defaults: sdkconfig.defaults;boards/nano_p4.defaults;boards/nano_p4_rev3.defaults
+          - id: p4-guition-rev3
+            build_dir: build.guition_rev3
+            sdkconfig_defaults: sdkconfig.defaults;boards/guition_p4.defaults;boards/guition_p4_rev3.defaults
     steps:
       - uses: actions/checkout@v4
         with:
@@ -268,7 +277,8 @@ jobs:
           version="${GITHUB_REF_NAME}"
           released="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           mkdir -p site
-          for board in p4-eth p4-eth-rev3 funcev p4-poe p4-poe-rev3 p4-nano p4-guition; do
+          for board in p4-eth p4-eth-rev3 funcev p4-poe p4-poe-rev3 p4-nano p4-nano-rev3 \
+                       p4-guition p4-guition-rev3; do
             bin="$(cd out && ls espkvm-*-"${board}".bin | grep -v -- '-merged')"
             merged="$(cd out && ls espkvm-*-"${board}"-merged.bin)"
 
@@ -318,7 +328,8 @@ jobs:
           <code>flash/&lt;board&gt;/manifest.json</code> is esp-web-tools.
           Boards: <code>p4-eth</code>, <code>p4-eth-rev3</code>, <code>funcev</code>,
           <code>p4-poe</code>, <code>p4-poe-rev3</code>, <code>p4-nano</code>,
-          <code>p4-guition</code>. The <code>-rev3</code> ones are for ESP32-P4 rev
+          <code>p4-nano-rev3</code>, <code>p4-guition</code>,
+          <code>p4-guition-rev3</code>. The <code>-rev3</code> ones are for ESP32-P4 rev
           3.x silicon and will not start on an older chip, nor the plain ones on a
           rev 3.x chip. <code>p4-poe</code> is configured from the schematic and not
           yet verified on hardware. The root <code>firmware/</code> and

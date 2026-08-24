@@ -1,0 +1,23 @@
+# Guition ESP32-P4-M3-Dev on revision 3.x silicon
+#
+# The Guition board's rev 3.x twin. Build it with:
+#   idf.py -B build.guition_rev3 -D SDKCONFIG=build.guition_rev3/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/guition_p4.defaults;boards/guition_p4_rev3.defaults" build
+#
+# Everything about the board is in guition_p4.defaults; this only moves the
+# silicon revision and the update slug.
+#
+# WHICH ONE DO I WANT? Read what esptool or the boot log says about the chip:
+# "revision v3.x" - this image; anything lower - the plain p4-guition image.
+# Neither starts on the other's silicon, and flashing the wrong one damages
+# nothing - the board waits in its bootloader for the right image.
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# Its own slug, so an update never swaps this device onto the other family.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-guition-rev3/manifest.json"
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_GUITION=y

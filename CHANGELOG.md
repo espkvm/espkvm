@@ -5,6 +5,18 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Added
+- **The NANO and the Guition boards get their rev 3.x images.** The ESP32-P4 ships
+  in two silicon families, an image built for one will not start on the other, and
+  the same product code arrives as either - so a NANO bought in August came up as
+  v3.1 and esptool refused every release we had. Both boards now build and publish
+  a `-rev3` image beside the plain one, each with its own update slug so a device
+  is never offered the other family's build. The browser flasher offers the choice,
+  and [docs/FLASHING.md](docs/FLASHING.md) says how to ask a board which chip it
+  has. Reported by @levrskn (#24).
+
 ## [0.32.0] - 2026-08-23
 
 ### Added

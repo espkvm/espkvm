@@ -160,7 +160,9 @@ details aren't exhaustively tested yet - reports welcome.
 **[Waveshare ESP32-P4-NANO](https://www.waveshare.com/esp32-p4-nano.htm)** &mdash; *community-tested*
 
 Same IP101 Ethernet and onboard ESP32-C6 as the boards above; 32 MB PSRAM, 16 MB
-flash. Build overlay: `boards/nano_p4.defaults`.
+flash. Build overlay: `boards/nano_p4.defaults`. Ships as either silicon revision
+under one product code, so a rev 3.x unit takes the `-rev3` image instead
+(`boards/nano_p4_rev3.defaults`).
 
 </td>
 <td valign="top">
@@ -169,7 +171,8 @@ flash. Build overlay: `boards/nano_p4.defaults`.
 
 A display board (4.3&Prime; MIPI-DSI touch, unused by the KVM) that also carries
 Ethernet and an ESP32-C6; 32 MB PSRAM, 16 MB flash. It has two USB-C ports - the
-target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`.
+target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`, or
+`boards/guition_p4_rev3.defaults` on rev 3.x silicon.
 
 </td>
 </tr>
