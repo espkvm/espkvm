@@ -10,13 +10,9 @@
 #include "mbedtls/ssl.h"
 
 /*
- * A read that means "nothing yet", not "the other end is gone".
- *
- * Over plain HTTP a sender that goes quiet comes back as HTTPD_SOCK_ERR_TIMEOUT.
- * Over HTTPS the same silence comes back as the raw mbedTLS code: the socket
- * carries a receive timeout, mbedtls_net_recv turns EAGAIN into WANT_READ, and
- * esp_https_server passes it up untouched. Reading that as a dead connection cut
- * uploads short whenever something else on the device starved them for a while.
+ * A read that means "nothing yet", not "the other end is gone". Plain HTTP says
+ * HTTPD_SOCK_ERR_TIMEOUT; HTTPS passes up the raw mbedTLS code instead, and
+ * taking that for a dead connection cut uploads short.
  */
 static inline bool kvm_recv_stalled(int n)
 {
@@ -24,6 +20,5 @@ static inline bool kvm_recv_stalled(int n)
            n == MBEDTLS_ERR_SSL_WANT_WRITE || n == MBEDTLS_ERR_SSL_TIMEOUT;
 }
 
-/* Silences in a row to sit through before calling an upload dead. Each one lasts
- * recv_wait_timeout, so this is minutes, not seconds. */
+/* Silences in a row before an upload is called dead - each is recv_wait_timeout. */
 #define KVM_RECV_MAX_STALLS 8

@@ -5,6 +5,19 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.33.1] - 2026-08-24
+
+### Fixed
+- **One slow client can no longer take the whole console down.** The web server is
+  a single task, and every accepted connection carried a thirty-second receive
+  timeout, so a client that opened a connection and never finished its request
+  stopped the device answering anybody for that long - measured at 30.9 seconds on
+  the bench. The device still pinged and still served a page now and then, which
+  is what made it look like a network fault rather than a stuck server. The wait is
+  five seconds now; a firmware or image upload is unaffected, because every place
+  the server reads a body already waits out a silence rather than treating it as a
+  broken connection. Reported by @petrn (#25).
+
 ## [0.33.0] - 2026-08-24
 
 ### Added

@@ -758,9 +758,8 @@ static esp_err_t api_system_update_post(httpd_req_t *req)
                              : (req->content_len - received);
         const int n = httpd_req_recv(req, chunk, (size_t)want);
         if (kvm_recv_stalled(n)) {
-            /* A gap in a multi-megabyte upload is normal, not a failure: the
-             * sender is simply slower than the socket timeout, or the device is
-             * busy enough - live video, usually - to starve the socket. */
+            /* A gap in a multi-megabyte upload is normal: a slow sender, or a
+             * device busy enough - live video - to starve the socket. */
             if (++stalls > KVM_RECV_MAX_STALLS) {
                 esp_ota_abort(ota);
                 kvm_display_notice("UPDATE", "upload lost", -1, 10000);
@@ -2975,9 +2974,10 @@ httpd_handle_t http_server_start(void)
     /* Prefer draining TCP slightly above capture so multipart frames reach the browser. */
     cfg.task_priority = tskIDLE_PRIORITY + 6;
     cfg.send_wait_timeout = 30;
-    /* Firmware uploads arrive in bursts; a short receive timeout turns a
-     * normal gap into a failed update. */
-    cfg.recv_wait_timeout = 30;
+    /* One task serves every session, so this is how long one peer that stops
+     * mid-request keeps everyone else waiting (#25). Uploads survive a short
+     * value now: the body reads wait out a silence, see http_recv.h. */
+    cfg.recv_wait_timeout = 5;
     cfg.keep_alive_enable = true;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.close_fn = http_sess_close_cb;
