@@ -57,7 +57,10 @@ void screentext_request(void);
 bool screentext_requested(void);
 
 /** Longest phrase an alert can carry, including its terminator. */
-#define SCREENTEXT_ALERT_MAX 64
+/* Every phrase on screen at once, comma-separated - not just the first. Sized so
+   nothing is ever dropped: the setting holds 255 characters, and joining its
+   phrases with ", " can add one character per phrase. */
+#define SCREENTEXT_ALERT_MAX 384
 
 /**
  * Record that a watched phrase is on the screen, or pass NULL to say none is.

@@ -62,7 +62,7 @@ Useful for what it does today, and honest about the rest.
 | Thermal protection | works |
 | Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
 | Reading a text screen as text (BIOS, boot loader, console) | works; select and copy with the mouse, or copy the whole screen. Character modes only &mdash; a graphical UEFI setup is a picture and is not read. Screens up to 1024x768 are read as they come; wider ones, up to 1080p, are read while you ask for them |
-| Watching the screen for words while nobody is looking | works; off by default. Give it phrases (`no boot device`, `kernel panic`) and it alerts in the log and in Home Assistant when one appears |
+| Watching the screen for words while nobody is looking | works; off by default. Give it phrases (`no boot device`, `kernel panic`) and it alerts in the log and in Home Assistant when one appears, naming every phrase on screen, not only the first |
 | Guessing the target's OS from how it enumerates USB | works |
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; verified on the ESP32-P4 Function EV. Also built for the NANO, Guition and PoE boards, which carry the same co-processor; the Waveshare ESP32-P4-ETH has no radio at all. One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |

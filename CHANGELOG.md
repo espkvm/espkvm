@@ -5,6 +5,23 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.34.0] - 2026-08-24
+
+### Fixed
+- **A refused firmware image no longer leaves the console behind a frozen
+  screen.** The install takes over the whole screen, and when the image was
+  rejected - the wrong file, or a download that arrived damaged - the message
+  appeared underneath it while the overlay stayed up saying what it had been
+  doing a moment ago. Only a reload got you out. The screen comes down with the
+  failure now.
+
+### Changed
+- **The screen watch names every phrase it finds, and has room for more of
+  them.** It reported only the first match, so a machine showing both a panic and
+  a failed disk told you about one of them; now the alert lists all of them, in
+  the order they were typed. The list of phrases also grew from 127 characters to
+  255, which was the real limit - three or four phrases and it was full.
+
 ## [0.33.1] - 2026-08-24
 
 ### Fixed

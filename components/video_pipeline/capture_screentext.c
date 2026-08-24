@@ -137,17 +137,28 @@ static bool row_contains(const screentext_grid_t *g, uint16_t r, const char *nee
 }
 
 /**
- * Compare a reading against the phrases the operator asked about, and record
- * the first that is on screen. Raising and clearing are both edges the store
+ * Compare a reading against the phrases the operator asked about and record
+ * every one that is on screen. Raising and clearing are both edges the store
  * reports once, so a phrase that stays on screen does not re-alert every second.
  */
+/* One phrase, bounded. The alert holds several of these at once, so a phrase
+   buffer is not the alert buffer - two of them live on the capture task. */
+#define PHRASE_MAX 64
+
 static void check_watch(const screentext_grid_t *g)
 {
     if (!kvm_setting_bool("scr_watch")) {
         return;
     }
-    char phrases[128];
+    char phrases[256];
     snprintf(phrases, sizeof(phrases), "%s", kvm_setting_str("scr_match"));
+
+    /* Every phrase on screen, in the order they were typed. The order has to be
+       stable: the store compares the whole string to decide whether this is
+       news, so screen order would re-alert on every redraw. */
+    char found[SCREENTEXT_ALERT_MAX];
+    size_t used = 0;
+    found[0] = '\0';
 
     char *save = NULL;
     for (char *p = strtok_r(phrases, ",", &save); p; p = strtok_r(NULL, ",", &save)) {
@@ -165,26 +176,35 @@ static void check_watch(const screentext_grid_t *g)
            full phrase but reporting a truncated one - or the other way round -
            makes the alert re-raise itself forever, because the store compares
            what it was given with what it stored. */
-        char phrase[SCREENTEXT_ALERT_MAX];
+        char phrase[PHRASE_MAX];
         size_t i = 0;
         for (; i < len && i < sizeof(phrase) - 1; i++) {
             phrase[i] = p[i];
         }
         phrase[i] = '\0';
 
-        char lower[SCREENTEXT_ALERT_MAX];
+        char lower[PHRASE_MAX];
         for (size_t k = 0; k <= i; k++) {
             lower[k] = (char)tolower((unsigned char)phrase[k]);
         }
 
         for (uint16_t r = 0; r < g->rows; r++) {
             if (row_contains(g, r, lower)) {
-                screentext_alert_set(phrase);
-                return;
+                /* Whole phrases only - half of one would read as a different
+                   alert, and would flap against the next reading. */
+                const size_t sep = used ? 2 : 0;
+                if (used + sep + i < sizeof(found)) {
+                    if (sep) {
+                        memcpy(found + used, ", ", sep);
+                    }
+                    memcpy(found + used + sep, phrase, i + 1);
+                    used += sep + i;
+                }
+                break;
             }
         }
     }
-    screentext_alert_set(NULL);
+    screentext_alert_set(found[0] ? found : NULL);
 }
 
 /**

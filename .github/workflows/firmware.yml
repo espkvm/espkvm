@@ -262,6 +262,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4   # for boards/boards.json
       - uses: actions/download-artifact@v4
         with:
           pattern: firmware-*
@@ -277,8 +278,13 @@ jobs:
           version="${GITHUB_REF_NAME}"
           released="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           mkdir -p site
-          for board in p4-eth p4-eth-rev3 funcev p4-poe p4-poe-rev3 p4-nano p4-nano-rev3 \
-                       p4-guition p4-guition-rev3; do
+          # The boards are whatever the build jobs actually produced - one
+          # sha256sums-<board>.txt each. A hand-kept list here went stale twice
+          # and silently published nothing for the boards it had missed.
+          boards="$(cd out && ls sha256sums-*.txt | sed -E 's/^sha256sums-(.*)\.txt$/\1/' | sort)"
+          [ -n "${boards}" ] || { echo "no board artefacts to publish"; exit 1; }
+          echo "publishing: ${boards}"
+          for board in ${boards}; do
             bin="$(cd out && ls espkvm-*-"${board}".bin | grep -v -- '-merged')"
             merged="$(cd out && ls espkvm-*-"${board}"-merged.bin)"
 
@@ -321,20 +327,44 @@ jobs:
           cp site/firmware/p4-eth/. site/firmware/ -r
           cp site/flash/p4-eth/. site/flash/ -r
 
-          cat > site/index.html <<'EOF'
+          # Same list again, from the same source, so the page cannot drift
+          # from what was published.
+          list="$(for b in ${boards}; do printf '<code>%s</code>, ' "$b"; done | sed 's/, $//')"
+          cat > site/index.html <<EOF
           <!doctype html><meta charset="utf-8"><title>ESP-KVM firmware</title>
           <p>Artefacts for the ESP-KVM console and the browser flasher, per board:
           <code>firmware/&lt;board&gt;/manifest.json</code> is the update check,
           <code>flash/&lt;board&gt;/manifest.json</code> is esp-web-tools.
-          Boards: <code>p4-eth</code>, <code>p4-eth-rev3</code>, <code>funcev</code>,
-          <code>p4-poe</code>, <code>p4-poe-rev3</code>, <code>p4-nano</code>,
-          <code>p4-nano-rev3</code>, <code>p4-guition</code>,
-          <code>p4-guition-rev3</code>. The <code>-rev3</code> ones are for ESP32-P4 rev
+          Boards: ${list}. The <code>-rev3</code> ones are for ESP32-P4 rev
           3.x silicon and will not start on an older chip, nor the plain ones on a
           rev 3.x chip. <code>p4-poe</code> is configured from the schematic and not
           yet verified on hardware. The root <code>firmware/</code> and
           <code>flash/</code> mirror <code>p4-eth</code> for older clients.</p>
           EOF
+          # The board list the site's flasher reads, so adding a board here is
+          # the whole job - the site needs no change. A -rev3 image is not a
+          # board of its own but the twin of the one it is named after.
+          # Board photos travel with the list, so a board the site has never
+          # heard of still gets a picture. The site prefers its own copy where
+          # it has one - same file, served from its own origin.
+          mkdir -p site/flash/img
+          for img in $(jq -r '.[].image // empty' boards/boards.json); do
+            cp "$img" site/flash/img/
+          done
+          jq -n --arg ids "${boards}" --slurpfile known boards/boards.json '
+              ($ids | split("\n") | map(select(length > 0))) as $all
+              | $all
+              | map(select(endswith("-rev3") | not))
+              | map(. as $id
+                    | ($known[0][] | select(.id == $id)) // { id: $id, label: $id }
+                    | . + { manifest: ($id + "/manifest.json") }
+                    | if .image then . + { image: ("img/" + (.image | split("/") | last)) } else . end
+                    | if ($all | index($id + "-rev3"))
+                      then . + { manifestRev3: ($id + "-rev3/manifest.json") }
+                      else . end)
+            ' > site/flash/boards.json
+          cat site/flash/boards.json
+
           find site -name manifest.json -print -exec cat {} \;
 
       - uses: actions/configure-pages@v5

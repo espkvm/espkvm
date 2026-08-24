@@ -108,9 +108,10 @@ static const kvm_setting_t s_settings[] = {
         .title = "Phrases to watch for",
         .help = "Comma-separated, matched without regard to case, anywhere on a line - "
                 "for example: no boot device, kernel panic, press F1 to continue. An "
-                "alert is raised the moment one appears and cleared when it goes; the "
-                "log records both, and Home Assistant gets a sensor if MQTT is on.",
-        .def_str = "", .max_len = 127, .requires_cap = KVM_CAP_VIDEO,
+                "alert is raised the moment one appears and cleared when it goes, and "
+                "every phrase on screen is named, not only the first; the log records "
+                "both, and Home Assistant gets a sensor if MQTT is on.",
+        .def_str = "", .max_len = 255, .requires_cap = KVM_CAP_VIDEO,
     },
 
     /* ---- input ---------------------------------------------------------- */

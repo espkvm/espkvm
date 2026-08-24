@@ -120,9 +120,11 @@ static void build_state(char *b, size_t n)
     const unsigned t_dec = (unsigned)((t < 0 ? -t : t) * 10.0f) % 10u;
     const unsigned long long uptime = (unsigned long long)(esp_timer_get_time() / 1000000);
     const unsigned psram_kb = (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
-    char alert[SCREENTEXT_ALERT_MAX];
+    /* Static for the same reason the payload below is: this runs on the
+       esp_timer task, and the alert now holds every phrase at once. */
+    static char alert[SCREENTEXT_ALERT_MAX];
+    static char alert_json[SCREENTEXT_ALERT_MAX * 2];
     const bool alerting = screentext_alert_get(alert, sizeof(alert), NULL);
-    char alert_json[SCREENTEXT_ALERT_MAX * 2];
     json_escape(alert_json, sizeof(alert_json), alerting ? alert : "");
 
     snprintf(b, n,
