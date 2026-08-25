@@ -5,9 +5,19 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.35.0] - 2026-08-25
+
+### Added
+- **Every release carries symbol maps** - one `espkvm-<version>-symbols.zip`
+  with a map per board. A panic prints an address and nothing else, and the
+  build that could turn it into a function name is thrown away, so reading
+  somebody's crash meant rebuilding that exact release first. Under a megabyte
+  for all of them, and it turns an afternoon into a minute (#22).
 
 ### Changed
+- **One list of checksums instead of one per board.** The per-board files were
+  an accident of building the boards in parallel; the release page now carries a
+  single `sha256sums.txt`, which is also what people actually check against.
 - **The demo runs itself until you take over.** It asked for three decisions
   before anything happened - switch virtual media on, choose an image, press
   Reset - and a first-time visitor has no reason to know that. Now a machine with

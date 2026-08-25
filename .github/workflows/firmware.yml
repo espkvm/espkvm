@@ -159,7 +159,9 @@ jobs:
             -D SDKCONFIG_DEFAULTS="${{ matrix.board.sdkconfig_defaults }}"
             build &&
             idf.py -B ${{ matrix.board.build_dir }}
-            merge-bin -o espkvm-merged.bin
+            merge-bin -o espkvm-merged.bin &&
+            riscv32-esp-elf-nm -nC ${{ matrix.board.build_dir }}/espkvm.elf
+            > ${{ matrix.board.build_dir }}/espkvm.sym
 
       - name: Collect what a person or a device might want
         run: |
@@ -184,6 +186,12 @@ jobs:
           cp "${bdir}/espkvm-merged.bin" "out/${base}-merged.bin"
           # Per-board so the two matrix jobs' sums do not clobber on merge.
           (cd out && sha256sum ./*"${board}"* > "sha256sums-${board}.txt")
+          # Which function is at which address. A panic prints an address and
+          # nothing else, and the build that could name it is thrown away, so
+          # reading a crash meant rebuilding that exact release first (see #22).
+          # After the sums on purpose: this is not something anyone flashes, and
+          # the release job packs every board's into one archive.
+          cp "${bdir}/espkvm.sym" "out/${base}.sym"
           ls -l out
 
       - uses: actions/upload-artifact@v4
@@ -205,6 +213,20 @@ jobs:
           pattern: firmware-*
           path: out
           merge-multiple: true
+
+      - name: Fewer files on the release page
+        # The per-board pieces exist because the matrix builds in parallel, not
+        # because anyone wants them separately: one archive of symbol maps and
+        # one list of checksums are easier to find among the images. This is the
+        # release page only - the Pages job reads the artefacts, where the
+        # per-board files are untouched.
+        run: |
+          cd out
+          zip -q -j "espkvm-${GITHUB_REF_NAME}-symbols.zip" ./*.sym
+          rm ./*.sym
+          cat sha256sums-*.txt | sed 's| \./| |' | sort -k2 > sha256sums.txt
+          rm sha256sums-*.txt
+          ls -l
 
       - name: Build release notes from the changelog
         run: |
