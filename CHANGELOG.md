@@ -7,7 +7,29 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Changed
+- **The demo runs itself until you take over.** It asked for three decisions
+  before anything happened - switch virtual media on, choose an image, press
+  Reset - and a first-time visitor has no reason to know that. Now a machine with
+  nothing in its drive says so, counts fifteen seconds down - long enough to look
+  around and pick an image yourself - then loads one and boots it, and types the
+  one command the screen asks for. The first thing you do stops the autopilot for
+  good, and the screen tells you what the next step is at every point.
+- **Handing control back does not take the pointer with it.** Pressing Esc on one
+  of the demo's desktops made the drawn cursor vanish. It stays where it was left
+  now, the way a real machine keeps its own pointer, while the screen behind it
+  carries on moving; it appears only once you have actually driven, so nothing is
+  parked in the middle of a screen nobody has touched.
+- **The flock wanders off from a hand that has stopped.** The sheep gather round
+  the pointer while it moves; after four still seconds they lose interest and go
+  back to grazing, and they come back when it moves again.
+
 ### Fixed
+- **Virtual media shows what is really in the drive.** The panel read the card
+  once, when it was opened, so a medium that changed after that - a second
+  operator, an upload finishing elsewhere - left it saying "ejected" while the
+  target was plainly booting. It re-reads every few seconds while it is open, and
+  a choice made here always beats a listing that was already on its way.
 - **No scrollbar down the side of the console.** The page is deliberately one
   pixel taller than the window so Android's captive-portal browser stops
   swallowing downward drags. On a desktop there is no such gesture, and that
