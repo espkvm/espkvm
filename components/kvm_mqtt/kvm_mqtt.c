@@ -131,29 +131,42 @@ static void build_state(char *b, size_t n)
              "{\"tempC\":%d.%u,\"thermal\":\"%s\",\"viewers\":%d,\"signal\":\"%s\","
              "\"resolution\":\"%s\",\"fps\":%u.%02u,\"codec\":\"%s\",\"kbps\":%u,"
              "\"usb\":\"%s\",\"power\":\"%s\",\"uptime\":%llu,\"psramKb\":%u,"
-             "\"screenAlert\":\"%s\",\"screenText\":\"%s\"}",
+             "\"screenAlert\":\"%s\",\"screenText\":\"%s\","
+             /* The other kind of bad screen: one the reader cannot read at all
+                because it is not characters - a stop screen, a blanked output -
+                which shows up as one flat colour that stays. Half a minute of
+                it is a state rather than a repaint. */
+             "\"screenFlat\":\"%s\",\"screenFlatSec\":%u}",
              t_int, t_dec, kvm_thermal_state_name(kvm_thermal_state()), viewers,
              v.signal ? "ON" : "OFF", res, (unsigned)(v.fps_x100 / 100),
              (unsigned)(v.fps_x100 % 100), codec, (unsigned)v.kbps,
              usb_hid_ready() ? "ON" : "OFF", a.have_led ? (a.power_on ? "ON" : "OFF") : "OFF",
-             uptime, psram_kb, alerting ? "ON" : "OFF", alert_json);
+             uptime, psram_kb, alerting ? "ON" : "OFF", alert_json,
+             v.flat_ms >= 30000u ? "ON" : "OFF", (unsigned)(v.flat_ms / 1000u));
 }
 
 /*
  * The state payload does not go on the stack.
  *
  * It is published from the esp_timer task, which runs on about 3.5 KB, and the
- * payload grew to 576 bytes when the screen alert joined it - on top of what
- * build_state() already needs for the alert and its escaped copy. A state
- * message is one at a time anyway, so it lives in one static buffer under the
- * lock that already serialises publishing.
+ * payload carries the screen alert - on top of what build_state() already needs
+ * for the alert and its escaped copy. A state message is one at a time anyway,
+ * so it lives in one static buffer under the lock that already serialises
+ * publishing.
+ *
+ * The size is set by the worst case rather than by a measurement: the alert can
+ * hold every phrase on screen at once (SCREENTEXT_ALERT_MAX), and escaping can
+ * double it. It used to be 576, which was right when an alert was one short
+ * phrase and became too small when the watch started naming all of them - a
+ * long list would have been published as truncated, unparseable JSON.
  */
+#define STATE_JSON_MAX (SCREENTEXT_ALERT_MAX * 2 + 384)
 static void publish_state(void)
 {
     if (!s_connected) {
         return;
     }
-    static char body[576];
+    static char body[STATE_JSON_MAX];
     xSemaphoreTake(s_mtx, portMAX_DELAY);
     build_state(body, sizeof(body));
     if (s_client) {
@@ -250,6 +263,10 @@ static void publish_discovery(void)
                  "problem", NULL, "mdi:message-alert", NULL);
     disco_sensor("sensor", "alerttext", "Screen alert text", "{{ value_json.screenText }}", NULL,
                  NULL, "mdi:text-recognition", "diagnostic");
+    disco_sensor("binary_sensor", "flat", "Screen one colour", "{{ value_json.screenFlat }}",
+                 "problem", NULL, "mdi:square-rounded", NULL);
+    disco_sensor("sensor", "flatsec", "Screen one colour for", "{{ value_json.screenFlatSec }}",
+                 "duration", "s", "mdi:timer-outline", "diagnostic");
     disco_sensor("binary_sensor", "signal", "HDMI signal", "{{ value_json.signal }}", NULL, NULL,
                  "mdi:hdmi-port", NULL);
     disco_sensor("binary_sensor", "usb", "Target USB", "{{ value_json.usb }}", "connectivity", NULL,

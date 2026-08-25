@@ -5,6 +5,49 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Added
+- **The screen as text, instead of the video.** A text screen is about two
+  kilobytes; the video is megabits a second. The Text button next to Select
+  shows the characters and stops the stream, so a machine stays workable over a
+  phone tether or any link that will not carry a picture - the keyboard still
+  reaches the target, which is most of what a BIOS asks for. An extra way to
+  look, never the default: the picture comes back the moment it is switched off,
+  and by itself when the target stops showing text - either because the mode
+  changed or because it simply drew something that is not characters. A screen
+  with the video stopped and nothing to read would be a black rectangle and a
+  puzzle, so it never waits to be asked.
+- **The selected row comes through in text.** A menu says which line you are on
+  by drawing it the other way round, and text alone loses exactly that. The
+  scanner already had to try both polarities to read such a row, so it now keeps
+  the answer: inverted cells are reported (`highlight` in
+  `/api/v1/screen/text`) and drawn inverted in text mode. It is relative to the
+  screen - an installer drawn black on white has nothing highlighted - and the
+  blanks inside a highlighted label travel with it.
+- **A screen that has gone to one flat colour is noticed.** Reading characters
+  cannot cover a modern Windows stop screen: it is a graphical page in a
+  proportional font, with no grid to cut. What it does have is a shape a few
+  hundred samples can see - nearly all of it one colour, and it stays. The
+  device reports how long the picture has been flat (`flatMs` in the video
+  status, "One flat colour for" in the video readout) and publishes it to Home
+  Assistant as a binary sensor with the seconds beside it. It catches a blanked
+  output and a frozen desktop too; what it means is the operator's call.
+
+- **Tests that run without a device, in one command.** `tools/test.sh` covers the
+  C that reads a screen as characters and the C that decides a screen has gone
+  flat, the console's own logic - the demo's machine, the settings file, the
+  keyboard tables, the text layer - and the paste tables. The console side is
+  new: node runs the TypeScript as it is, so it costs no dependency, and it is
+  where a regression like "fast typing repeats a letter" gets caught before
+  anybody else finds it. CI runs the same suites.
+
+### Fixed
+- **A long screen-watch list no longer truncates the MQTT payload.** The state
+  buffer was sized when an alert was one short phrase; the watch has been naming
+  every phrase on screen since 0.34.0, and a full list would have been published
+  as unparseable JSON. It is sized from the worst case now.
+
 ## [0.36.0] - 2026-08-25
 
 ### Added

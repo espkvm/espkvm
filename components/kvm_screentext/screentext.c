@@ -158,11 +158,16 @@ typedef struct {
  * The character in a cell, or 0.
  *
  * Tried both ways round: a selected menu row is drawn dark-on-light, which
- * thresholds to the exact inverse of the glyph in the font.
+ * thresholds to the exact inverse of the glyph in the font. Which way round it
+ * was is worth keeping - it is the only thing a text screen says about
+ * highlighting - so @p inverted carries it out when the caller wants it.
  */
 static uint16_t cell_char(const screentext_frame_t *f, const layout_t *lay, uint16_t col,
-                          uint16_t row, bool *had_ink)
+                          uint16_t row, bool *had_ink, bool *inverted)
 {
+    if (inverted) {
+        *inverted = false;
+    }
     const uint32_t px = (uint32_t)lay->x0 + (uint32_t)col * lay->cell_w;
     const uint32_t py = (uint32_t)lay->y0 + (uint32_t)row * lay->cell_h;
 
@@ -180,7 +185,11 @@ static uint16_t cell_char(const screentext_frame_t *f, const layout_t *lay, uint
     for (uint32_t i = 0; i < lay->cell_h; i++) {
         bits[i] = (uint8_t)~bits[i];
     }
-    return glyph_lookup(lay->font, lay->font_len, fnv1a(bits, lay->cell_h));
+    cp = glyph_lookup(lay->font, lay->font_len, fnv1a(bits, lay->cell_h));
+    if (cp && inverted) {
+        *inverted = true;
+    }
+    return cp;
 }
 
 /**
@@ -258,7 +267,7 @@ static bool layout_probes_ok(const screentext_frame_t *frame, const layout_t *la
         const uint32_t cell = (i * 337u) % cells;
         bool had_ink = false;
         const uint16_t cp = cell_char(frame, lay, (uint16_t)(cell % lay->cols),
-                                      (uint16_t)(cell / lay->cols), &had_ink);
+                                      (uint16_t)(cell / lay->cols), &had_ink, NULL);
         if (had_ink) {
             ink++;
             if (cp) {
@@ -269,24 +278,82 @@ static bool layout_probes_ok(const screentext_frame_t *frame, const layout_t *la
     return ink == 0 || hit * 100 >= ink * PROBE_MIN_PERCENT;
 }
 
+/**
+ * Join up a row's marks.
+ *
+ * A highlighted label is inverted across its whole width, spaces included, but a
+ * blank cell is one flat colour and has no glyph to take a polarity from. The
+ * blanks that sit between two marked cells on a row are part of the same bar,
+ * so they are marked with it; padding past the last character is left alone,
+ * because there is nothing to say how far it went.
+ */
+static void join_row_marks(screentext_grid_t *out, uint16_t cols, uint16_t rows)
+{
+    for (uint16_t r = 0; r < rows; r++) {
+        const size_t base = (size_t)r * cols;
+        int first = -1, last = -1;
+        for (uint16_t c = 0; c < cols; c++) {
+            if (screentext_marked(out, base + c)) {
+                if (first < 0) {
+                    first = c;
+                }
+                last = c;
+            }
+        }
+        for (int c = first + 1; c < last; c++) {
+            const size_t i = base + (size_t)c;
+            out->marks[i >> 3] |= (uint8_t)(1u << (i & 7));
+        }
+    }
+}
+
 /** Read the whole screen with one layout. False if it does not hold up. */
 static bool scan_with(const screentext_frame_t *frame, const layout_t *lay,
                       screentext_grid_t *out)
 {
-    uint32_t ink = 0, hit = 0;
+    uint32_t ink = 0, hit = 0, inverted_cells = 0;
+    memset(out->marks, 0, sizeof(out->marks));
     for (uint16_t r = 0; r < lay->rows; r++) {
         for (uint16_t c = 0; c < lay->cols; c++) {
-            bool cell_ink = false;
-            const uint16_t cp = cell_char(frame, lay, c, r, &cell_ink);
+            bool cell_ink = false, cell_inverted = false;
+            const uint16_t cp = cell_char(frame, lay, c, r, &cell_ink, &cell_inverted);
+            const size_t i = (size_t)r * lay->cols + c;
             if (cell_ink) {
                 ink++;
                 if (cp) {
                     hit++;
+                    if (cell_inverted) {
+                        inverted_cells++;
+                        out->marks[i >> 3] |= (uint8_t)(1u << (i & 7));
+                    }
                 }
             }
-            out->cells[(size_t)r * lay->cols + c] = cp ? cp : SCREENTEXT_UNREADABLE;
+            out->cells[i] = cp ? cp : SCREENTEXT_UNREADABLE;
         }
     }
+    /*
+     * Which way round the screen itself is drawn is a question only the whole
+     * screen can answer - the sample above sees too few characters on a sparse
+     * one to be trusted with it. So the marks start out as "inverted", and if
+     * that turned out to be most of the screen, the meaning is turned around
+     * here: what is marked is always the minority.
+     *
+     * Only cells that matched a glyph take part. A blank has one flat colour
+     * and no polarity to speak of, and turning the meaning around must not
+     * sweep whole empty rows into the selection.
+     */
+    if (inverted_cells * 2 > hit) {
+        for (uint16_t r = 0; r < lay->rows; r++) {
+            for (uint16_t c = 0; c < lay->cols; c++) {
+                const size_t i = (size_t)r * lay->cols + c;
+                const uint16_t cp = out->cells[i];
+                if (cp != ' ' && cp != SCREENTEXT_UNREADABLE) {
+                    out->marks[i >> 3] ^= (uint8_t)(1u << (i & 7));
+                }
+            }
+        }
+    }
+    join_row_marks(out, lay->cols, lay->rows);
 
     if (ink < MIN_INK_CELLS) {
         return false;

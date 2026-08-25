@@ -61,14 +61,15 @@ Useful for what it does today, and honest about the rest.
 | Login, and a physical password reset | works |
 | Thermal protection | works |
 | Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
-| Reading a text screen as text (BIOS, boot loader, console) | works; select and copy with the mouse, or copy the whole screen. Character modes only &mdash; a graphical UEFI setup is a picture and is not read. Screens up to 1024x768 are read as they come; wider ones, up to 1080p, are read while you ask for them |
+| Reading a text screen as text (BIOS, boot loader, console) | works; select and copy with the mouse, or copy the whole screen, and read it *instead* of the video with the Text button &mdash; a screen is a couple of kilobytes, which is what makes a machine workable over a link that will not carry a picture. The row a menu is sitting on comes through: cells drawn the other way round are reported and shown inverted. Character modes only &mdash; a graphical UEFI setup is a picture and is not read. Screens up to 1024x768 are read as they come; wider ones, up to 1080p, are read while you ask for them |
+| Noticing a screen that is one flat colour | works; a modern Windows stop screen, a blanked output or a desktop that died into its background has no characters to read, but it is one colour and it stays &mdash; the device reports how long it has been that way, in the video readout and to Home Assistant |
 | Watching the screen for words while nobody is looking | works; off by default. Give it phrases (`no boot device`, `kernel panic`) and it alerts in the log and in Home Assistant when one appears, naming every phrase on screen, not only the first |
 | Guessing the target's OS from how it enumerates USB | works |
 | Wake-on-LAN (magic packet to the target's MAC) | works |
 | WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; verified on the ESP32-P4 Function EV. Also built for the NANO, Guition and PoE boards, which carry the same co-processor; the Waveshare ESP32-P4-ETH has no radio at all. One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
 | Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306 in six sizes, SH1106 in four, found on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
-| Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional |
+| Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional. Includes what the screen is doing: the words the watch found, and whether the screen has gone to one flat colour |
 | VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
 | HDMI audio | not implemented |
 
@@ -440,6 +441,24 @@ attached at all:
 ```sh
 cd web && npm run dev:mock
 ```
+
+### Tests
+
+Everything that can be checked without a device runs in a couple of seconds:
+
+```sh
+tools/test.sh          # all of it
+tools/test.sh host     # just the C
+tools/test.sh web      # just the console
+```
+
+That is the C that reads a screen as characters and the C that decides a screen
+has gone to one flat colour - both plain arithmetic over a pixel buffer, so they
+compile and run on a development machine - plus the console's own logic (the
+demo's machine, the settings file, the keyboard tables, the text layer) run by
+`node --test`, and the paste tables checked against the real keyboard layouts.
+The same suites run in CI on every push. Building the firmware itself needs
+ESP-IDF and takes minutes, so it is not part of this.
 
 ## How it works
 

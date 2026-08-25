@@ -627,6 +627,7 @@ static void capture_monitor_task(void *arg)
                  * gone. Keeping it would let the console offer a copy of a
                  * screen the target is no longer showing. */
                 capture_screentext_forget();
+                capture_flat_forget();
             }
             continue;
         }

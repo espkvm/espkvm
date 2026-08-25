@@ -228,6 +228,7 @@ void capture_loop_run(capture_ctx_t *c)
          * without paying for either. Costs a few hundred reads unless this is a
          * text mode that has stopped moving. */
         capture_screentext_tick(c, src);
+        capture_flat_tick(c, src);
 
         esp_err_t ee = codec->encode(c, src, force_publish);
         if (ee == ESP_OK) {

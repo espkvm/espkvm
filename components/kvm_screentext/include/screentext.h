@@ -111,7 +111,34 @@ typedef struct {
     uint16_t height; /**< the grid onto a picture of any displayed size */
     uint8_t confidence; /**< percent of the cells carrying ink that matched a glyph */
     uint16_t cells[SCREENTEXT_MAX_CELLS]; /**< Unicode code points, row-major */
+    /**
+     * Which cells are drawn the other way round - one bit per cell, row-major.
+     *
+     * A text screen has no colours to read, but it does say which cells are
+     * inverted, and that is what a menu's selected row is: the same glyph with
+     * ink and paper swapped. The scanner already had to know - a cell that does
+     * not match the font is looked up again inverted - so this is that answer
+     * kept rather than thrown away, and it is what makes a menu readable as
+     * text at all.
+     *
+     * It is relative to the screen, not absolute: an installer drawn black on
+     * white has every cell "inverted" and none of them highlighted, so the
+     * polarity most of the screen is drawn in counts as normal and the minority
+     * is what ends up marked.
+     *
+     * Blanks between two marked cells on a row are marked too, so a highlighted
+     * label reads as one bar. Padding beyond the last character of a highlight
+     * is not marked: a blank cell is one flat colour and carries no glyph to
+     * tell the polarity from.
+     */
+    uint8_t marks[(SCREENTEXT_MAX_CELLS + 7) / 8];
 } screentext_grid_t;
+
+/** Whether the cell at @p index (row-major) is drawn inverted. */
+static inline bool screentext_marked(const screentext_grid_t *g, size_t index)
+{
+    return (g->marks[index >> 3] >> (index & 7)) & 1u;
+}
 
 /**
  * Whether a mode can hold a character grid at all, so a caller can skip the

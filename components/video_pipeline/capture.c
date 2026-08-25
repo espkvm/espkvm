@@ -143,6 +143,10 @@ void capture_status_get(kvm_video_status_t *out)
     taskENTER_CRITICAL(&s_mu);
     *out = s_status;
     taskEXIT_CRITICAL(&s_mu);
+    /* Kept by the capture task rather than in the status block: it is one
+       integer written by one task and read here, and it has no business
+       holding the critical section the encoder's counters live in. */
+    out->flat_ms = capture_flat_ms();
 }
 
 static void camera_task(void *arg)

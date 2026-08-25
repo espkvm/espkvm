@@ -274,6 +274,9 @@ static esp_err_t api_pins_get(httpd_req_t *req)
  * The grid comes with the reading so the console can lay a selectable text layer
  * over the video without guessing where the cells are.
  */
+/* Enough for any real screen: a menu has one highlighted row, a dialog two. */
+#define HIGHLIGHT_RUNS_MAX 128
+
 static esp_err_t api_screen_text_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
@@ -344,6 +347,46 @@ static esp_err_t api_screen_text_get(httpd_req_t *req)
         cJSON_AddNumberToObject(o, "confidence", grid->confidence);
         cJSON_AddNumberToObject(o, "ageMs", (double)age_ms);
         cJSON_AddStringToObject(o, "text", text);
+        /*
+         * Which cells are drawn the other way round from the rest of the screen
+         * - a menu's selected row, a highlighted button - as runs of
+         * [row, column, length]. Text alone loses the one thing a character
+         * screen says about selection, which is exactly what somebody
+         * navigating a boot menu needs to see.
+         *
+         * Runs rather than a bitmap: a screen has one or two of them, and a
+         * bitmap would be 250 bytes of mostly zeroes.
+         */
+        cJSON *runs = cJSON_CreateArray();
+        if (runs) {
+            int made = 0;
+            for (uint16_t r = 0; r < grid->rows && made < HIGHLIGHT_RUNS_MAX; r++) {
+                uint16_t c = 0;
+                while (c < grid->cols && made < HIGHLIGHT_RUNS_MAX) {
+                    if (!screentext_marked(grid, (size_t)r * grid->cols + c)) {
+                        c++;
+                        continue;
+                    }
+                    const uint16_t start = c;
+                    while (c < grid->cols &&
+                           screentext_marked(grid, (size_t)r * grid->cols + c)) {
+                        c++;
+                    }
+                    const int run[3] = {r, start, c - start};
+                    cJSON *item = cJSON_CreateIntArray(run, 3);
+                    if (!item) {
+                        break;
+                    }
+                    cJSON_AddItemToArray(runs, item);
+                    made++;
+                }
+            }
+            if (made > 0) {
+                cJSON_AddItemToObject(o, "highlight", runs);
+            } else {
+                cJSON_Delete(runs);
+            }
+        }
         /* What the watch found on this screen, if it was asked to look. */
         char alert[SCREENTEXT_ALERT_MAX];
         if (screentext_alert_get(alert, sizeof(alert), NULL)) {
@@ -445,14 +488,17 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
      * - that is what /api/v1/screen/text answers - only that asking is worth it. */
     const bool text_mode = st.signal && screentext_mode_supported(st.hres, st.vres);
 
-    char body[384];
+    char body[416];
     int n = snprintf(body, sizeof(body),
                      "{\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"fps\":%u.%02u,\"skippedFps\":%u.%02u,\"kbps\":%u,"
                      "\"encodeUs\":%u,\"ppaUs\":%u,\"encoderBusyPct\":%u,"
                      "\"modeChanges\":%u,\"sysStatus\":%u,\"viewers\":%d,"
                      "\"wsClients\":%u,\"imgClients\":%d,\"codec\":\"%s\","
-                     "\"textMode\":%s}",
+                     /* How long the picture has been one flat colour: the shape
+                        of a stop screen or a blanked output, neither of which
+                        can be read as text. 0 means it is a picture. */
+                     "\"textMode\":%s,\"flatMs\":%u}",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
                      st.interlaced ? "true" : "false", (unsigned)(st.fps_x100 / 100u),
                      (unsigned)(st.fps_x100 % 100u), (unsigned)(st.skipped_fps_x100 / 100u),
@@ -460,7 +506,8 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)st.encode_us, (unsigned)st.ppa_us, (unsigned)st.encoder_busy_pct,
                      (unsigned)st.mode_changes, (unsigned)st.sys_status,
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
-                     s_stream_workers, codec, text_mode ? "true" : "false");
+                     s_stream_workers, codec, text_mode ? "true" : "false",
+                     (unsigned)st.flat_ms);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
     }

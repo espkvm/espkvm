@@ -133,6 +133,18 @@ static uint8_t *render(const uint8_t *text, uint32_t cols, uint32_t rows,
     return buf;
 }
 
+/** How many cells on a row came back marked as drawn the other way round. */
+static uint32_t marks_in_row(const screentext_grid_t *g, uint16_t row)
+{
+    uint32_t n = 0;
+    for (uint16_t c = 0; c < g->cols; c++) {
+        if (screentext_marked(g, (size_t)row * g->cols + c)) {
+            n++;
+        }
+    }
+    return n;
+}
+
 static int failures;
 static void check(int ok, const char *what)
 {
@@ -197,8 +209,49 @@ int main(int argc, char **argv)
         check(strstr(out, l3) != NULL, "every ASCII symbol came back");
         check(strstr(out, "───") != NULL, "box drawing came back as Unicode");
         check(strstr(out, "   \n") == NULL, "trailing blanks are trimmed");
+
+        /* The selected row is the one drawn dark on light, and that is the only
+           thing a text screen says about a menu's selection. */
+        const size_t sel = (size_t)5 * cols;
+        check(screentext_marked(&grid, sel + 2), "the selected row's first letter is marked");
+        check(screentext_marked(&grid, sel + 17),
+              "a blank inside the selected label is marked with it");
+        check(!screentext_marked(&grid, sel + 0),
+              "padding before the selection is not marked");
+        check(!screentext_marked(&grid, sel + strlen(l1)),
+              "padding after the selection is not marked");
+        check(marks_in_row(&grid, 5) == strlen(l1) - 2,
+              "the mark covers the label and nothing else");
+        uint32_t elsewhere = 0;
+        for (uint16_t r = 0; r < grid.rows; r++) {
+            if (r != 5) elsewhere += marks_in_row(&grid, r);
+        }
+        check(elsewhere == 0, "no other row is marked");
     }
     free(buf);
+
+    /* --- a screen drawn the other way round: black on white, one light row ---
+       Inversion is relative to the screen, so here it is the ordinary-looking
+       row that is the selection, and the rest of the page is not marked. */
+    uint8_t *inv = malloc(cols * rows);
+    memset(inv, ' ', cols * rows);
+    memcpy(inv + 2 * cols, l2, strlen(l2));
+    memcpy(inv + 6 * cols, l1, strlen(l1));
+    for (uint32_t r = 0; r < SCREENTEXT_MAX_ROWS; r++) pairs[r] = (pair_t){20, 220};
+    pairs[6] = (pair_t){200, 30}; /* the selected row, light on dark this time */
+    buf = render(inv, cols, rows, 9, SCREENTEXT_FMT_UYVY, pairs, &vga, 0, 0, &w, &h, &stride);
+    frame = (screentext_frame_t){buf, SCREENTEXT_FMT_UYVY, w, h, stride};
+    const bool got_inv = screentext_scan(&frame, &grid);
+    check(got_inv, "a black-on-white screen still reads");
+    if (got_inv) {
+        check(marks_in_row(&grid, 6) == strlen(l1) - 2,
+              "on an inverted page the odd row out is the marked one");
+        check(marks_in_row(&grid, 2) == 0, "the page itself is not marked");
+        screentext_to_utf8(&grid, out, sizeof out);
+        check(strstr(out, "5CG9382KJ7") != NULL, "text still came back from the inverted page");
+    }
+    free(buf);
+    free(inv);
 
     /* --- the same screen in BGR888 at 640x480, 8-wide cells --- */
     uint8_t *text2 = malloc(cols * 30);

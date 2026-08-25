@@ -126,6 +126,20 @@ void capture_screentext_tick(capture_ctx_t *c, const void *frame);
 void capture_screentext_forget(void);
 
 /*
+ * Watching for a screen that has become one flat colour - a Windows stop
+ * screen, a blanked output, a desktop that died into its background. Cheap
+ * enough to run on every frame in every mode, which is the point: the text
+ * reader cannot see any of those. See capture_flat.c.
+ */
+void capture_flat_tick(capture_ctx_t *c, const void *frame);
+
+/** Forget it, the way capture_screentext_forget() does when the signal goes. */
+void capture_flat_forget(void);
+
+/** How long the screen has been one colour, in ms; 0 when it is not. */
+uint32_t capture_flat_ms(void);
+
+/*
  * Read the screen with no viewer connected, for the watch. Cheap and silent
  * unless the operator asked for a watch and the target is showing text.
  * Capture task only.

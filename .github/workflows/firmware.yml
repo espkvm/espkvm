@@ -29,15 +29,37 @@ permissions:
   contents: read
 
 jobs:
-  # The screen-text scanner is plain C over a pixel buffer, so its tests run
-  # here in a second rather than needing a board and a target sitting in its
-  # BIOS. It is a table lookup against a font: exactly the kind of thing that
-  # breaks quietly, and the kind that a host test catches for free.
+  # Two pieces of the capture path are plain C over a pixel buffer - reading a
+  # screen as characters, and deciding a screen has gone to one flat colour - so
+  # their tests run here in a second rather than needing a board and a target
+  # sitting in its BIOS. Both are the kind of thing that breaks quietly.
   screentext:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: components/kvm_screentext/test/run.sh
+      - run: components/video_pipeline/test/run.sh
+
+  # The console's own logic: the fake machine the demo runs on, the settings
+  # file, the keyboard tables, the text layer. Node runs the TypeScript as it
+  # is, so this needs nothing but a checkout and an npm ci - and it is where a
+  # regression like "fast typing repeats a letter" gets caught before anyone
+  # else finds it.
+  console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run test
+        working-directory: web
 
   # The paste tables: self-consistent (no two characters on one key), and right
   # (every character where the real layout puts it). Both are the kind of

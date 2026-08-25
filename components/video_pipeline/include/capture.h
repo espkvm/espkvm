@@ -27,6 +27,15 @@ typedef struct {
     uint32_t ppa_us;           /**< mean PPA colour-conversion time per frame (H.264) */
     uint32_t encoder_busy_pct; /**< share of wall clock spent in conversion + encode */
     uint8_t sys_status;    /**< raw TC358743 SYS_STATUS, for diagnostics */
+    /**
+     * How long the picture has been one flat colour, in ms; 0 when it is not.
+     *
+     * The text reader covers screens drawn from a character generator. This
+     * covers the other kind of bad news - a Windows stop screen, a blanked
+     * output, a desktop that died into its background - which has no grid to
+     * read and is nearly all one colour. See capture_flat.c.
+     */
+    uint32_t flat_ms;
 } kvm_video_status_t;
 
 void capture_start(void);
