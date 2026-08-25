@@ -5,6 +5,68 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.36.0] - 2026-08-25
+
+### Added
+- **A panel can be pinned open beside the picture.** Panels float over the
+  screen on purpose - a picture that resizes whenever one opens makes you find
+  everything again - but on a wide screen there is room for both, and then
+  covering the target is the worse of the two. The pin in the panel's header
+  hands it a strip of the stage instead: the picture shrinks to what is left and
+  everything drawn on it stays centred on the picture. Off by default,
+  remembered per browser (it depends on the window, not the device), and not
+  offered on a phone, where the panel is the whole width.
+- **Arrow keys on a phone.** A soft keyboard has no arrows, which makes a BIOS
+  menu or a boot list impossible to drive from a phone. Touch mode has a pad
+  now: the four arrows in the shape they have on a keyboard, with Esc, Tab and
+  Enter around them - missing for the same reason and wanted in the same places.
+  Hold a key and it repeats.
+
+### Changed
+- **The video figures open where they are shown.** Ten numbers about the capture
+  had a panel of their own, which slid over the very picture they describe. The
+  headline ones have always been in the status bar; clicking them now opens the
+  rest just below, and the rail is one button shorter. The bar itself is
+  shorter too: "skipped" waits in the readout, and whether the device answers at
+  all stands beside the figures rather than inside them - that is about the
+  connection, not the picture.
+- **Power is a menu on the rail, not a panel.** Three buttons and Wake-on-LAN do
+  not need a panel sliding over the screen - and that panel covered the very
+  thing you want to watch while a machine restarts. The button sits at the foot
+  of the side rail with the target's power state on it, and the menu opens
+  beside it.
+
+### Fixed
+- **A demo machine that is switched off looks switched off.** With no power there
+  is no text screen, and the drawing fell through to the constellation - so a
+  target that had just been shut down showed a running desktop, and Reset, which
+  does nothing to a machine that is already off, looked broken. It is a black
+  screen and "No signal" now, and the power button brings it back.
+  Thanks @DaveDavenport.
+- **The install stops crying "longer than usual" on a healthy update.** Writing
+  and verifying an image takes past forty seconds on a real board, and the
+  console expected twelve, so every update looked like it was going wrong; the
+  wait for the device to come back was short by a few seconds too. Both now sit
+  past what a healthy device takes. Reported by @petrn (#22).
+- **The version badge stops competing with the install screen.** It filled as a
+  ring and pulsed while the same install was described full-screen - two things
+  telling one story, and the moving one made the version underneath hard to
+  read. The badge carries the version; the screen carries the install.
+  Reported by @petrn (#22).
+- **Clicking the picture answers you.** Taking control is a button, deliberately
+  - the first click would otherwise land on the target - but clicking the
+  picture did nothing at all, which reads as a broken console. It waves the
+  button at you now.
+- **The demo points at the control it is asking for.** "Open Media" and "turn on
+  Select" are obvious to anyone who knows the console and to nobody else, so the
+  button in question glows while the demo waits for it, and the screens name
+  where it is.
+- **The demo types like a keyboard.** Two keys overlapping - which is what fast
+  typing is - made it repeat the first one, because it read every report of what
+  is held down as a fresh press. Only the device's own demo was affected: real
+  hardware passes the report to the target, which decides what is new.
+  Thanks @DaveDavenport.
+
 ## [0.35.0] - 2026-08-25
 
 ### Added

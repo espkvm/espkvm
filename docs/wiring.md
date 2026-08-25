@@ -107,6 +107,7 @@ Under **Settings -> Power**:
 | `atx_active_high` | Drive high to press (high-level-trigger module) | on |
 | `atx_led_active_high` | LED reads high when the target is on | on |
 
-Set the pins and turn `atx_enable` on; the Power panel in the console lights up.
+Set the pins and turn `atx_enable` on; the power button at the bottom of the
+console's side rail lights up.
 If the target reacts to the wrong button, or the reported power state is
 inverted, flip the matching polarity setting - no reflash.

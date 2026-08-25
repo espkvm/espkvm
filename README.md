@@ -650,6 +650,8 @@ docs/             what the hardware actually does
 - [LAB1612](https://1612.it/posts/esp-kvm-ip-kvm-esp32-p4/) - *ESP-KVM: un IP-KVM open source con un solo ESP32-P4, alternativa economica a PiKVM e JetKVM* (in Italian; a comparison against PiKVM and JetKVM, fair about what is still missing here - no security review, and one pair of hands)
 - [SMZDM](https://post.smzdm.com/p/a70dq2ql/) - *一周两条GBA满帧视频、一块59元新板：ESP32-P4终于"能玩了"，但上手前先看这三个问题* (in Chinese; ESP-KVM is one of three ESP32-P4 projects it weighs up, and it repeats this project's own advice to keep the device on a network you trust)
 - [EdigE](http://edige.xyz/news/esp32-p4-hdmi-ip-kvm) - *An ESP32-P4 turned into a real IP-KVM with HDMI, H.264, USB HID and boot images* (in Russian, and it goes into the capture path and the frame budget rather than only the feature list)
+- [LearningBot](https://learningbot.tech/newsletter/every-ai-output-in-europe-needs-a-receipt-starting-today/) - *Build of the Week* (a newsletter about the EU AI Act's transparency rules picks ESP-KVM as its build, and likes that one chip has to be a USB peripheral and a capture pipeline at once)
+- [RISC-V International](https://www.linkedin.com/pulse/week-risc-v-july-31-2026-risc-v-international-zzxze) - *This Week in RISC-V* (July 31, 2026)
 
 On video: **Wels** covered it in
 [5 Minutos de Miercoles #22](https://youtu.be/nw-8a1GmJLE?t=342), from 5:42.
