@@ -30,6 +30,10 @@ static SemaphoreHandle_t s_lock;
 static screentext_grid_t *s_scratch;
 static screentext_grid_t *s_latest;
 static int64_t s_latest_us;
+/* Bumped whenever what a reader would see changes. One 32-bit word, written
+   under the lock and read without it: a reader that catches an old value simply
+   sends the reading one moment later. */
+static volatile uint32_t s_seq;
 
 void screentext_store_init(void)
 {
@@ -59,6 +63,10 @@ void screentext_store_init(void)
    that lands a frame late simply reads the next frame. */
 static volatile int64_t s_requested_us;
 
+/* Subscribers being sent every reading. One writer (the web server, under its
+   own lock), read by the capture task. */
+static volatile int s_streaming;
+
 void screentext_request(void)
 {
     s_requested_us = esp_timer_get_time();
@@ -66,8 +74,31 @@ void screentext_request(void)
 
 bool screentext_requested(void)
 {
+    /* A subscriber is somebody sitting in front of the screen right now, which
+       is a stronger version of the same statement - so it never lapses. */
+    if (s_streaming > 0) {
+        return true;
+    }
     const int64_t asked = s_requested_us;
     return asked != 0 && esp_timer_get_time() - asked < REQUEST_HOLD_US;
+}
+
+void screentext_stream_enter(void)
+{
+    s_streaming++;
+    screentext_request();
+}
+
+void screentext_stream_leave(void)
+{
+    if (s_streaming > 0) {
+        s_streaming--;
+    }
+}
+
+bool screentext_streaming(void)
+{
+    return s_streaming > 0;
 }
 
 /** Everything below is a no-op until init has succeeded. */
@@ -90,12 +121,22 @@ void screentext_publish(const screentext_grid_t *grid)
     if (grid) {
         memcpy(s_latest, grid, sizeof(*s_latest));
         s_latest_us = esp_timer_get_time();
-    } else {
+        s_seq++;
+    } else if (s_latest->rows != 0 || s_latest->cols != 0) {
+        /* Only on the way from text to no text: the scanner says "not text" for
+           every settled picture on a desktop, and a sequence that moved for each
+           of those would have a subscriber re-reading nothing all day. */
         s_latest->rows = 0;
         s_latest->cols = 0;
         s_latest_us = 0;
+        s_seq++;
     }
     xSemaphoreGive(s_lock);
+}
+
+uint32_t screentext_seq(void)
+{
+    return s_seq;
 }
 
 static char s_alert[SCREENTEXT_ALERT_MAX];

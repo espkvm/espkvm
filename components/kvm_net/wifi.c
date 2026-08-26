@@ -210,6 +210,38 @@ static void derive_ap_ssid(char *out, size_t len)
     snprintf(out, len, "ESP-KVM-%02x%02x", mac[4], mac[5]);
 }
 
+/*
+ * Give the hotspot a password of its own, once, and say what it is.
+ *
+ * The hotspot used to come up open when nobody had set a password, which is a
+ * poor default for a device whose whole job is reaching a machine: an open
+ * network is one anybody in the building can join, and what they find on it is
+ * the console's login page and a captive portal. So an unset password is filled
+ * in with a random one rather than meaning "open".
+ *
+ * It has to be knowable, or the device locks its own operator out: it goes in
+ * the log, on the status display, and into the QR code the display shows, and it
+ * can be changed or cleared in Settings. Choosing an open hotspot on purpose is
+ * still possible - that is what ap_open is for.
+ */
+#define AP_PASS_GENERATED_LEN 12
+
+static void generate_ap_password(void)
+{
+    /* No lookalikes: this gets read off a small screen or typed from a photo. */
+    static const char alphabet[] = "abcdefghijkmnpqrstuvwxyz23456789";
+    char pass[AP_PASS_GENERATED_LEN + 1];
+    for (int i = 0; i < AP_PASS_GENERATED_LEN; i++) {
+        pass[i] = alphabet[esp_random() % (sizeof(alphabet) - 1)];
+    }
+    pass[AP_PASS_GENERATED_LEN] = '\0';
+    if (kvm_setting_set_str("ap_pass", pass) == ESP_OK) {
+        ESP_LOGW(TAG, "hotspot password set to '%s' - change it in Settings -> Network", pass);
+    } else {
+        ESP_LOGE(TAG, "could not store a hotspot password; the hotspot stays open");
+    }
+}
+
 /* Fill an access-point config (name ESP-KVM-<mac>, WPA2 if ap_pass is long
  * enough else open). Shared by AP mode and the APSTA rescue hotspot. */
 static void fill_ap_config(wifi_config_t *ap)
@@ -220,8 +252,14 @@ static void fill_ap_config(wifi_config_t *ap)
     ap->ap.ssid_len = (uint8_t)strlen(apssid);
     ap->ap.channel = 1;
     ap->ap.max_connection = 4;
+    /* An unset password means "make one", not "let anybody in"; an open hotspot
+       is a deliberate choice and has its own setting. */
+    if (!kvm_setting_bool("ap_open") && (!kvm_setting_str("ap_pass") ||
+                                         strlen(kvm_setting_str("ap_pass")) < 8)) {
+        generate_ap_password();
+    }
     const char *pass = kvm_setting_str("ap_pass");
-    if (pass && strlen(pass) >= 8) {
+    if (!kvm_setting_bool("ap_open") && pass && strlen(pass) >= 8) {
         strlcpy((char *)ap->ap.password, pass, sizeof(ap->ap.password));
         ap->ap.authmode = WIFI_AUTH_WPA2_PSK;
     } else {

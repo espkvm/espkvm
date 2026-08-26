@@ -69,6 +69,7 @@ Useful for what it does today, and honest about the rest.
 | WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; verified on the ESP32-P4 Function EV. Also built for the NANO, Guition and PoE boards, which carry the same co-processor; the Waveshare ESP32-P4-ETH has no radio at all. One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
 | ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
 | Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306 in six sizes, SH1106 in four, found on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
+| A viewing token for dashboards | works; off until you make one (Settings &rarr; Security). One long random string that opens the MJPEG stream, a single frame and the capture's figures - enough for a camera card in Home Assistant - and no endpoint that can touch the target. Only its hash is stored, so it is shown once |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered sensors and power/reset/Wake-on-LAN buttons, TLS optional. Includes what the screen is doing: the words the watch found, and whether the screen has gone to one flat colour |
 | VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
 | HDMI audio | not implemented |
@@ -501,6 +502,14 @@ lands where it was aimed whatever the target's mouse acceleration is doing. A
 relative pointer, for software that captures the cursor. And the consumer keys.
 Everything is released when the browser goes away, so a dropped connection cannot
 leave a key held down on the target.
+
+One thing to know about the absolute pointer: it addresses the target's whole
+desktop, not the single output being captured. On a target with a second display
+the desktop is wider than the picture, so the pointer travels further than the
+mouse and part of the picture aims at the screen you cannot see. Unplug the second
+display while working through ESP-KVM, or switch the pointer to relative in
+Settings - relative sends movement rather than position, so the desktop's layout
+stops mattering.
 
 **Target OS.** How a machine enumerates a USB device is a fingerprint. Windows
 asks for a Microsoft OS descriptor, macOS reads each string twice, Linux does

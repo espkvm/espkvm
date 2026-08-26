@@ -353,12 +353,24 @@ static const kvm_setting_t s_settings[] = {
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },
     {
+        .key = "ap_open", .section = "network", .type = KVM_VT_BOOL,
+        .title = "Open hotspot (no password)",
+        .help = "Run the device's hotspot with no password at all. Off, and with "
+                "no password set, the device makes one up on first use and prints "
+                "it in the log and on the display - an open network anybody in the "
+                "building can join is a poor way to reach a server. Turn this on "
+                "only where that is what you want.",
+        .def = 0, .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
+    },
+    {
         .key = "ap_pass", .section = "network", .type = KVM_VT_STR,
         .title = "Hotspot password",
         .help = "Password for the device's own hotspot (\"ap\" mode, or the rescue "
-                "hotspot below). At least 8 characters, or blank for an open "
-                "hotspot. The network name is ESP-KVM-xxxx (the device's MAC). "
-                "Stored write-only.",
+                "hotspot below). At least 8 characters. Left blank, the device "
+                "makes one up the first time the hotspot comes up and prints it "
+                "in the log and on the display; for a hotspot with no password at "
+                "all, use the setting above. The network name is ESP-KVM-xxxx "
+                "(the device's MAC). Stored write-only.",
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
         .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
     },

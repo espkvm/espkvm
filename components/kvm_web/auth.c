@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h> /* strncasecmp: a header name is case-insensitive and so is its value */
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -21,6 +22,7 @@
 #include "kvm_board.h"
 #include "kvm_settings.h"
 #include "http_recv.h"
+#include "http_server.h" /* kvm_web_security_headers: the auth routes register themselves */
 #include "kvm_tls.h"
 #include "wifi.h" /* kvm_net_mode_t: AP mode serves the console plain */
 
@@ -30,6 +32,9 @@
 #define NVS_KEY_SALT "salt"
 #define NVS_KEY_HASH "hash"
 #define NVS_KEY_ITER "iter"
+/* SHA-256 of the viewing token, if one has been made. The token itself is never
+   stored: it is shown once, and what is kept only proves a guess wrong. */
+#define NVS_KEY_TOKEN "camtok"
 
 #define SALT_LEN 16
 #define HASH_LEN 32
@@ -469,8 +474,184 @@ bool kvm_auth_required(void)
     return kvm_setting_bool("sec_auth");
 }
 
+/* ---- the viewing token ---------------------------------------------------
+ *
+ * One long random string that opens the picture and nothing else: the MJPEG
+ * stream, a single frame, and the capture's figures. It exists because Home
+ * Assistant's camera integrations speak a URL and basic auth, and this device
+ * speaks a session cookie - so without it the only way to put the target's
+ * screen on a dashboard is to turn the login off, which is not a trade anybody
+ * should make.
+ *
+ * What it deliberately cannot do: press a key, move the pointer, touch the
+ * power, change a setting, install firmware, or read the screen as text. It is
+ * a viewing credential, and a viewing credential is all it is.
+ *
+ * Kept as a SHA-256 of itself, so a dump of the flash gives an attacker
+ * something to compare against rather than something to use. It is shown once,
+ * when it is made.
+ */
+#define TOKEN_VIEW_BYTES 16 /* 128 bits, hex-encoded to 32 characters */
+
+esp_err_t kvm_auth_token_create(char *out, size_t out_len)
+{
+    if (!out || out_len < TOKEN_VIEW_BYTES * 2 + 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t raw[TOKEN_VIEW_BYTES];
+    esp_fill_random(raw, sizeof(raw));
+    for (size_t i = 0; i < sizeof(raw); i++) {
+        snprintf(&out[i * 2], 3, "%02x", raw[i]);
+    }
+
+    uint8_t digest[32];
+    esp_err_t err = sha256((const uint8_t *)out, TOKEN_VIEW_BYTES * 2, NULL, 0, digest);
+    if (err != ESP_OK) {
+        return err;
+    }
+    nvs_handle_t nvs;
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_blob(nvs, NVS_KEY_TOKEN, digest, sizeof(digest));
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+esp_err_t kvm_auth_token_revoke(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_erase_key(nvs, NVS_KEY_TOKEN);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK; /* there was nothing to revoke, which is the wanted state */
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static bool token_digest(uint8_t out[32])
+{
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    size_t len = 32;
+    const esp_err_t err = nvs_get_blob(nvs, NVS_KEY_TOKEN, out, &len);
+    nvs_close(nvs);
+    return err == ESP_OK && len == 32;
+}
+
+bool kvm_auth_token_exists(void)
+{
+    uint8_t digest[32];
+    return token_digest(digest);
+}
+
+/** The token from the request: a bearer header, or ?token= for clients that
+    can only be given a URL - which is what a camera integration is. */
+static bool token_from_request(httpd_req_t *req, char *out, size_t out_len)
+{
+    char hdr[128];
+    if (httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof(hdr)) == ESP_OK &&
+        strncasecmp(hdr, "Bearer ", 7) == 0) {
+        strlcpy(out, hdr + 7, out_len);
+        return out[0] != '\0';
+    }
+    char query[160];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "token", out, out_len) == ESP_OK) {
+        return out[0] != '\0';
+    }
+    return false;
+}
+
+bool kvm_auth_token_ok(httpd_req_t *req)
+{
+    uint8_t want[32];
+    if (!token_digest(want)) {
+        return false; /* no token has been made: nothing to let in */
+    }
+    char given[80];
+    if (!token_from_request(req, given, sizeof(given))) {
+        return false;
+    }
+    uint8_t got[32];
+    if (sha256((const uint8_t *)given, strlen(given), NULL, 0, got) != ESP_OK) {
+        return false;
+    }
+    return equal_ct(got, want, sizeof(want));
+}
+
+bool kvm_auth_origin_ok(httpd_req_t *req)
+{
+    char origin[128];
+    if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
+        /* No Origin at all: a same-origin GET, curl, or Home Assistant. Nothing
+           a browser sends across sites is missing this header. */
+        return true;
+    }
+    char host[96];
+    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+        return false;
+    }
+    const char *slashes = strstr(origin, "://");
+    const char *o = slashes ? slashes + 3 : origin;
+    /* Host carries the port when it is not the default, and so does Origin, so
+       the two compare directly - including the captive portal, where both name
+       whatever host the phone was probing. */
+    return strcmp(o, host) == 0;
+}
+
+/*
+ * Is this a state-changing request that our own console made?
+ *
+ * The session lives in a cookie, so the question a cookie cannot answer by
+ * itself is "did the operator mean this" - another site can make a browser send
+ * a request with that cookie attached. SameSite=Strict is the first answer and a
+ * good one; this is the second, for the browsers and the corner cases where it
+ * is not enforced.
+ *
+ * A form on another site can only send a few content types and cannot add a
+ * header of its own, so requiring either JSON or our own header shuts that door
+ * without a token to keep in sync. Uploads, which are octet-stream by nature,
+ * pass on the header.
+ */
+static bool intentional_write(httpd_req_t *req)
+{
+    if (req->method != HTTP_POST && req->method != HTTP_PUT && req->method != HTTP_DELETE) {
+        return true;
+    }
+    if (!kvm_auth_origin_ok(req)) {
+        return false;
+    }
+    char v[64];
+    if (httpd_req_get_hdr_value_str(req, KVM_CONSOLE_HEADER, v, sizeof(v)) == ESP_OK) {
+        return true;
+    }
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", v, sizeof(v)) == ESP_OK &&
+        strncasecmp(v, "application/json", strlen("application/json")) == 0) {
+        return true;
+    }
+    return false;
+}
+
 bool kvm_auth_check(httpd_req_t *req)
 {
+    if (!intentional_write(req)) {
+        ESP_LOGW(TAG, "%s refused: not from this console", req->uri);
+        return false;
+    }
     if (!kvm_auth_required()) {
         return true;
     }
@@ -593,6 +774,7 @@ static esp_err_t send_json(httpd_req_t *req, const char *status, const char *bod
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, status);
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    kvm_web_security_headers(req);
     return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
 }
 
@@ -612,11 +794,14 @@ static esp_err_t auth_session_get(httpd_req_t *req)
         unlock();
     }
 
-    char body[192];
+    char body[224];
     snprintf(body, sizeof(body),
-             "{\"required\":%s,\"authenticated\":%s,\"mustChange\":%s,\"user\":\"%s\"}",
+             "{\"required\":%s,\"authenticated\":%s,\"mustChange\":%s,\"user\":\"%s\","
+             /* Whether a viewing token exists, never what it is. */
+             "\"viewToken\":%s}",
              kvm_auth_required() ? "true" : "false", authenticated ? "true" : "false",
-             must_change ? "true" : "false", kvm_setting_str("sec_user"));
+             must_change ? "true" : "false", kvm_setting_str("sec_user"),
+             kvm_auth_token_exists() ? "true" : "false");
     return send_json(req, "200 OK", body);
 }
 

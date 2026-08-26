@@ -22,7 +22,16 @@
 
 static const char *TAG = "tc358743";
 
+/* How hard to look for the bridge before deciding it is not there. */
+#define TC358743_PROBE_TRIES 3
+#define TC358743_PROBE_GAP_MS 5
+#define TC358743_PROBE_TIMEOUT_MS 50
+
 #define CHIPID 0x0000
+/* The register holds the chip id in the top byte and the revision in the
+   bottom one, and a TC358743 answers with a chip id of 0. Same test the Linux
+   driver makes to tell "somebody else lives at this address" from "us". */
+#define MASK_CHIPID 0xff00
 #define SYSCTL 0x0002
 #define MASK_IRRST 0x0800
 #define MASK_CECRST 0x0400
@@ -703,6 +712,47 @@ esp_err_t tc358743_probe(i2c_master_bus_handle_t bus, const tc358743_cfg_t *cfg,
         ESP_LOGE(TAG, "i2c add device fail %s", esp_err_to_name(err));
         return err;
     }
+
+    /*
+     * Now actually talk to the chip. Adding a device to the bus asks the bus
+     * nothing, so with the ribbon unplugged this used to succeed, every later
+     * read returned whatever was on the wire, and the device went on to start a
+     * capture on a bridge that was not there - it reported "no signal" when the
+     * truth was "no capture board".
+     *
+     * Two questions, because either can pass on its own: does anything answer
+     * at this address, and is what answers a TC358743. A few tries, because the
+     * chip has just come out of reset when this runs.
+     */
+    err = ESP_ERR_NOT_FOUND;
+    for (int attempt = 0; attempt < TC358743_PROBE_TRIES; attempt++) {
+        if (attempt > 0) {
+            vTaskDelay(pdMS_TO_TICKS(TC358743_PROBE_GAP_MS));
+        }
+        if (i2c_master_probe(bus, TC358743_I2C_ADDR, TC358743_PROBE_TIMEOUT_MS) != ESP_OK) {
+            continue;
+        }
+        uint8_t b[2] = {0};
+        if (i2c_read_reg(d, CHIPID, b, sizeof(b)) != ESP_OK) {
+            continue;
+        }
+        const uint16_t id = (uint16_t)b[0] | ((uint16_t)b[1] << 8);
+        if ((id & MASK_CHIPID) != 0) {
+            ESP_LOGW(TAG, "0x%02x answers, but CHIPID 0x%04x is not a TC358743", TC358743_I2C_ADDR, id);
+            continue;
+        }
+        err = ESP_OK;
+        break;
+    }
+    if (err != ESP_OK) {
+        i2c_master_bus_rm_device(d->i2c);
+        free(d);
+        ESP_LOGE(TAG, "no TC358743 at 0x%02x - is the ribbon to the capture board seated?",
+                 TC358743_I2C_ADDR);
+        return err;
+    }
+
+    d->i2c_ok = true; /* the probe just proved it */
     *out_dev = d;
     return ESP_OK;
 }

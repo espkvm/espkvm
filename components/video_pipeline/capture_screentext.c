@@ -35,10 +35,32 @@
  * that a repainting menu is read once, short enough to feel immediate. */
 #define SETTLE_US (300 * 1000)
 
+/*
+ * The same wait, for somebody being sent every reading as it happens.
+ *
+ * With a subscriber the repaint IS the event being waited for, so most of the
+ * 300 ms above is pure latency between a keypress and the highlight moving. It
+ * still has to be long enough to miss a half-drawn screen - a menu repaints in
+ * a frame or two - and the duplicate reading a shorter wait can produce costs
+ * nothing, because a reading identical to the last one is not sent.
+ */
+#define SETTLE_STREAM_US (70 * 1000)
+
 /* How often the watch looks, with nobody connected. A screen that has just
  * changed still has to hold still for SETTLE_US before it is read, so this is
  * the rate of looking, not of scanning. */
 #define IDLE_INTERVAL_US (1000 * 1000)
+
+/* With somebody watching the characters, the reading is the picture: a menu
+ * answers a keypress at once and the console asks again right after the key,
+ * so a slow scan here is what an operator would read as "it is not listening".
+ * Nothing else is using the encoder while text mode is up. */
+#define ASKED_INTERVAL_US (250 * 1000)
+
+/* And for a subscriber, close enough to the frame rate that the signature
+ * notices the repaint in the frame after it happens. This is the rate of
+ * looking; a scan only follows a picture that changed and then held still. */
+#define STREAM_INTERVAL_US (50 * 1000)
 
 /* Pixels the signature looks at. Spread over the frame by a stride that is
  * coprime with the row length, so it never samples one column. */
@@ -223,17 +245,36 @@ void capture_screentext_idle(capture_ctx_t *c)
 {
     static int64_t s_last_us;
 
-    if (!kvm_setting_bool("scr_watch") || !c->signal_present) {
+    if (!c->signal_present) {
         return;
     }
-    /* Not worth_reading(): the watch runs with the console closed, so there is
-       nobody to have asked, and a watch that woke the chip for a full 1080p pass
-       every second would be a different feature with a different price. */
-    if (!screentext_mode_unprompted(c->hres, c->vres)) {
+    /*
+     * Two different reasons to read a frame nobody is watching, with different
+     * prices, so they get different rules.
+     *
+     * The watch runs with the console closed and nobody to have asked, so it
+     * reads only the modes cheap enough to read unprompted - waking the chip
+     * for a full 1080p pass every second on the off-chance would be a different
+     * feature.
+     *
+     * Somebody reading the screen as characters is the other, and it is the
+     * case this whole path exists for: text mode turns the video off, so there
+     * is no viewer left to carry the reading, and ignoring the ask here would
+     * freeze the characters the moment the mode is entered - the operator walks
+     * a menu and nothing moves. An ask is somebody sitting there, so it is
+     * answered promptly and in any mode the reader supports.
+     */
+    const bool asked = screentext_requested() && screentext_mode_supported(c->hres, c->vres);
+    const bool watched =
+        kvm_setting_bool("scr_watch") && screentext_mode_unprompted(c->hres, c->vres);
+    if (!asked && !watched) {
         return;
     }
     const int64_t now = esp_timer_get_time();
-    if (now - s_last_us < IDLE_INTERVAL_US) {
+    const int64_t interval = screentext_streaming() ? STREAM_INTERVAL_US
+                             : asked                ? ASKED_INTERVAL_US
+                                                    : IDLE_INTERVAL_US;
+    if (now - s_last_us < interval) {
         return;
     }
     s_last_us = now;
@@ -276,7 +317,8 @@ void capture_screentext_tick(capture_ctx_t *c, const void *frame)
         s_done = false;
         return;
     }
-    if (s_done || now - s_changed_us < SETTLE_US) {
+    const int64_t settle = screentext_streaming() ? SETTLE_STREAM_US : SETTLE_US;
+    if (s_done || now - s_changed_us < settle) {
         return;
     }
     s_done = true; /* one attempt per still picture, whether or not it reads */

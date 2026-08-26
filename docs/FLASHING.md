@@ -4,10 +4,17 @@ You do **not** need to build anything or install ESP-IDF to run a release. Grab 
 prebuilt image from the [releases page](https://github.com/espkvm/espkvm/releases)
 and write it to the board. There are two ways to do it.
 
-The board's USB-C port is a **CH343 USB-serial bridge** used for flashing and the
-serial console. Plug the board's USB-C into your computer for flashing. (The
-separate MX1.25 OTG connector is what later goes to the target machine - it is not
-used for flashing.)
+Plug the board's USB-C into your computer for flashing. (The separate MX1.25 OTG
+connector is what later goes to the target machine - it is not used for
+flashing.)
+
+Which chip answers on that port differs by board, and it is worth knowing before
+anything goes wrong. On the Waveshare ESP32-P4-ETH it is a **CH343 USB-serial
+bridge** (USB `1a86:55d3`), which needs a driver on older systems. On boards that
+bring out the P4's own USB instead - the ESP32-P4 Function EV Board, for one -
+the port is the chip's built-in **USB-Serial-JTAG** (USB `303a:1001`) and no
+driver is involved. `lsusb` on Linux, System Information on macOS or Device
+Manager on Windows says which one you have.
 
 ## Which file
 
@@ -52,6 +59,14 @@ Chrome or Edge on a desktop can flash over USB with nothing installed.
 
 That is it. If the browser cannot see a port, see the driver notes below - the
 same CH343 driver applies.
+
+If the browser finds the port but says **"Failed to initialize"**, while
+`esptool` on the same machine works: that is the browser failing to put the chip
+into its download mode, not a problem with the image. Put the board there
+yourself - hold **BOOT**, tap **RESET**, let go of BOOT - then press Install and
+pick the port again. On a board whose port is the P4's own USB-Serial-JTAG the
+board re-appears as a new device when it resets, so the port has to be chosen
+again after that. Option 2 below always works.
 
 ---
 

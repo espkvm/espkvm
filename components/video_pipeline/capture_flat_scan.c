@@ -43,6 +43,13 @@ static inline void sample_at(const uint8_t *px, size_t i, uint8_t bytes_per_px,
 
 bool capture_flat_is_flat(const uint8_t *px, size_t pixels, uint8_t bytes_per_px)
 {
+    /* UYVY stores two pixels in four bytes, so an odd count has a half pair at
+       the end that is not there. Round it away rather than trusting every mode
+       to be even: reading one byte past a frame buffer is not worth the two
+       characters this costs. */
+    if (bytes_per_px == 2) {
+        pixels &= ~(size_t)1;
+    }
     if (pixels < FLAT_SAMPLES) {
         return false;
     }

@@ -56,6 +56,53 @@ bool kvm_auth_required(void);
  * True when the request carries a valid session, or when authentication is
  * switched off. Handlers call this first and answer 401 when it is false.
  */
+/*
+ * The header our own console puts on everything it sends.
+ *
+ * A page on another site can make a browser send a request with this device's
+ * cookie attached, but it cannot add a header of its own without asking
+ * permission first - which this device never gives. So a state-changing request
+ * has to carry either this or a JSON content type, neither of which a plain
+ * cross-site form can produce.
+ */
+#define KVM_CONSOLE_HEADER "X-ESP-KVM"
+
+/**
+ * Whether the request's Origin, if it sent one, is this device.
+ *
+ * True when there is no Origin at all: that is a same-origin GET or a client
+ * that is not a browser, and neither can be a cross-site forgery.
+ */
+/*
+ * The viewing token: a credential that opens the picture and nothing else.
+ *
+ * Home Assistant's camera integrations can be given a URL and little else, and
+ * this device authenticates with a session cookie - so the only way to put a
+ * target's screen on a dashboard used to be turning the login off. This is the
+ * alternative: a long random string that reaches the MJPEG stream, a single
+ * frame and the capture's figures, and no other endpoint at all.
+ *
+ * Off until one is made. Only the SHA-256 of it is stored, and it is shown once.
+ */
+#define KVM_AUTH_TOKEN_CHARS 32
+
+/** Make one (replacing any before it) and write it to @p out, once. */
+esp_err_t kvm_auth_token_create(char *out, size_t out_len);
+
+/** Forget it. Whatever was handed out stops working. */
+esp_err_t kvm_auth_token_revoke(void);
+
+/** Whether a token has been made at all - never says what it is. */
+bool kvm_auth_token_exists(void);
+
+/**
+ * Whether this request carries the token, as `Authorization: Bearer <token>` or
+ * `?token=<token>`. Call it only from the handlers a viewer may reach.
+ */
+bool kvm_auth_token_ok(httpd_req_t *req);
+
+bool kvm_auth_origin_ok(httpd_req_t *req);
+
 bool kvm_auth_check(httpd_req_t *req);
 
 /** Send the 401 that tells the console to show a login form. */

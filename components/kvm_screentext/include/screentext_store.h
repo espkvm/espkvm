@@ -9,6 +9,8 @@
 
 #include "screentext.h"
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -55,6 +57,30 @@ void screentext_request(void);
 
 /** Whether a request made by screentext_request() is still standing. */
 bool screentext_requested(void);
+
+/**
+ * How many readings have been published. Changes whenever what a reader would
+ * see changes - a new reading, or the screen ceasing to hold text - so somebody
+ * pushing readings out can tell "nothing new" from "read it again" without
+ * copying a grid to compare.
+ */
+uint32_t screentext_seq(void);
+
+/**
+ * Say that somebody is being sent every reading as it happens, rather than
+ * asking for one now and then.
+ *
+ * It is the console with its text layer open, and it changes two things: the
+ * ask above never lapses while it lasts, and the capture side reads on a
+ * streaming budget instead of a polling one - a keypress on a boot menu should
+ * move the highlight in about the time the target takes to repaint, not in the
+ * second an ask-and-poll round trip costs. Balanced calls; safe to nest.
+ */
+void screentext_stream_enter(void);
+void screentext_stream_leave(void);
+
+/** Whether anyone is being streamed readings right now. */
+bool screentext_streaming(void);
 
 /** Longest phrase an alert can carry, including its terminator. */
 /* Every phrase on screen at once, comma-separated - not just the first. Sized so

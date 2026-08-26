@@ -65,6 +65,37 @@ static const char *TAG = "web";
 /** Body limit for settings writes; the whole table serialises well under this. */
 #define API_BODY_MAX 4096
 
+/*
+ * Headers every answer carries.
+ *
+ * Applied once, in register_route() below, so a handler that sends its own body
+ * cannot forget them - which is what happened while they were a call each
+ * handler had to remember.
+ *
+ * The console is one self-contained page that fetches nothing from anywhere, so
+ * the policy can be strict about where content may come from - the one thing it
+ * has to allow is inline script and style, because the build inlines them into
+ * that single file. What it buys is the rest: no framing (a KVM console inside
+ * somebody else's invisible frame, with a "force off" button under the
+ * pointer), no remote script, nowhere to send a form, and no guessing at
+ * content types.
+ */
+void kvm_web_security_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Content-Security-Policy",
+                       "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                       "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+                       "media-src 'self' blob:; connect-src 'self' ws: wss:; "
+                       "font-src 'self' data:; object-src 'none'; base-uri 'none'; "
+                       "form-action 'self'; frame-ancestors 'none'");
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
+}
+
+/* Defined further down, next to the other gates; used by the status handler
+   above it. */
+static bool viewing_allowed(httpd_req_t *req, esp_err_t *out);
+
 /** Send a malloc'd JSON document and free it. NULL means the generator failed. */
 static esp_err_t send_json_owned(httpd_req_t *req, char *json)
 {
@@ -277,6 +308,120 @@ static esp_err_t api_pins_get(httpd_req_t *req)
 /* Enough for any real screen: a menu has one highlighted row, a dialog two. */
 #define HIGHLIGHT_RUNS_MAX 128
 
+/*
+ * The reading as UTF-8, one line per row, in PSRAM - the caller frees it.
+ *
+ * Three bytes per cell is the worst case: the box-drawing characters a BIOS
+ * frames its panes with are three bytes of UTF-8 each. A 240x68 grid is 49 KB
+ * of it, big and short-lived, so it does not belong in the internal heap the
+ * TLS sessions live in.
+ */
+static char *screentext_utf8_alloc(const screentext_grid_t *g)
+{
+    const size_t cap = (size_t)g->cols * g->rows * 3u + g->rows + 1u;
+    char *text = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    if (!text) {
+        return NULL;
+    }
+    screentext_to_utf8(g, text, cap);
+    return text;
+}
+
+/*
+ * Which cells are drawn the other way round from the rest of the screen - a
+ * menu's selected row, a highlighted button - as runs of [row, column, length].
+ * Text alone loses the one thing a character screen says about selection, which
+ * is exactly what somebody navigating a boot menu needs to see.
+ *
+ * Runs rather than a bitmap: a screen has one or two of them, and a bitmap would
+ * be 250 bytes of mostly zeroes.
+ */
+/**
+ * The marked runs on this grid, as {row, first column, length}.
+ *
+ * Taken out of the JSON builder because the push path has to COMPARE it too: on
+ * a boot menu the highlight bar is the only thing that moves, so a reading whose
+ * characters are identical is still a different screen to look at.
+ *
+ * @return how many runs were written, at most HIGHLIGHT_RUNS_MAX
+ */
+static int highlight_runs(const screentext_grid_t *grid, uint16_t out[][3])
+{
+    int made = 0;
+    for (uint16_t r = 0; r < grid->rows && made < HIGHLIGHT_RUNS_MAX; r++) {
+        uint16_t c = 0;
+        while (c < grid->cols && made < HIGHLIGHT_RUNS_MAX) {
+            if (!screentext_marked(grid, (size_t)r * grid->cols + c)) {
+                c++;
+                continue;
+            }
+            const uint16_t start = c;
+            while (c < grid->cols && screentext_marked(grid, (size_t)r * grid->cols + c)) {
+                c++;
+            }
+            out[made][0] = r;
+            out[made][1] = start;
+            out[made][2] = (uint16_t)(c - start);
+            made++;
+        }
+    }
+    return made;
+}
+
+static void json_add_highlight_runs(cJSON *o, const uint16_t runs[][3], int n)
+{
+    if (n <= 0) {
+        return;
+    }
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr) {
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        const int run[3] = {runs[i][0], runs[i][1], runs[i][2]};
+        cJSON *item = cJSON_CreateIntArray(run, 3);
+        if (!item) {
+            break;
+        }
+        cJSON_AddItemToArray(arr, item);
+    }
+    cJSON_AddItemToObject(o, "highlight", arr);
+}
+
+static void json_add_highlight(cJSON *o, const screentext_grid_t *grid)
+{
+    uint16_t runs[HIGHLIGHT_RUNS_MAX][3];
+    json_add_highlight_runs(o, runs, highlight_runs(grid, runs));
+}
+
+/* What the watch found on this screen, if it was asked to look. */
+static void json_add_alert(cJSON *o)
+{
+    char alert[SCREENTEXT_ALERT_MAX];
+    if (screentext_alert_get(alert, sizeof(alert), NULL)) {
+        cJSON_AddStringToObject(o, "alert", alert);
+    }
+}
+
+/*
+ * Where the grid sits in the frame, and how big that frame was. A UEFI console
+ * centres its text rather than filling the screen, so an overlay that assumes
+ * the grid starts at 0,0 is off by the margin.
+ */
+static void json_add_geometry(cJSON *o, const screentext_grid_t *grid, uint32_t age_ms)
+{
+    cJSON_AddNumberToObject(o, "cols", grid->cols);
+    cJSON_AddNumberToObject(o, "rows", grid->rows);
+    cJSON_AddNumberToObject(o, "cellWidth", grid->cell_w);
+    cJSON_AddNumberToObject(o, "cellHeight", grid->cell_h);
+    cJSON_AddNumberToObject(o, "originX", grid->x0);
+    cJSON_AddNumberToObject(o, "originY", grid->y0);
+    cJSON_AddNumberToObject(o, "width", grid->width);
+    cJSON_AddNumberToObject(o, "height", grid->height);
+    cJSON_AddNumberToObject(o, "confidence", grid->confidence);
+    cJSON_AddNumberToObject(o, "ageMs", (double)age_ms);
+}
+
 static esp_err_t api_screen_text_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
@@ -321,77 +466,18 @@ static esp_err_t api_screen_text_get(httpd_req_t *req)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    /* Three bytes per cell is the worst case: the box-drawing characters a BIOS
-     * frames its panes with are three bytes of UTF-8 each. */
-    const size_t cap = (size_t)grid->cols * grid->rows * 3u + grid->rows + 1u;
-    char *text = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+    char *text = screentext_utf8_alloc(grid);
     if (!text) {
         free(grid);
         return send_json_error(req, "500 Internal Server Error", "out of memory");
     }
-    screentext_to_utf8(grid, text, cap);
 
     cJSON *o = cJSON_CreateObject();
     if (o) {
-        cJSON_AddNumberToObject(o, "cols", grid->cols);
-        cJSON_AddNumberToObject(o, "rows", grid->rows);
-        cJSON_AddNumberToObject(o, "cellWidth", grid->cell_w);
-        cJSON_AddNumberToObject(o, "cellHeight", grid->cell_h);
-        /* Where the grid sits in the frame, and how big that frame was. A UEFI
-         * console centres its text rather than filling the screen, so an overlay
-         * that assumes the grid starts at 0,0 is off by the margin. */
-        cJSON_AddNumberToObject(o, "originX", grid->x0);
-        cJSON_AddNumberToObject(o, "originY", grid->y0);
-        cJSON_AddNumberToObject(o, "width", grid->width);
-        cJSON_AddNumberToObject(o, "height", grid->height);
-        cJSON_AddNumberToObject(o, "confidence", grid->confidence);
-        cJSON_AddNumberToObject(o, "ageMs", (double)age_ms);
+        json_add_geometry(o, grid, age_ms);
         cJSON_AddStringToObject(o, "text", text);
-        /*
-         * Which cells are drawn the other way round from the rest of the screen
-         * - a menu's selected row, a highlighted button - as runs of
-         * [row, column, length]. Text alone loses the one thing a character
-         * screen says about selection, which is exactly what somebody
-         * navigating a boot menu needs to see.
-         *
-         * Runs rather than a bitmap: a screen has one or two of them, and a
-         * bitmap would be 250 bytes of mostly zeroes.
-         */
-        cJSON *runs = cJSON_CreateArray();
-        if (runs) {
-            int made = 0;
-            for (uint16_t r = 0; r < grid->rows && made < HIGHLIGHT_RUNS_MAX; r++) {
-                uint16_t c = 0;
-                while (c < grid->cols && made < HIGHLIGHT_RUNS_MAX) {
-                    if (!screentext_marked(grid, (size_t)r * grid->cols + c)) {
-                        c++;
-                        continue;
-                    }
-                    const uint16_t start = c;
-                    while (c < grid->cols &&
-                           screentext_marked(grid, (size_t)r * grid->cols + c)) {
-                        c++;
-                    }
-                    const int run[3] = {r, start, c - start};
-                    cJSON *item = cJSON_CreateIntArray(run, 3);
-                    if (!item) {
-                        break;
-                    }
-                    cJSON_AddItemToArray(runs, item);
-                    made++;
-                }
-            }
-            if (made > 0) {
-                cJSON_AddItemToObject(o, "highlight", runs);
-            } else {
-                cJSON_Delete(runs);
-            }
-        }
-        /* What the watch found on this screen, if it was asked to look. */
-        char alert[SCREENTEXT_ALERT_MAX];
-        if (screentext_alert_get(alert, sizeof(alert), NULL)) {
-            cJSON_AddStringToObject(o, "alert", alert);
-        }
+        json_add_highlight(o, grid);
+        json_add_alert(o);
     }
     free(text);
     free(grid);
@@ -401,6 +487,43 @@ static esp_err_t api_screen_text_get(httpd_req_t *req)
     char *json = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     return send_json_owned(req, json);
+}
+
+/*
+ * Make a viewing token, and say what it is - once.
+ *
+ * The device keeps only a hash of it, so this is the one moment it can be read.
+ * The console says so plainly; there is no endpoint that can hand it over
+ * again, on purpose.
+ */
+static esp_err_t api_token_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    char token[KVM_AUTH_TOKEN_CHARS + 1];
+    const esp_err_t err = kvm_auth_token_create(token, sizeof(token));
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", "could not store the token");
+    }
+    ESP_LOGW(TAG, "a viewing token was created");
+    char body[96];
+    snprintf(body, sizeof(body), "{\"token\":\"%s\"}", token);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_token_delete(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (kvm_auth_token_revoke() != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", "could not revoke the token");
+    }
+    ESP_LOGW(TAG, "the viewing token was revoked");
+    return send_json_owned(req, strdup("{\"status\":\"revoked\"}"));
 }
 
 static esp_err_t api_settings_get(httpd_req_t *req)
@@ -453,14 +576,18 @@ static esp_err_t api_settings_put(httpd_req_t *req)
  * the device still believes in should be visible from the API, not just as an
  * encoder that will not go idle. */
 static uint8_t s_video_client_count;
+/* And those being sent the screen as characters instead. Kept apart because
+   they are not viewers: no encoder runs for them. */
+static uint8_t s_text_client_count;
 /** Multipart /stream responses in flight, counted separately from WebSocket
  *  subscribers so "who is holding the encoder busy" has an answer. */
 static volatile int s_stream_workers;
 
 static esp_err_t api_video_status_get(httpd_req_t *req)
 {
-    if (!kvm_auth_check(req)) {
-        return kvm_auth_challenge(req);
+    esp_err_t gate;
+    if (!viewing_allowed(req, &gate)) {
+        return gate;
     }
     kvm_video_status_t st;
     capture_status_get(&st);
@@ -488,13 +615,13 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
      * - that is what /api/v1/screen/text answers - only that asking is worth it. */
     const bool text_mode = st.signal && screentext_mode_supported(st.hres, st.vres);
 
-    char body[416];
+    char body[464];
     int n = snprintf(body, sizeof(body),
                      "{\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"fps\":%u.%02u,\"skippedFps\":%u.%02u,\"kbps\":%u,"
                      "\"encodeUs\":%u,\"ppaUs\":%u,\"encoderBusyPct\":%u,"
                      "\"modeChanges\":%u,\"sysStatus\":%u,\"viewers\":%d,"
-                     "\"wsClients\":%u,\"imgClients\":%d,\"codec\":\"%s\","
+                     "\"wsClients\":%u,\"textClients\":%u,\"imgClients\":%d,\"codec\":\"%s\","
                      /* How long the picture has been one flat colour: the shape
                         of a stop screen or a blanked output, neither of which
                         can be read as text. 0 means it is a picture. */
@@ -506,7 +633,8 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)st.encode_us, (unsigned)st.ppa_us, (unsigned)st.encoder_busy_pct,
                      (unsigned)st.mode_changes, (unsigned)st.sys_status,
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
-                     s_stream_workers, codec, text_mode ? "true" : "false",
+                     (unsigned)s_text_client_count, s_stream_workers, codec,
+                     text_mode ? "true" : "false",
                      (unsigned)st.flat_ms);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
@@ -1613,6 +1741,23 @@ static bool ascii_to_hid(char c, uint8_t *usage, bool *shift)
  * control of the target to whatever calls them - the same control the console
  * has, over a simpler interface. Returns true to proceed; on false it has
  * already written the response into *out. */
+/*
+ * The picture, to a session or to the viewing token.
+ *
+ * These three - the stream, one frame, the figures that describe them - are the
+ * only endpoints a token opens, and they are all read-only. Everything else
+ * goes on asking for a session, which is what keeps a dashboard credential from
+ * being a way to type at somebody's server.
+ */
+static bool viewing_allowed(httpd_req_t *req, esp_err_t *out)
+{
+    if (kvm_auth_check(req) || kvm_auth_token_ok(req)) {
+        return true;
+    }
+    *out = kvm_auth_challenge(req);
+    return false;
+}
+
 static bool agent_allowed(httpd_req_t *req, esp_err_t *out)
 {
     if (!kvm_auth_check(req)) {
@@ -1632,8 +1777,11 @@ static bool agent_allowed(httpd_req_t *req, esp_err_t *out)
  * frame even when nobody is streaming. */
 static esp_err_t api_video_frame_get(httpd_req_t *req)
 {
+    /* A still of the screen is a picture like the stream is, so the viewing
+       token reaches it - but a session still has to pass the agent switch,
+       which is what governs the rest of the machine-facing API. */
     esp_err_t gate;
-    if (!agent_allowed(req, &gate)) {
+    if (!kvm_auth_token_ok(req) && !agent_allowed(req, &gate)) {
         return gate;
     }
     if (video_frame_payload() != VIDEO_PAYLOAD_JPEG) {
@@ -1926,7 +2074,17 @@ static void http_sess_close_cb(httpd_handle_t hd, int sockfd)
     (void)hd;
     bool was_control_session = false;
 
-    if (s_ws_mu && xSemaphoreTake(s_ws_mu, pdMS_TO_TICKS(500)) == pdTRUE) {
+    /*
+     * Waited for rather than attempted, like video_remove_client: this one must
+     * not fail. The lock is only ever held for the few instructions that read or
+     * write s_ws_fd, so it cannot block for long, and giving up costs far more
+     * than the wait. s_ws_fd is a bare descriptor number, and the close() below
+     * hands that number straight back to the system - so a release that gives up
+     * leaves control held by a socket that no longer exists, and the next
+     * connection to be given the same number silently inherits it. Either way
+     * the operator's keystrokes are dropped with no way back but "Take control".
+     */
+    if (s_ws_mu && xSemaphoreTake(s_ws_mu, portMAX_DELAY) == pdTRUE) {
         was_control_session = (sockfd == s_ws_fd);
         if (was_control_session) {
             s_ws_fd = -1;
@@ -2474,6 +2632,9 @@ static void stream_worker_task(void *arg)
  * short enough that a truly gone viewer stops holding up the pump. */
 #define VIDEO_STALL_DROP_FRAMES 90
 
+/* The first byte of a subscriber's first message: what it wants to be sent. */
+#define WS_SUBSCRIBE_TEXT 2
+
 static int s_video_fds[VIDEO_MAX_CLIENTS];
 /**
  * A viewer that has not been sent a decodable frame yet. H.264 P-frames are
@@ -2486,10 +2647,21 @@ static bool s_video_need_key[VIDEO_MAX_CLIENTS];
  * A half-open socket left by an unclean disconnect, or a viewer that stopped
  * reading, sits here until it is dropped - so it never gets a spinning TLS send. */
 static int s_video_stall[VIDEO_MAX_CLIENTS];
-/* s_video_client_count is defined near api_video_status_get (declared once, above). */
+/*
+ * A subscriber on this socket wants the screen read as characters, not encoded
+ * as pictures. It is the same socket and the same table because it is the same
+ * question - "show me the target" - answered in the cheaper of two ways, and a
+ * second WebSocket would mean a second authentication, a second slot and a
+ * second thing to close.
+ */
+static bool s_text_mode[VIDEO_MAX_CLIENTS];
+/* A subscriber that has no reading yet cannot be sent the rows that changed. */
+static bool s_text_need_full[VIDEO_MAX_CLIENTS];
+/* s_video_client_count and s_text_client_count are defined near
+   api_video_status_get (declared once, above). */
 static SemaphoreHandle_t s_video_mu;
 
-static void video_add_client(int fd)
+static void video_add_client(int fd, bool text)
 {
     /*
      * Waited for rather than attempted: the table is only ever held for the
@@ -2511,6 +2683,8 @@ static void video_add_client(int fd)
             s_video_fds[i] = fd;
             s_video_need_key[i] = true;
             s_video_stall[i] = 0;
+            s_text_mode[i] = text;
+            s_text_need_full[i] = text;
             /* Bound sends to this viewer. esp-tls left the socket non-blocking, so a
              * full send buffer makes esp_tls_conn_write return 0 (WANT_WRITE) and
              * httpd_send_all spin on it with no yield - pegging the pump task and
@@ -2523,7 +2697,13 @@ static void video_add_client(int fd)
             }
             const struct timeval sndto = {.tv_sec = 0, .tv_usec = 400000};
             (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sndto, sizeof(sndto));
-            if (s_video_client_count++ == 0) {
+            if (text) {
+                /* Deliberately not a viewer: the encoder stays idle, which is
+                   the whole saving text mode exists for. What the reader does
+                   need is the capture side reading the screen promptly. */
+                s_text_client_count++;
+                screentext_stream_enter();
+            } else if (s_video_client_count++ == 0) {
                 /* First viewer: the encoder is idle until someone is reading. */
                 video_frame_viewer_enter();
             }
@@ -2531,16 +2711,28 @@ static void video_add_client(int fd)
         }
     }
     xSemaphoreGive(s_video_mu);
-    /* Also when this is not the first viewer: the newcomer needs a frame it
-     * can decode from, whoever else is already watching. */
-    video_frame_request_keyframe();
+    if (!text) {
+        /* Also when this is not the first viewer: the newcomer needs a frame it
+         * can decode from, whoever else is already watching. */
+        video_frame_request_keyframe();
+    }
 }
 
 static void video_drop_client_locked(int index)
 {
+    const bool was_text = s_text_mode[index];
     s_video_fds[index] = -1;
     s_video_need_key[index] = false;
     s_video_stall[index] = 0;
+    s_text_mode[index] = false;
+    s_text_need_full[index] = false;
+    if (was_text) {
+        if (s_text_client_count > 0) {
+            s_text_client_count--;
+        }
+        screentext_stream_leave();
+        return;
+    }
     if (s_video_client_count > 0 && --s_video_client_count == 0) {
         video_frame_viewer_leave();
     }
@@ -2565,6 +2757,248 @@ static void video_remove_client(int fd)
     xSemaphoreGive(s_video_mu);
 }
 
+/* ---- the screen as characters, pushed ---------------------------------- */
+
+/*
+ * A reading is a couple of kilobytes where a picture is megabits a second, and
+ * that is the whole reason text mode exists - so a reading goes out the way a
+ * picture does, the moment there is one, rather than being fetched by a console
+ * asking again and again. Each ask was a fresh HTTPS request with a handshake
+ * on it, which is what made walking a boot menu feel like it was not listening.
+ *
+ * Only the rows that changed are sent. Moving a highlight one line changes two
+ * of them, and a 1080p console is 240 columns by 56 rows - fourteen kilobytes
+ * to say what four hundred bytes can.
+ *
+ * The polled /api/v1/screen/text stays exactly as it was: scripts, Home
+ * Assistant and the MCP adapter use it, and it is the fallback for a console
+ * whose socket will not open.
+ */
+static screentext_grid_t *s_push_grid; /* PSRAM, made once and kept */
+static char *s_push_sent;              /* the reading subscribers already hold */
+static uint16_t s_push_cols, s_push_rows;
+static uint32_t s_push_seq;
+/* The highlight subscribers already hold, beside the characters. Kept because a
+   menu being walked changes only this - see highlight_runs(). */
+static uint16_t s_push_runs[HIGHLIGHT_RUNS_MAX][3];
+static int s_push_runs_n;
+
+/** Row @p index of a '\n'-separated reading, and how long it is. */
+static char *line_at(char *text, uint16_t index, size_t *len)
+{
+    char *p = text;
+    for (uint16_t i = 0; i < index && p; i++) {
+        p = strchr(p, '\n');
+        if (p) {
+            p++;
+        }
+    }
+    if (!p || !*p) {
+        *len = 0;
+        return NULL;
+    }
+    const char *nl = strchr(p, '\n');
+    *len = nl ? (size_t)(nl - p) : strlen(p);
+    return p;
+}
+
+/**
+ * The rows where two readings differ, as [row, text] pairs.
+ *
+ * @p cur is written to and put back: a line is terminated in place so cJSON can
+ * take it, which costs nothing where copying every row out would cost the very
+ * kilobytes this is here to save.
+ */
+static cJSON *changed_lines(char *cur, char *prev, uint16_t rows)
+{
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr) {
+        return NULL;
+    }
+    for (uint16_t i = 0; i < rows; i++) {
+        size_t cl = 0, pl = 0;
+        char *c = line_at(cur, i, &cl);
+        char *pv = line_at(prev, i, &pl);
+        if (!c) {
+            break;
+        }
+        if (pv && cl == pl && memcmp(c, pv, cl) == 0) {
+            continue;
+        }
+        const char save = c[cl];
+        c[cl] = '\0';
+        cJSON *pair = cJSON_CreateArray();
+        cJSON *text = cJSON_CreateString(c);
+        c[cl] = save;
+        if (!pair || !text) {
+            cJSON_Delete(pair);
+            cJSON_Delete(text);
+            break;
+        }
+        cJSON_AddItemToArray(pair, cJSON_CreateNumber(i));
+        cJSON_AddItemToArray(pair, text);
+        cJSON_AddItemToArray(arr, pair);
+    }
+    return arr;
+}
+
+static void text_send(httpd_handle_t server, const int *fds, int count, const char *json)
+{
+    if (!json || count <= 0) {
+        return;
+    }
+    httpd_ws_frame_t frame = {
+        .final = true,
+        .type = HTTPD_WS_TYPE_TEXT,
+        .payload = (uint8_t *)json,
+        .len = strlen(json),
+    };
+    for (int i = 0; i < count; i++) {
+        if (httpd_ws_send_frame_async(server, fds[i], &frame) != ESP_OK) {
+            video_remove_client(fds[i]);
+        }
+    }
+}
+
+/** Send whatever is new to whoever is subscribed. Returns at once when neither. */
+static void text_push(httpd_handle_t server)
+{
+    if (s_text_client_count == 0) {
+        /* Let the copy go, and make the next subscriber start from a whole
+           reading rather than from rows that changed against nothing. */
+        free(s_push_sent);
+        s_push_sent = NULL;
+        s_push_runs_n = 0;
+        return;
+    }
+
+    int fresh[VIDEO_MAX_CLIENTS], caught_up[VIDEO_MAX_CLIENTS];
+    int fresh_n = 0, caught_up_n = 0;
+    if (!s_video_mu || xSemaphoreTake(s_video_mu, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    for (int i = 0; i < VIDEO_MAX_CLIENTS; i++) {
+        if (s_video_fds[i] < 0 || !s_text_mode[i]) {
+            continue;
+        }
+        if (s_text_need_full[i]) {
+            fresh[fresh_n++] = s_video_fds[i];
+            s_text_need_full[i] = false;
+        } else {
+            caught_up[caught_up_n++] = s_video_fds[i];
+        }
+    }
+    xSemaphoreGive(s_video_mu);
+
+    const uint32_t seq = screentext_seq();
+    if (seq == s_push_seq && fresh_n == 0) {
+        return; /* nothing read since the last send, and nobody new */
+    }
+
+    if (!s_push_grid) {
+        s_push_grid = heap_caps_malloc(sizeof(*s_push_grid), MALLOC_CAP_SPIRAM);
+        if (!s_push_grid) {
+            return;
+        }
+    }
+    uint32_t age_ms = 0;
+    if (!screentext_latest(s_push_grid, &age_ms)) {
+        /* The screen stopped being characters - it booted, or drew a picture.
+           Said plainly, because the alternative is a console showing text from
+           a screen that is gone. */
+        int all[VIDEO_MAX_CLIENTS];
+        int all_n = 0;
+        for (int i = 0; i < fresh_n; i++) {
+            all[all_n++] = fresh[i];
+        }
+        for (int i = 0; i < caught_up_n; i++) {
+            all[all_n++] = caught_up[i];
+        }
+        text_send(server, all, all_n, "{\"kind\":\"text\",\"gone\":true}");
+        free(s_push_sent);
+        s_push_sent = NULL;
+        s_push_runs_n = 0;
+        s_push_seq = seq;
+        return;
+    }
+
+    char *text = screentext_utf8_alloc(s_push_grid);
+    if (!text) {
+        return;
+    }
+    const bool same_shape = s_push_sent && s_push_cols == s_push_grid->cols &&
+                            s_push_rows == s_push_grid->rows;
+
+    uint16_t runs[HIGHLIGHT_RUNS_MAX][3];
+    const int runs_n = highlight_runs(s_push_grid, runs);
+    const bool highlight_moved =
+        runs_n != s_push_runs_n || memcmp(runs, s_push_runs, (size_t)runs_n * sizeof(runs[0])) != 0;
+
+    /* The rows that changed, for everyone who already has a reading. */
+    if (caught_up_n > 0 && same_shape) {
+        cJSON *lines = changed_lines(text, s_push_sent, s_push_grid->rows);
+        if (lines) {
+            if (cJSON_GetArraySize(lines) == 0 && !highlight_moved) {
+                /* Nothing a reader would see. The characters alone are not that
+                 * test: walking a boot menu moves the highlight bar and leaves
+                 * every character where it was, so comparing only the text threw
+                 * the whole update away and the menu looked frozen - while the
+                 * picture, when anyone switched to it, showed the selection
+                 * exactly where the operator had scrolled to. */
+                cJSON_Delete(lines);
+            } else {
+                cJSON *o = cJSON_CreateObject();
+                if (o) {
+                    cJSON_AddStringToObject(o, "kind", "text");
+                    cJSON_AddBoolToObject(o, "full", false);
+                    cJSON_AddNumberToObject(o, "ageMs", (double)age_ms);
+                    cJSON_AddItemToObject(o, "lines", lines);
+                    json_add_highlight(o, s_push_grid);
+                    json_add_alert(o);
+                    char *json = cJSON_PrintUnformatted(o);
+                    cJSON_Delete(o);
+                    text_send(server, caught_up, caught_up_n, json);
+                    free(json);
+                } else {
+                    cJSON_Delete(lines);
+                }
+            }
+        }
+    } else {
+        /* No base to send rows against - a different screen shape, or the first
+           reading of this run. Everyone gets the whole thing. */
+        for (int i = 0; i < caught_up_n; i++) {
+            fresh[fresh_n++] = caught_up[i];
+        }
+        caught_up_n = 0;
+    }
+
+    /* The whole reading, for anyone who has just subscribed. */
+    if (fresh_n > 0) {
+        cJSON *o = cJSON_CreateObject();
+        if (o) {
+            cJSON_AddStringToObject(o, "kind", "text");
+            cJSON_AddBoolToObject(o, "full", true);
+            json_add_geometry(o, s_push_grid, age_ms);
+            cJSON_AddStringToObject(o, "text", text);
+            json_add_highlight(o, s_push_grid);
+            json_add_alert(o);
+            char *json = cJSON_PrintUnformatted(o);
+            cJSON_Delete(o);
+            text_send(server, fresh, fresh_n, json);
+            free(json);
+        }
+    }
+
+    free(s_push_sent);
+    s_push_sent = text;
+    s_push_cols = s_push_grid->cols;
+    s_push_rows = s_push_grid->rows;
+    s_push_seq = seq;
+    memcpy(s_push_runs, runs, (size_t)runs_n * sizeof(runs[0]));
+    s_push_runs_n = runs_n;
+}
+
 /*
  * One task pushes to every subscribed socket. The websocket upgrade is handled
  * by esp_http_server itself, so unlike the multipart stream this must not be
@@ -2579,8 +3013,16 @@ static void video_pump_task(void *arg)
     uint32_t last_seq = 0;
 
     for (;;) {
+        /* Cheap unless there is a new reading and somebody to send it to: a
+           sequence compared against the last one sent. */
+        text_push(server);
+
         if (s_video_client_count == 0) {
-            vTaskDelay(pdMS_TO_TICKS(100));
+            /* A reader of characters is waited on more closely than an empty
+               device: the check above is what turns a settled screen into an
+               update, and 20 ms of it is nothing next to the encode this mode
+               is not doing. */
+            vTaskDelay(pdMS_TO_TICKS(s_text_client_count ? 20 : 100));
             last_seq = video_frame_seq();
             continue;
         }
@@ -2683,6 +3125,9 @@ static void video_pump_task(void *arg)
             if (fd < 0) {
                 continue;
             }
+            if (s_text_mode[i]) {
+                continue; /* reading the screen, not watching it */
+            }
             if (s_video_need_key[i] && !keyframe) {
                 continue; /* still waiting for its first decodable frame */
             }
@@ -2741,6 +3186,16 @@ static void video_pump_task(void *arg)
  */
 static esp_err_t ws_pre_handshake(httpd_req_t *req)
 {
+    /*
+     * A WebSocket upgrade carries the cookie like any other request, and the
+     * page that opened it says where it came from. A socket that would drive
+     * somebody's keyboard is worth being sure about, so an Origin that is not
+     * this device is refused before the session is even looked at.
+     */
+    if (!kvm_auth_origin_ok(req)) {
+        ESP_LOGW(TAG, "websocket refused: another site opened it");
+        return ESP_FAIL;
+    }
     if (!kvm_auth_check(req)) {
         ESP_LOGW(TAG, "websocket refused: no session");
         return ESP_FAIL;
@@ -2768,19 +3223,27 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
         video_remove_client(httpd_req_to_sockfd(req));
         return ESP_OK;
     }
-    uint8_t discard[8];
+    /*
+     * What the first message says is what the client wants: 2 asks for the
+     * screen read as characters, anything else (a byte of 1, or nothing at all)
+     * for the picture. A byte rather than a word because the console has always
+     * sent a byte here, and a firmware that met an older console would otherwise
+     * have to guess.
+     */
+    uint8_t hello[8] = {0};
     if (pkt.len) {
-        pkt.payload = discard;
-        (void)httpd_ws_recv_frame(req, &pkt, sizeof(discard));
+        pkt.payload = hello;
+        (void)httpd_ws_recv_frame(req, &pkt, sizeof(hello));
     }
-    video_add_client(httpd_req_to_sockfd(req));
+    video_add_client(httpd_req_to_sockfd(req), hello[0] == WS_SUBSCRIBE_TEXT);
     return ESP_OK;
 }
 
 static esp_err_t stream_get(httpd_req_t *req)
 {
-    if (!kvm_auth_check(req)) {
-        return kvm_auth_challenge(req);
+    esp_err_t gate;
+    if (!viewing_allowed(req, &gate)) {
+        return gate;
     }
     if (!video_frame_store_ready()) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "camera starting");
@@ -2964,9 +3427,51 @@ static esp_err_t redirect_to_https(httpd_req_t *req, httpd_err_code_t err)
  * has cost this project two debugging sessions - once the video WebSocket, once
  * the input one - so it ends here.
  */
+/*
+ * Every ordinary route is answered through here, so the security headers are
+ * set once for all of them. The real handler travels in user_ctx, which no
+ * route of ours uses for anything else; a WebSocket keeps its own handler,
+ * because by the time it runs the handshake response is long gone.
+ */
+static esp_err_t route_with_headers(httpd_req_t *req)
+{
+    kvm_web_security_headers(req);
+    esp_err_t (*const handler)(httpd_req_t *) = (esp_err_t (*)(httpd_req_t *))req->user_ctx;
+    return handler(req);
+}
+
+/*
+ * The server answers "no such page" and "wrong method" from inside itself, so
+ * those replies never pass through a route of ours and used to go out with no
+ * headers at all. Same body and the same closed socket as before - the browser
+ * is simply told how to treat the page, like every other answer.
+ */
+static esp_err_t err_with_headers(httpd_req_t *req, httpd_err_code_t error)
+{
+    kvm_web_security_headers(req);
+    (void)httpd_resp_send_err(req, error, NULL);
+    /* What the default does when no handler is registered. */
+    return ESP_FAIL;
+}
+
+static void register_err_handlers(httpd_handle_t h)
+{
+    for (int code = 0; code < HTTPD_ERR_CODE_MAX; code++) {
+        const esp_err_t err = httpd_register_err_handler(h, (httpd_err_code_t)code, err_with_headers);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "error handler %d not registered: %s", code, esp_err_to_name(err));
+        }
+    }
+}
+
 static void register_route(httpd_handle_t h, const httpd_uri_t *u)
 {
-    const esp_err_t err = httpd_register_uri_handler(h, u);
+    httpd_uri_t wrapped = *u;
+    if (!u->is_websocket && !u->user_ctx) {
+        wrapped.handler = route_with_headers;
+        wrapped.user_ctx = (void *)u->handler;
+    }
+    const esp_err_t err = httpd_register_uri_handler(h, &wrapped);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "route %s NOT registered: %s - raise max_uri_handlers", u->uri,
                  esp_err_to_name(err));
@@ -2998,7 +3503,7 @@ static httpd_handle_t start_redirect_server(void)
      * fetched and trusted without first clicking through the warning it fixes.
      * Everything else on port 80 redirects to https. */
     httpd_uri_t u_cert = {.uri = "/cert.pem", .method = HTTP_GET, .handler = cert_get};
-    httpd_register_uri_handler(h, &u_cert);
+    register_route(h, &u_cert);
     httpd_register_err_handler(h, HTTPD_404_NOT_FOUND, redirect_to_https);
     return h;
 }
@@ -3053,7 +3558,7 @@ httpd_handle_t http_server_start(void)
      * The check below now logs a failed registration rather than swallowing it, so
      * the next person gets a line instead of a mystery - but keep headroom anyway.
      */
-    cfg.max_uri_handlers = 56;
+    cfg.max_uri_handlers = 60;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -3162,24 +3667,26 @@ httpd_handle_t http_server_start(void)
     }
     usb_hid_set_led_callback(on_hid_leds, NULL);
 
+    register_err_handlers(h);
+
     httpd_uri_t u_root = {.uri = "/", .method = HTTP_GET, .handler = root_get};
-    httpd_register_uri_handler(h, &u_root);
+    register_route(h, &u_root);
     httpd_uri_t u_favicon = {.uri = "/favicon.ico", .method = HTTP_GET, .handler = favicon_get};
-    httpd_register_uri_handler(h, &u_favicon);
+    register_route(h, &u_favicon);
     httpd_uri_t u_cert = {.uri = "/cert.pem", .method = HTTP_GET, .handler = cert_get};
-    httpd_register_uri_handler(h, &u_cert);
+    register_route(h, &u_cert);
     /* PWA: manifest, service worker and icons (unauthenticated static assets). */
     httpd_uri_t u_manifest = {
         .uri = "/manifest.webmanifest", .method = HTTP_GET, .handler = manifest_get};
-    httpd_register_uri_handler(h, &u_manifest);
+    register_route(h, &u_manifest);
     httpd_uri_t u_sw = {.uri = "/sw.js", .method = HTTP_GET, .handler = sw_get};
-    httpd_register_uri_handler(h, &u_sw);
+    register_route(h, &u_sw);
     httpd_uri_t u_icon192 = {.uri = "/icon-192.png", .method = HTTP_GET, .handler = icon192_get};
-    httpd_register_uri_handler(h, &u_icon192);
+    register_route(h, &u_icon192);
     httpd_uri_t u_icon512 = {.uri = "/icon-512.png", .method = HTTP_GET, .handler = icon512_get};
-    httpd_register_uri_handler(h, &u_icon512);
+    register_route(h, &u_icon512);
     httpd_uri_t u_stream = {.uri = "/stream", .method = HTTP_GET, .handler = stream_get};
-    httpd_register_uri_handler(h, &u_stream);
+    register_route(h, &u_stream);
     static const httpd_uri_t api_uris[] = {
         {.uri = "/api/capabilities", .method = HTTP_GET, .handler = api_capabilities_get},
         {.uri = "/api/v1/settings/schema", .method = HTTP_GET, .handler = api_settings_schema_get},
@@ -3195,6 +3702,8 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
         {.uri = "/api/v1/system/boot-slot", .method = HTTP_POST, .handler = api_system_boot_slot_post},
         {.uri = "/api/v1/tls", .method = HTTP_GET, .handler = api_tls_get},
+        {.uri = "/api/v1/auth/token", .method = HTTP_POST, .handler = api_token_post},
+        {.uri = "/api/v1/auth/token", .method = HTTP_DELETE, .handler = api_token_delete},
         {.uri = "/api/v1/tls/cert", .method = HTTP_PUT, .handler = api_tls_cert_put},
         {.uri = "/api/v1/tls/cert", .method = HTTP_DELETE, .handler = api_tls_cert_delete},
         {.uri = "/api/v1/power/wake", .method = HTTP_POST, .handler = api_power_wake_post},

@@ -1,0 +1,78 @@
+# The form shown when somebody starts a discussion in "Cases and mounts".
+# The file name must match the category's slug, or GitHub ignores it.
+title: "[Case] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share a printable case, bracket or mount for an ESP-KVM build. A photo
+        of the printed thing and a link to the files is the whole post - the
+        rest of these boxes is what saves the next person a failed print.
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: Which ESP32-P4 board it fits.
+      placeholder: Waveshare ESP32-P4-ETH
+    validations:
+      required: true
+  - type: textarea
+    id: fits
+    attributes:
+      label: What it holds
+      description: >
+        The capture board, a display, an optocoupler module, the cables that
+        have to leave it - and anything it deliberately leaves out.
+      placeholder: |
+        - the board and the C790 capture card
+        - a 0.96" I2C OLED behind a window
+        - cut-outs for USB-C, Ethernet and the MX1.25 cable
+    validations:
+      required: true
+  - type: input
+    id: files
+    attributes:
+      label: Files
+      description: >
+        Where to download them - a repository, Printables, MakerWorld, a release
+        on your own project. STEP or the original source beside the STL is a
+        kindness: it lets somebody adjust it.
+      placeholder: https://...
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: Licence
+      description: >
+        What others may do with it. Without one, nobody can safely remix your
+        work. CC BY 4.0 and CC BY-SA 4.0 are the usual choices.
+      placeholder: CC BY-SA 4.0
+    validations:
+      required: true
+  - type: dropdown
+    id: printed
+    attributes:
+      label: Has it been printed?
+      description: A model nobody has printed yet is still welcome - just say so.
+      options:
+        - Yes, and the parts fit
+        - Yes, but it needs adjusting
+        - Not yet, designed only
+    validations:
+      required: true
+  - type: textarea
+    id: printing
+    attributes:
+      label: How to print it
+      description: >
+        Material, layer height, supports, infill, orientation - whatever you had
+        to get right. Screws and inserts too, if it uses them.
+      placeholder: |
+        PETG, 0.2 mm, no supports, 20% infill, printed face down.
+        4x M3x6 screws into 4x M3 heat-set inserts.
+  - type: textarea
+    id: photos
+    attributes:
+      label: Photos
+      description: Drag the images in here. One of the assembled thing is worth the most.

@@ -159,19 +159,13 @@ void capture_loop_run(capture_ctx_t *c)
         }
 
         /*
-         * Nobody watching, nothing to encode. The encoder would otherwise keep
-         * chewing through a 1080p frame every 50 ms, and the PSRAM bandwidth
-         * that goes with it, for output no one reads. A viewer that arrives is
-         * handed the last published frame at once and gets a fresh one within a
-         * frame period.
+         * The codec is settled before the "nobody is watching" check, not after.
+         * The MJPEG paths - the stream, a single frame, the viewing token - all
+         * refuse to serve while H.264 is running, so a device left on H.264 with
+         * no viewer would never switch: the only way to become a viewer is
+         * through a path that is closed until the switch happens. Switching with
+         * nobody watching costs one open and one close.
          */
-        if (video_frame_viewer_count() == 0) {
-            /* Nobody to encode for - but a watch set to look for words on the
-             * screen exists for exactly this state, so give it the frame. */
-            capture_screentext_idle(c);
-            continue;
-        }
-
         const capture_codec_t *want = codec_wanted();
         if (want != codec) {
             const capture_codec_t *now_running = codec_switch(codec, want);
@@ -184,6 +178,20 @@ void capture_loop_run(capture_ctx_t *c)
             }
             codec = now_running;
             force_publish = true;
+            continue;
+        }
+
+        /*
+         * Nobody watching, nothing to encode. The encoder would otherwise keep
+         * chewing through a 1080p frame every 50 ms, and the PSRAM bandwidth
+         * that goes with it, for output no one reads. A viewer that arrives is
+         * handed the last published frame at once and gets a fresh one within a
+         * frame period.
+         */
+        if (video_frame_viewer_count() == 0) {
+            /* Nobody to encode for - but a watch set to look for words on the
+             * screen exists for exactly this state, so give it the frame. */
+            capture_screentext_idle(c);
             continue;
         }
 

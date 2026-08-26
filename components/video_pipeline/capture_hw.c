@@ -383,8 +383,15 @@ capture_ctx_t *capture_hw_init_start(void)
      * KVM still serves HID, and the web UI explains what is wrong. */
     esp_err_t probe_err = tc358743_probe(i2c_bus, NULL, &s_cap.tc);
     if (probe_err != ESP_OK) {
-        kvm_cap_report(KVM_CAP_VIDEO, false, "TC358743 not responding on I2C (%s)",
-                       esp_err_to_name(probe_err));
+        /* Nothing answered, so say the thing an operator can act on: the board
+           or its ribbon, not an error code. Any other failure keeps the code. */
+        if (probe_err == ESP_ERR_NOT_FOUND) {
+            kvm_cap_report(KVM_CAP_VIDEO, false,
+                           "no capture board found - check the ribbon between it and the device");
+        } else {
+            kvm_cap_report(KVM_CAP_VIDEO, false, "TC358743 not responding on I2C (%s)",
+                           esp_err_to_name(probe_err));
+        }
         ESP_LOGE(CAPTURE_LOG_TAG, "TC358743 probe failed: %s", esp_err_to_name(probe_err));
         return NULL;
     }

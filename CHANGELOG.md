@@ -9,15 +9,21 @@ bumps the patch).
 
 ### Added
 - **The screen as text, instead of the video.** A text screen is about two
-  kilobytes; the video is megabits a second. The Text button next to Select
-  shows the characters and stops the stream, so a machine stays workable over a
-  phone tether or any link that will not carry a picture - the keyboard still
-  reaches the target, which is most of what a BIOS asks for. An extra way to
-  look, never the default: the picture comes back the moment it is switched off,
-  and by itself when the target stops showing text - either because the mode
-  changed or because it simply drew something that is not characters. A screen
-  with the video stopped and nothing to read would be a black rectangle and a
-  puzzle, so it never waits to be asked.
+  kilobytes; the video is megabits a second. Tick "text when the screen is text"
+  in the video readout and the console shows the characters and stops the
+  stream, so a machine stays workable over a phone tether or any link that will
+  not carry a picture - the keyboard still reaches the target, which is most of
+  what a BIOS asks for. It is a standing preference rather than a place to go
+  back to: with it on, the view follows the target through a boot by itself -
+  characters at the boot menu, the picture the moment a desktop paints,
+  characters again at the next restart - and the encoder only starts when a
+  reading fails. Both directions need two readings to agree, so a screen that
+  sits near the edge of being readable does not flip back and forth. The
+  readings arrive the way the picture does - pushed along the same socket as the
+  device makes them, carrying only what changed - so walking a boot menu moves
+  the highlight about as fast as the target repaints it.
+  `GET /api/v1/screen/text` is unchanged, for scripts, Home Assistant and
+  anything whose socket will not open.
 - **The selected row comes through in text.** A menu says which line you are on
   by drawing it the other way round, and text alone loses exactly that. The
   scanner already had to try both polarities to read such a row, so it now keeps
@@ -42,11 +48,115 @@ bumps the patch).
   where a regression like "fast typing repeats a letter" gets caught before
   anybody else finds it. CI runs the same suites.
 
+- **A viewing token, so a dashboard need not be given the keys.** Home
+  Assistant's camera integrations can be handed a URL and little else, and this
+  device authenticates with a session cookie - so putting a target's screen on a
+  dashboard used to mean turning the login off. A token (Settings -> Security,
+  off until you make one) opens the MJPEG stream, one frame and the capture's
+  figures, and nothing that can press a key or cut the power. Only its hash is
+  kept, so it is shown once.
+
+### Changed
+- **Security headers on every answer, and a stricter idea of who is asking.**
+  A policy that allows this device and nothing else, no framing at all (a
+  console inside somebody's invisible frame, with "force off" under the
+  pointer), and no content-type guessing. A WebSocket upgrade from another
+  origin is refused before the session is looked at, and a request that changes
+  something has to carry either JSON or the console's own header - which a
+  cross-site form cannot produce.
+- **The hotspot no longer comes up open by default.** With no password set the
+  device now makes one up the first time the hotspot starts and prints it in the
+  log and on the display, rather than running an open network anybody in the
+  building can join. An open hotspot is still available, as a deliberate choice
+  (Settings -> Network).
+
 ### Fixed
+- **A few things found by re-reading the new code rather than by running it.**
+  The moment a screen went flat was kept as a 64-bit number written by the
+  capture task and read by two others - two loads on this core, so a reader
+  could catch half an update; it is 32 bits now. Text mode gave the picture back
+  even to somebody who had paused it themselves, and left the last frame showing
+  under the characters. The MQTT escaper passed control bytes through into what
+  is meant to be JSON. A packed-YUV frame with an odd number of pixels would
+  have been sampled one byte past its end. None of these had been seen in the
+  wild; all of them were waiting.
+- **Text mode reads the screen again while it is up.** Found on hardware: text
+  mode stops the video, and with nobody watching the device only re-read the
+  narrow modes on its own - so on a 1080p console the characters froze the
+  moment the mode was entered. Walking a boot menu moved nothing. An operator
+  asking for the text now counts as a reason to read, in any mode the reader
+  understands, and four times a second while they are there. The console asks
+  again right after a keypress instead of waiting for its poll.
+- **The MJPEG codec could not be selected once H.264 was running.** The switch
+  was only considered when somebody was watching, and the only ways to watch
+  MJPEG - the stream, a single frame, anything the viewing token opens - refuse
+  to serve while H.264 runs. So the setting saved, nothing changed, and the new
+  viewing token had nothing to open. The codec is settled before that check now.
+- **The security headers really are on every answer.** They were a call each
+  handler had to remember, and the handlers that send their own body - system
+  info, the video status, the auth replies - did not. They are set once, where
+  routes are registered. "No such page" and "wrong method" come from inside the
+  server and never pass a route of ours, so those carry them too now.
+- **The MCP adapter can press the power button again.** Its power calls carry no
+  body, so they carried no content type either, and the new "did the operator
+  mean this" rule turned them away. It sends the console's own header on
+  everything now.
+- **Where to switch how the screen is shown.** H.264, MJPEG and text were kept
+  in three places - two in Settings, one as a button under the picture. They now
+  live in the video readout in the status bar, next to the figures they change:
+  the codec as two buttons, and text as a tick under them, because which codec
+  to send and whether to read the screen as characters are different questions.
+  While the characters are up the readout says so rather than naming a codec
+  that is deliberately not running.
 - **A long screen-watch list no longer truncates the MQTT payload.** The state
   buffer was sized when an alert was one short phrase; the watch has been naming
   every phrase on screen since 0.34.0, and a full list would have been published
   as unparseable JSON. It is sized from the worst case now.
+- **The phone's keyboard stops pushing the picture off the screen.** A virtual
+  keyboard covers the window rather than shrinking it, so the console was laid
+  out as if it were not there and the browser did the only thing left to it: it
+  scrolled the page to reach the field, taking the status bar and the top of the
+  screen with it. The keyboard is measured now and the console is sized to what
+  is left, so the whole picture stays visible above it and nothing scrolls.
+- **A capture board that is not plugged in is noticed.** The probe never spoke
+  to the bridge - it only registered an address on the I2C bus - so with the
+  ribbon off every later read came back with rubbish off the wire, the device
+  started a capture on a chip that was not there and reported "no signal". It
+  asks the bus for the address now and checks the answer really is a TC358743.
+  When nothing answers the console says video is not available and repeats the
+  device's own reason: check the ribbon. Input, media and power carry on as
+  before - a missing capture board was never a reason to take the rest down.
+  Found on a Waveshare board with the ribbon unplugged.
+- **Fit stops blowing a small screen up.** Fit meant "fill the stage", so a
+  640x480 BIOS on a big monitor was stretched over the whole window and every
+  character came out soft. It now shrinks a picture that does not fit and leaves
+  one that does at its own size. The old behaviour is still there as Stretch -
+  the button walks Fit, Stretch, 1:1 - for anyone who wants the picture as large
+  as the window whatever it measures. The pointer still lands where it is
+  pointed in all three.
+- **The target's keyboard and mouse work again straight after an update.** A
+  restart resets our side of the USB link, but the target's power never drops
+  and this port does not always give it a clean disconnect - so the target went
+  on addressing a device that had forgotten who it was, and nothing reached it
+  until the cable was unplugged and back in. The device now drops off the bus
+  for a moment on every boot and comes back, which is all a replug ever did.
+- **Control no longer gets stuck with a session that has gone.** Only one
+  browser drives the target at a time, and releasing that claim could give up if
+  it could not take a lock at once - leaving the claim held by a connection that
+  no longer existed. Every other console was then quietly ignored, with no
+  notice and nothing to press. It waits for the lock now, as the rest of the
+  bookkeeping already did.
+- **"Take control" is offered in text mode too.** Text mode stops the video, and
+  the notice that says another session is driving was hidden along with the
+  picture - so an operator reading the characters found the keyboard dead, with
+  no explanation and no way to take over.
+- **A picture that froze when H.264 was selected.** Switching codec ends the
+  older multipart stream cleanly, and a cleanly ended one raises no error in the
+  browser: the console kept showing the last frame it had and never moved to the
+  channel that carries H.264. It now follows what the device reports it is
+  encoding. The same mix-up could also leave the console retrying a stream the
+  device answers with "not this codec" every couple of seconds, forever; with no
+  transport that can carry the picture it now says so once.
 
 ## [0.36.0] - 2026-08-25
 

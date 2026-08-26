@@ -94,7 +94,10 @@ static void json_escape(char *dst, size_t cap, const char *src)
         if (*p == '"' || *p == '\\') {
             dst[o++] = '\\';
         }
-        dst[o++] = (*p == '\n' || *p == '\r') ? ' ' : *p;
+        /* Anything below a space would be raw control bytes inside a JSON
+           string, which is not JSON at all - and the phrase came off a screen,
+           so it is not worth trusting to be printable. One space each. */
+        dst[o++] = ((unsigned char)*p < 0x20) ? ' ' : *p;
     }
     dst[o] = '\0';
 }

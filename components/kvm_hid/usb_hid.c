@@ -53,6 +53,11 @@ enum {
 #define HID_WORKER_STACK 4096     /* bytes */
 #define HID_WORKER_PRIO (tskIDLE_PRIORITY + 8) /* above stream/httpd so input isn't delayed */
 
+/* How long to sit off the bus at startup so the target counts it as a detach.
+ * The same 100 ms the media-type swap uses, and well past the microseconds a
+ * host needs to see SE0 - the margin is for hub debounce, not for the spec. */
+#define USB_REATTACH_MS 100
+
 /* MSC bulk endpoints, sharing endpoint number 4 (IN 0x84, OUT 0x04) beside the
  * three HID interrupt IN endpoints 0x81/0x82/0x83. */
 #define EPNUM_MSC_OUT 0x04
@@ -958,6 +963,24 @@ esp_err_t usb_hid_init(void)
     kvm_cap_report(KVM_CAP_HID, usb_err == ESP_OK, "USB device stack failed to start (%s)",
                    esp_err_to_name(usb_err));
     ESP_RETURN_ON_ERROR(usb_err, TAG, "tinyusb_driver_install");
+
+    /*
+     * Come back as a NEW device, not the one the target thinks it still has.
+     *
+     * A restart - an OTA above all - resets this side while the target's VBUS
+     * never drops, and this OTG port does not always give the host a clean
+     * detach (the same gap the probe trace works around in kvm_usb_host_probe).
+     * The host then keeps the address and configuration it handed out before the
+     * restart while this side has forgotten both, so every report goes into
+     * nothing and the operator finds the keyboard dead until the cable is pulled
+     * by hand. Holding D+ low long enough to read as a detach and then attaching
+     * again puts the host through a fresh enumeration, which is all a replug
+     * ever did. Same trick as usb_hid_msc_set_type, for the same reason.
+     */
+    tud_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(USB_REATTACH_MS));
+    tud_connect();
+    ESP_LOGI(TAG, "re-attached to the target so it enumerates this boot");
 
     /* Above stream/httpd work so HID reports are not delayed by MJPEG or WS parsing. */
     BaseType_t ok = xTaskCreate(hid_worker, "usb_hid", HID_WORKER_STACK, NULL, HID_WORKER_PRIO, &s_hid_task);
