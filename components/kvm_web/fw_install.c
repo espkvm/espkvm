@@ -47,6 +47,9 @@ static const char *TAG = "fw_install";
 #define MAX_REDIRECTS 5
 /* Header buffers, both ways - see the note in the client config below. */
 #define HTTP_BUF 2048
+/* Silences in a row before the download is called dead, each HTTP_TIMEOUT_MS
+ * long. Generous on purpose: the far end is a CDN, not the LAN. */
+#define MAX_STALLS 3
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static fw_install_status_t s_status;
@@ -246,14 +249,33 @@ static void install_task(void *arg)
 
     int64_t received = 0;
     int shown = -1;
+    int stalls = 0;
     while (total <= 0 || received < total) {
         const int n = esp_http_client_read(http, chunk, CHUNK);
         if (n < 0) {
+            /*
+             * A read that timed out with nothing to show is "not yet", not
+             * "gone". esp_http_client_read returns -ESP_ERR_HTTP_EAGAIN for
+             * that and ESP_FAIL for a transport that has actually broken -
+             * both negative. Taking the first for the second is what cut a
+             * download short with "the download broke off" on a link that was
+             * merely quiet for a moment; the upload path has guarded the same
+             * distinction all along (kvm_recv_stalled).
+             */
+            if (n == -ESP_ERR_HTTP_EAGAIN && ++stalls <= MAX_STALLS) {
+                ESP_LOGW(TAG, "quiet at %lld of %lld bytes (%d/%d)", (long long)received,
+                         (long long)total, stalls, MAX_STALLS);
+                continue;
+            }
             free(chunk);
-            fail(http, ota, "the download broke off");
+            char why[80];
+            snprintf(why, sizeof(why), "the download broke off after %lld of %lld bytes",
+                     (long long)received, (long long)total);
+            fail(http, ota, why);
             vTaskDelete(NULL);
             return;
         }
+        stalls = 0;
         if (n == 0) {
             /* A clean end. With a known length that is short, and short means
              * a truncated image - esp_ota_end would refuse it anyway, but the

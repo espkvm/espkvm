@@ -5,6 +5,23 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.37.1] - 2026-08-26
+
+### Fixed
+- **Installing a published release no longer gives up when the link goes
+  quiet.** A download that paused for a moment was read as a broken one and
+  stopped with "the download broke off" - the read returns a negative number
+  both for "nothing yet" and for "the connection is gone", and the two were
+  being treated the same. A quiet spell is now waited out, as an upload from
+  the browser already was. Nothing was ever at risk: the image is written to
+  the spare slot, so a download that fails leaves the running firmware alone.
+- **The list of releases is easier on GitHub's rate limit.** It is fetched by
+  the browser, so the 60 unauthenticated calls an hour GitHub allows are counted
+  against the address the console is opened from - your own, and never shared
+  with other people running ESP-KVM. The list is held for ten minutes now, so a
+  reload does not spend another, and if the limit is reached the console says so
+  and when it clears rather than showing a bare 403.
+
 ## [0.37.0] - 2026-08-26
 
 ### Added
