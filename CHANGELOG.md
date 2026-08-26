@@ -5,7 +5,7 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.37.0] - 2026-08-26
 
 ### Added
 - **The screen as text, instead of the video.** A text screen is about two
@@ -55,6 +55,18 @@ bumps the patch).
   off until you make one) opens the MJPEG stream, one frame and the capture's
   figures, and nothing that can press a key or cut the power. Only its hash is
   kept, so it is shown once.
+
+- **Go back to any published release, not just the other slot.** The two slots
+  already let the console boot back one step, which helps only while the image
+  you want is still sitting in the other one. Settings now lists what the
+  project has published and installs the one you pick - a version from weeks
+  ago, or one you skipped. The device fetches the image itself, because the
+  browser is not allowed to: the host serving them refuses cross-origin reads,
+  whichever way the URL is reached. That means the device talking to GitHub, so
+  it is **off until you turn it on** in Settings - a KVM often sits where
+  nothing is meant to reach the internet, and ordinary updates do not need it.
+  A release that lands badly is still reverted by the bootloader, exactly as an
+  upload is.
 
 ### Changed
 - **Security headers on every answer, and a stricter idea of who is asking.**

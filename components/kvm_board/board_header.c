@@ -54,6 +54,7 @@ static const kvm_board_header_t s_headers[] = {
 };
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Waveshare ESP32-P4-ETH"
+#define BOARD_ID_BASE "p4-eth"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_WAVESHARE_POE
@@ -77,6 +78,7 @@ static const kvm_board_header_t s_headers[] = {
 };
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Waveshare ESP32-P4-WIFI6-POE-ETH"
+#define BOARD_ID_BASE "p4-poe"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_WAVESHARE_NANO
@@ -116,6 +118,7 @@ static const kvm_board_header_t s_headers[] = {
 };
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Waveshare ESP32-P4-NANO"
+#define BOARD_ID_BASE "p4-nano"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_FUNCEV
@@ -148,6 +151,7 @@ static const kvm_board_header_t s_headers[] = {
 };
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Espressif ESP32-P4 Function EV"
+#define BOARD_ID "funcev"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_GUITION
@@ -175,14 +179,40 @@ static const kvm_board_header_t s_headers[] = {
 };
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Guition ESP32-P4-M3-Dev"
+#define BOARD_ID_BASE "p4-guition"
 #define BOARD_VERIFIED false
 
 #else
 /* Ported by hand: no published header to draw. */
 #define BOARD_NAME "ESP32-P4"
+#define BOARD_ID_BASE "p4-eth"
 #define BOARD_VERIFIED false
 #define BOARD_HAS_HEADERS 0
 #endif
+
+/*
+ * The id this board's published image is named with - the same string the
+ * release workflow's matrix uses, so "espkvm-<version>-<id>.bin" names a file
+ * that exists. Kept beside the human name rather than derived from it, because
+ * a typo here downloads an image built for another board.
+ *
+ * Every board except the Function EV also has a rev 3.x twin, and the two are
+ * fenced against each other in the image header - neither starts on the other's
+ * silicon - so the revision this build targets is part of the id. The Function
+ * EV is only made on rev 3.x, so it has one image and no suffix.
+ */
+#ifndef BOARD_ID
+#if CONFIG_ESP32P4_REV_MIN_300
+#define BOARD_ID BOARD_ID_BASE "-rev3"
+#else
+#define BOARD_ID BOARD_ID_BASE
+#endif
+#endif
+
+const char *kvm_board_id(void)
+{
+    return BOARD_ID;
+}
 
 const char *kvm_board_name(void)
 {

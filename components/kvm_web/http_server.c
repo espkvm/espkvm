@@ -49,6 +49,7 @@
 #include "kvm_ts.h"
 #include "kvm_wg.h"
 #include "kvm_auth.h"
+#include "fw_install.h"
 #include "kvm_board_header.h"
 #include "kvm_caps.h"
 #include "kvm_display.h"
@@ -72,20 +73,30 @@ static const char *TAG = "web";
  * cannot forget them - which is what happened while they were a call each
  * handler had to remember.
  *
- * The console is one self-contained page that fetches nothing from anywhere, so
- * the policy can be strict about where content may come from - the one thing it
+ * The console is one self-contained page - nothing is LOADED from anywhere else,
+ * so the policy can be strict about where content comes from. The one thing it
  * has to allow is inline script and style, because the build inlines them into
  * that single file. What it buys is the rest: no framing (a KVM console inside
  * somebody else's invisible frame, with a "force off" button under the
  * pointer), no remote script, nowhere to send a form, and no guessing at
  * content types.
+ *
+ * `connect-src` is the exception, and it has to be. The page does reach outside
+ * itself: it reads the update manifest, and it lists what the project has
+ * published so an earlier release can be picked. An earlier version of this
+ * header said the console fetched nothing at all and left `connect-src` at
+ * 'self' - which quietly broke the update check with "Failed to fetch", found on
+ * hardware. It cannot be a fixed list of hosts either: the manifest URL is a
+ * setting, so it may be a fork or a file server inside the operator's own
+ * network. Allowing https: costs little of what this header is here for - none
+ * of the four things above depends on it.
  */
 void kvm_web_security_headers(httpd_req_t *req)
 {
     httpd_resp_set_hdr(req, "Content-Security-Policy",
                        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
                        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-                       "media-src 'self' blob:; connect-src 'self' ws: wss:; "
+                       "media-src 'self' blob:; connect-src 'self' https: ws: wss:; "
                        "font-src 'self' data:; object-src 'none'; base-uri 'none'; "
                        "form-action 'self'; frame-ancestors 'none'");
     httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
@@ -271,6 +282,9 @@ static esp_err_t api_pins_get(httpd_req_t *req)
      * way it is printed - when the board is one we have a pinout for.
      */
     cJSON_AddStringToObject(root, "board", kvm_board_name());
+    /* The id its published image is named with, so the console can tell which
+       releases actually carry a build for this board. */
+    cJSON_AddStringToObject(root, "boardId", kvm_board_id());
     size_t header_count = 0;
     const kvm_board_header_t *headers = kvm_board_headers(&header_count);
     if (headers) {
@@ -771,6 +785,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     char body[2048];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
+                     "\"boardId\":\"%s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
@@ -781,7 +796,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
                      "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
                      "\"ts\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"peers\":%d}}",
-                     app->project_name, app->version, app->date, app->time, app->idf_ver,
+                     app->project_name, app->version, app->date, app->time, kvm_board_id(),
+                     app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false", ota_json,
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
@@ -1587,6 +1603,69 @@ static cJSON *read_json_body(httpd_req_t *req)
  * unconfirmed, without reflashing. Refused unless the target slot holds a valid
  * image, so a click can never leave the device booting an empty or bad slot.
  */
+/*
+ * Install a published release the device fetches for itself.
+ *
+ * The console can list what has been published - GitHub's API allows that read
+ * from a browser - but it cannot fetch an image, because the host serving the
+ * assets sends no cross-origin header. So the operator picks a version here and
+ * the device goes and gets it. Going backwards is the point, but nothing here
+ * cares about the direction: it installs whatever published version is asked
+ * for, and the rollback the bootloader already does covers a bad landing.
+ */
+static esp_err_t api_system_install_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    cJSON *j = read_json_body(req);
+    if (!j) {
+        return send_json_error(req, "400 Bad Request", "expected JSON {version:\"v.X.Y.Z\"}");
+    }
+    const cJSON *jv = cJSON_GetObjectItem(j, "version");
+    char version[FW_INSTALL_VERSION_MAX] = {0};
+    if (cJSON_IsString(jv) && jv->valuestring) {
+        snprintf(version, sizeof(version), "%s", jv->valuestring);
+    }
+    cJSON_Delete(j);
+
+    const esp_err_t err = fw_install_start(version);
+    if (err == ESP_ERR_INVALID_ARG) {
+        return send_json_error(req, "400 Bad Request", "that is not a published version");
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict", "an install is already running");
+    }
+    if (err == ESP_ERR_NOT_ALLOWED) {
+        return send_json_error(req, "403 Forbidden",
+                               "the device is not allowed to fetch releases itself "
+                               "(turn it on in Settings > System)");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
+    }
+    httpd_resp_set_status(req, "202 Accepted");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"started\"}");
+}
+
+/** How the fetch above is getting on, for a console that has to show it. */
+static esp_err_t api_system_install_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    fw_install_status_t st;
+    fw_install_get_status(&st);
+    static const char *const k_states[] = {"idle", "running", "done", "failed"};
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"state\":\"%s\",\"percent\":%d,\"version\":\"%s\",\"message\":\"%s\"}",
+             k_states[st.state], st.percent, st.version, st.message);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, body);
+}
+
 static esp_err_t api_system_boot_slot_post(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
@@ -3701,6 +3780,8 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
         {.uri = "/api/v1/system/boot-slot", .method = HTTP_POST, .handler = api_system_boot_slot_post},
+        {.uri = "/api/v1/system/install", .method = HTTP_POST, .handler = api_system_install_post},
+        {.uri = "/api/v1/system/install", .method = HTTP_GET, .handler = api_system_install_get},
         {.uri = "/api/v1/tls", .method = HTTP_GET, .handler = api_tls_get},
         {.uri = "/api/v1/auth/token", .method = HTTP_POST, .handler = api_token_post},
         {.uri = "/api/v1/auth/token", .method = HTTP_DELETE, .handler = api_token_delete},

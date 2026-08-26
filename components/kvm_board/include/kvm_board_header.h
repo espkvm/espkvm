@@ -55,6 +55,13 @@ typedef struct {
 const char *kvm_board_name(void);
 
 /**
+ * The id this board's published firmware image carries, e.g. "funcev" or
+ * "p4-eth-rev3". Matches the release workflow's board matrix, so it names the
+ * asset "espkvm-<version>-<id>.bin" in a GitHub release.
+ */
+const char *kvm_board_id(void);
+
+/**
  * Whether the header layout below was checked against the board in front of us
  * rather than only read off the vendor's diagram. The console says so, because
  * a pinout nobody has confirmed is a wire in the wrong place.

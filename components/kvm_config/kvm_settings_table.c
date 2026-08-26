@@ -612,6 +612,18 @@ static const kvm_setting_t s_settings[] = {
     },
 
     {
+        .key = "fw_fetch", .section = "system", .type = KVM_VT_BOOL,
+        .title = "Let the device fetch releases itself",
+        .help = "Off by default, and deliberately so: a KVM often sits where nothing is "
+                "supposed to reach the internet, and it does not talk to GitHub unless it is "
+                "told to. Turn it on and the console can offer any published release - which "
+                "is how you go back to an earlier one, since the browser is not allowed to "
+                "download the image itself. Ordinary updates do not need this; the browser "
+                "fetches those and hands them over.",
+        .def = 0, .requires_cap = KVM_CAP_OTA,
+    },
+
+    {
         .key = "therm_guard", .section = "system", .type = KVM_VT_BOOL,
         .title = "Thermal protection",
         .help = "Cap the frame rate when the chip gets warm and stop encoding if it gets hot. "

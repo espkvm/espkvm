@@ -3,6 +3,7 @@ idf_component_register(
         "http_server.c"
         "tls_cert.c"
         "auth.c"
+        "fw_install.c"
     INCLUDE_DIRS "include"
     REQUIRES
         esp_http_server
@@ -27,6 +28,8 @@ idf_component_register(
         nvs_flash
         esp_hw_support
         kvm_board
+        esp_http_client
+        esp-tls
         esp_driver_gpio
     EMBED_FILES
         "assets/index.html.gz"
