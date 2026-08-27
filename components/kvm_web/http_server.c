@@ -263,7 +263,7 @@ static esp_err_t api_pins_get(httpd_req_t *req)
         pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN, "WiFi co-processor D2");
         pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN, "WiFi co-processor D3");
         pins_add_reserved(r, CONFIG_ESP_HOSTED_HOST_RESET_GPIO, "WiFi co-processor reset");
-#if CONFIG_KVM_BOARD_WAVESHARE_WIFI6_DEVKIT
+#if CONFIG_KVM_BOARD_WAVESHARE_WIFI6_DEVKIT || CONFIG_KVM_BOARD_WAVESHARE_WIFI6
         /* The schematic ties P4 GPIO 6 to the C6's IO2 through a 0R. esp-hosted
          * does not claim it, but offering it as free would let something an
          * owner plugs in fight the co-processor. */

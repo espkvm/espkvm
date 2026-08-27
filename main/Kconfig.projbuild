@@ -154,6 +154,8 @@ menu "ESP-KVM"
                 bool "Waveshare ESP32-P4-WIFI6-POE-ETH"
             config KVM_BOARD_WAVESHARE_WIFI6_DEVKIT
                 bool "Waveshare ESP32-P4-WIFI6-DEV-KIT"
+            config KVM_BOARD_WAVESHARE_WIFI6
+                bool "Waveshare ESP32-P4-WIFI6"
             config KVM_BOARD_WAVESHARE_NANO
                 bool "Waveshare ESP32-P4-NANO"
             config KVM_BOARD_GUITION
@@ -235,9 +237,11 @@ menu "ESP-KVM"
         config KVM_MDNS_HOSTNAME
             string "mDNS hostname (device is <name>.local)"
             default "espkvm"
+            depends on KVM_ETH_ENABLE || KVM_WIFI
             help
                 DNS label only: letters, digits, hyphen. Advertised over mDNS and
-                sent as the DHCP client hostname when supported.
+                sent as the DHCP client hostname when supported. It is shared by
+                the Ethernet and WiFi transports.
 
                 Not tied to Ethernet: a board with no wired port still answers to
                 this name over WiFi, and it is also what the certificate and the

@@ -17,6 +17,26 @@ idf.py -p /dev/ttyACM0 flash
 Config: `sdkconfig.defaults` + `partitions.csv` (32 MB, `storage` and `rescue`
 both 4 MB). Chip target rev <3.0.
 
+## Waveshare ESP32-P4-WIFI6 (chip rev v1.3, 32 MB flash)
+
+The WiFi-only SKU uses its onboard ESP32-C6 over SDIO and opens its own setup
+hotspot on a fresh ESP-KVM install:
+
+```
+idf.py -B build.waveshare_wifi6 \
+  -D SDKCONFIG=build.waveshare_wifi6/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare_p4_wifi6.defaults" \
+  build
+
+idf.py -B build.waveshare_wifi6 -p /dev/ttyACM0 flash
+```
+
+Config deltas: Ethernet disabled, WiFi/esp-hosted enabled on the documented
+Function-EV-compatible SDIO pins, microSD power-gated by GPIO45, and the UART
+console retained for the onboard CH343 bridge. The separate four-pin USB port
+is the target-facing HID connection. The expansion-header layout was checked
+against the physical board.
+
 ## Espressif ESP32-P4 Function EV Board (chip rev v3.2, 16 MB flash)
 
 An overlay on the common defaults, built into a separate directory so it never
