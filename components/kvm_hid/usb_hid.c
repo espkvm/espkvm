@@ -754,6 +754,14 @@ static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
     if (acc_buttons != add_buttons) {
         return false;
     }
+    /* A held-button move is semantic input, not disposable cursor motion. In
+     * particular, drawing and drag-and-drop targets need the intermediate
+     * positions to reconstruct the path. Folding a whole held drag down to its
+     * final position leaves some hosts with only the press and release marks.
+     * The queue is deliberately deep enough to preserve these reports. */
+    if (acc_buttons != 0) {
+        return false;
+    }
     if (acc->type == Q_MOUSE_ABS) {
         /* Only the newest position matters - intermediate ones are not motion
          * the target needs to see. Scroll clicks still accumulate. */
