@@ -303,8 +303,28 @@ Waveshare ESP32-P4-ETH it is not a USB socket at all but the **MX1.25 header**,
 so that one needs an MX1.25-to-USB-A cable. The other USB-C on any of these
 boards is the serial bridge, for flashing.
 
+### A case
+
+<table>
+<tr>
+<td width="50%"><a href="https://www.printables.com/model/1824874-esp32-p4-eth-kvm-case"><img src="docs/case-p4eth.webp" alt="A 3D-printed case for the Waveshare ESP32-P4-ETH, with HDMI, Ethernet and the USB cable coming out of one side"></a></td>
+<td valign="top">
+
+**[ESP32-P4-ETH KVM Case](https://www.printables.com/model/1824874-esp32-p4-eth-kvm-case)** (optional)
+
+A printed box for the Waveshare ESP32-P4-ETH and the C790 together, published by
+[Colin Hickey](https://github.com/chickey). It keeps the two boards and the OTG
+cable to the target tidy; HDMI, Ethernet and that cable all come out of one
+side. The P4 board is held tightly, so take care when you take it out again.
+The author is asking for feedback on the fit.
+
+</td>
+</tr>
+</table>
+
 <sub>Board and module photos (c) their makers, taken from product pages and used
-only to identify the hardware. ESP-KVM is not affiliated with
+only to identify the hardware. The case photo is by its author,
+[Colin Hickey](https://github.com/chickey), CC BY-NC. ESP-KVM is not affiliated with
 [Espressif](https://github.com/espressif), [Waveshare](https://github.com/waveshareteam),
 [Geekworm](https://github.com/geekworm-com) or [Guition](https://github.com/guitionofficial).
 The pin map is in `components/kvm_board/include/kvm_board.h`.</sub>
