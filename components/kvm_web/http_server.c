@@ -1196,7 +1196,14 @@ static bool image_name_from_query(httpd_req_t *req, char *out, size_t outlen)
 /* Full "/sd/<name>" path into buf. Caller has already validated the name. */
 static void image_path(char *buf, size_t buflen, const char *name)
 {
-    snprintf(buf, buflen, "%s/%s", kvm_storage_mount_point(), name);
+    int n = snprintf(buf, buflen, "%s/%s", kvm_storage_mount_point(), name);
+    /* A truncated path names a different file than the caller asked for, so it
+     * is emptied instead - every caller then fails to open it, which is the
+     * right answer. Names are validated and short, so this cannot happen in
+     * practice; it is here because a silent cut is the dangerous kind. */
+    if (n < 0 || (size_t)n >= buflen) {
+        buf[0] = '\0';
+    }
 }
 
 static esp_err_t api_storage_images_get(httpd_req_t *req)

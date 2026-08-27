@@ -198,7 +198,11 @@ static void gather(kvm_display_status_t *st)
         /* Matches wifi.c and the QR: below WPA2's minimum the hotspot comes up
          * open, and there is no passphrase to show. */
         if (pass && strlen(pass) >= 8) {
-            snprintf(st->ap_pass, sizeof(st->ap_pass), "%s", pass);
+            /* The precision, rather than a plain %s: the passphrase is a
+               setting string of unknown length, and at -O2 gcc calls that a
+               possible truncation. Cutting it here is deliberate. */
+            snprintf(st->ap_pass, sizeof(st->ap_pass), "%.*s",
+                     (int)sizeof(st->ap_pass) - 1, pass);
         }
     }
 

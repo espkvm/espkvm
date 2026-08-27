@@ -131,7 +131,11 @@ static void ca_hostname(char *out, size_t len)
     hostname_now(host, sizeof(host));
     uint8_t mac[6] = {0};
     (void)esp_efuse_mac_get_default(mac); /* factory base MAC, stable per device */
-    snprintf(out, len, "%s-%02x%02x", host, mac[4], mac[5]);
+    /* The precision keeps room for the suffix: it is what makes one
+     * device's CA distinct from another's, so a long hostname must lose
+     * its tail rather than push the MAC out of the buffer. */
+    const int room = (int)(len > 6 ? len - 6 : 0);
+    snprintf(out, len, "%.*s-%02x%02x", room, host, mac[4], mac[5]);
 }
 
 /** Parse "a.b.c.d" into four bytes. False (and out untouched) if it is not one. */
