@@ -52,6 +52,28 @@ void usb_hid_mouse_abs(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel, in
 /** Relative motion in mickeys, for pointer-lock and captured-cursor software. */
 void usb_hid_mouse_rel(uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, int8_t pan);
 
+/**
+ * When something was last sent to the target, on the esp_timer clock.
+ *
+ * The jiggler uses it to keep out of the way: a nudge while the operator is
+ * moving the mouse would fight them. Its own nudges land here too, so it
+ * remembers the value it left and treats a later one as somebody real.
+ */
+int64_t usb_hid_last_input_us(void);
+
+/**
+ * Start the mouse jiggler, if `jiggle_s` asks for one.
+ *
+ * A nudge of one pixel and straight back, so the target counts it as activity
+ * and nothing on screen moves. Runs on the device rather than in the console
+ * because the point of it is a machine left alone - a browser tab that is closed
+ * would take a console-side jiggler with it.
+ */
+void usb_hid_jiggler_start(void);
+
+/** How many nudges it has sent since boot - what makes it testable. */
+uint32_t usb_hid_jiggler_nudges(void);
+
 /** Boot keyboard report: modifier bitmap plus up to six key usages. */
 void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[6]);
 

@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "usb_hid.c"
+        "jiggler.c"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES
         kvm_board

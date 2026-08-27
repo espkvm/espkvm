@@ -149,6 +149,16 @@ static const kvm_setting_t s_settings[] = {
         .min = 10, .max = 400, .def = 100, .requires_cap = KVM_CAP_HID,
     },
     {
+        .key = "jiggle_s", .section = "input", .type = KVM_VT_INT,
+        .title = "Mouse jiggler (seconds)",
+        .help = "0 turns it off. Otherwise the pointer is nudged one pixel and put straight "
+                "back this often, so the target does not lock or fall asleep while you are "
+                "watching it. It stands aside whenever you are using the mouse yourself, and "
+                "does nothing when no target is attached.",
+        .min = 0, .max = 3600, .def = 0, .requires_cap = KVM_CAP_HID,
+    },
+
+    {
         .key = "scroll_inv", .section = "input", .type = KVM_VT_BOOL,
         .title = "Invert scroll wheel",
         .def = 0, .requires_cap = KVM_CAP_HID,

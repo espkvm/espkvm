@@ -23,6 +23,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - Thermal protection
 - Over-the-network updates with automatic rollback
 - Install any published release, including going back to an earlier one - the device fetches the image itself, so the history is not limited to the two slots on the board
+- A mouse jiggler - a nudge of one pixel and straight back, now and then, so the target does not lock or fall asleep while you are watching it
 - A second board build target (Espressif ESP32-P4 Function EV Board)
 - WiFi on boards with an ESP32-C6 (station or the device's own access point) - one link at a time, with a rescue hotspot and captive portal so a device whose network is out of range is still set up from a phone
 - Faster H.264 on rev 3.x silicon - native YUV422 capture fed straight to the encoder; 1080p went from ~15 to ~22 fps
@@ -34,7 +35,6 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 
 - **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser
 - **More supported boards**
-- **A mouse jiggler** - a small move now and then so the target does not lock or sleep while you are watching it
 - **Tell the console how the target's monitors are arranged** - an absolute pointer addresses the target's whole desktop, so a second display makes the pointer travel further than the mouse and half the picture aim at a screen you cannot see. Give the desktop's size and where the captured screen sits inside it, and the console maps into that part instead - absolute pointing that lands where it is aimed on a multi-monitor target, without falling back to relative
 - **Install your own EDID** - the built-in profiles cover the common cases; this takes a binary from a monitor that works, for the target that only likes its own
 - **GPIO relays and lamps** - the pins already drive the ATX buttons; this opens the rest of them, as buttons and indicators of your own in the console

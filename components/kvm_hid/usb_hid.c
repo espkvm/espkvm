@@ -853,11 +853,22 @@ void usb_hid_set_led_callback(usb_hid_led_cb_t cb, void *user)
     s_led_cb = cb;
 }
 
+/* When something was last sent to the target. Read by the jiggler, which stands
+   aside while the operator is using the mouse - and recognises its own nudges by
+   the timestamp they leave here. */
+static volatile int64_t s_last_input_us;
+
+int64_t usb_hid_last_input_us(void)
+{
+    return s_last_input_us;
+}
+
 static void enqueue(const q_msg_t *m)
 {
     if (!s_hid_q) {
         return;
     }
+    s_last_input_us = esp_timer_get_time();
     (void)xQueueSend(s_hid_q, m, 0);
 }
 

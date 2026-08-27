@@ -553,6 +553,8 @@ void app_main(void)
     esp_err_t hid_err = usb_hid_init();
     if (hid_err != ESP_OK) {
         ESP_LOGE(TAG, "usb_hid_init: %s (continuing without HID)", esp_err_to_name(hid_err));
+    } else {
+        usb_hid_jiggler_start();
     }
 
     ESP_LOGI(TAG, "boot: capture");

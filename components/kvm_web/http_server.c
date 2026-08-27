@@ -795,7 +795,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"atx\":{\"enabled\":%s,\"known\":%s,\"on\":%s},"
                      "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
                      "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
-                     "\"ts\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"peers\":%d}}",
+                     "\"ts\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"peers\":%d},"
+                     "\"jiggler\":{\"everyS\":%d,\"nudges\":%u}}",
                      app->project_name, app->version, app->date, app->time, kvm_board_id(),
                      app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false", ota_json,
@@ -812,7 +813,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      mqtt_conn ? "true" : "false", wg.enabled ? "true" : "false",
                      wg.up ? "true" : "false", wg.address, wg.public_key,
                      ts.enabled ? "true" : "false", ts.up ? "true" : "false", ts.address,
-                     ts.peers);
+                     ts.peers, (int)kvm_setting_int("jiggle_s"),
+                     (unsigned)usb_hid_jiggler_nudges());
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }

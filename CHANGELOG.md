@@ -5,6 +5,30 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.38.0] - 2026-08-27
+
+### Added
+- **A mouse jiggler.** A machine left alone locks its screen or goes to sleep,
+  and then what you were watching is behind a password. Set an interval in
+  Settings and the pointer is nudged one pixel and put straight back that often
+  - nothing moves on screen, and the target counts it as somebody being there.
+  It runs on the device rather than in the browser, because the case it exists
+  for is a machine nobody is sitting in front of; a console-side one would go
+  with the tab. It stands aside whenever you are using the mouse yourself, and
+  does nothing when no target is attached. Off by default.
+
+### Fixed
+- **The update popup no longer sits lit up under the restart screen.** Starting
+  an update raises a full-screen progress panel over a blurred page, and the
+  popup the button was in stayed open behind it - with its own progress bar
+  visibly filling through the frosting. It closes as the panel goes up.
+- **That popup no longer scrolls sideways.** Long version names pushed the rows
+  wider than the popup, and asking for a vertical scrollbar quietly gets you a
+  horizontal one as well, so a stray bar slid about under the restart screen.
+  The rows shrink and the names end in an ellipsis instead.
+- **The mark on the sign-in card is centred.** It sat against the left edge with
+  the fields, which was never the intention.
+
 ## [0.37.1] - 2026-08-26
 
 ### Fixed

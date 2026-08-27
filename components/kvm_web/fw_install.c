@@ -55,13 +55,22 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static fw_install_status_t s_status;
 static char s_version[FW_INSTALL_VERSION_MAX];
 
+/*
+ * The lock is a spinlock, so what happens under it has to be short - it runs
+ * with interrupts off on this core. The string is therefore laid out first and
+ * only copied inside; formatting in there would hold interrupts for as long as
+ * snprintf takes, on a device that is meanwhile decoding video and serving a
+ * web interface.
+ */
 static void set_state(fw_install_state_t state, int percent, const char *message)
 {
+    char text[sizeof(s_status.message)];
+    const size_t len = message ? strlcpy(text, message, sizeof(text)) + 1 : 0;
     portENTER_CRITICAL(&s_lock);
     s_status.state = state;
     s_status.percent = percent;
-    if (message) {
-        snprintf(s_status.message, sizeof(s_status.message), "%s", message);
+    if (len) {
+        memcpy(s_status.message, text, len < sizeof(text) ? len : sizeof(text));
     }
     portEXIT_CRITICAL(&s_lock);
 }
@@ -351,13 +360,15 @@ esp_err_t fw_install_start(const char *version)
     if (!kvm_setting_bool("fw_fetch")) {
         return ESP_ERR_NOT_ALLOWED;
     }
-    snprintf(s_version, sizeof(s_version), "%s", version);
+    strlcpy(s_version, version, sizeof(s_version));
+    char ver[sizeof(s_status.version)];
+    const size_t vlen = strlcpy(ver, version, sizeof(ver)) + 1;
     portENTER_CRITICAL(&s_lock);
     s_status.state = FW_INSTALL_RUNNING;
     s_status.percent = -1;
-    snprintf(s_status.version, sizeof(s_status.version), "%s", version);
-    snprintf(s_status.message, sizeof(s_status.message), "starting");
+    memcpy(s_status.version, ver, vlen < sizeof(ver) ? vlen : sizeof(ver));
     portEXIT_CRITICAL(&s_lock);
+    set_state(FW_INSTALL_RUNNING, -1, "starting");
 
     if (xTaskCreate(install_task, "fw_install", TASK_STACK, NULL, TASK_PRIO, NULL) != pdPASS) {
         set_state(FW_INSTALL_FAILED, -1, "could not start the download task");
