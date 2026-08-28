@@ -5,6 +5,22 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.38.1] - 2026-08-28
+
+### Fixed
+- **H.264 comes back after MJPEG.** Switching to MJPEG and back left the device
+  on MJPEG, while the setting still said H.264. The encoder wants one unbroken
+  block of internal memory for its reference frame, 135 KB at 1080p, and asks
+  for internal only. That memory fragments as the device runs, so the block was
+  there at boot and gone an hour later: 323 KB free on the bench, longest run
+  132 KB. The encoder is now left alone when the codec changes, and rebuilt only
+  when the resolution does.
+- **Three string truncations, found by building with -O2.** The certificate
+  authority is named after the hostname plus the last of the MAC, and the MAC is
+  what keeps two devices apart; a long enough hostname would have pushed it out
+  of the buffer. A path to an image on the card was cut instead of refused.
+  Neither is reachable with the values the settings allow.
+
 ## [0.38.0] - 2026-08-27
 
 ### Added

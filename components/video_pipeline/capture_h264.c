@@ -64,6 +64,10 @@
 
 static esp_h264_enc_handle_t s_enc;
 static esp_h264_enc_param_hw_handle_t s_param;
+/** Whether the encoder currently holds the H.264 block, its interrupt and DMA.
+ *  It stays true across a codec switch: the encoder keeps both, see
+ *  encoder_park(). */
+static bool s_enc_hw_held;
 static uint8_t *s_buf[H264_SLOTS];
 static uint32_t s_buf_alloc[H264_SLOTS];
 
@@ -146,13 +150,43 @@ const char *h264_err_name(esp_h264_err_t err)
 static void encoder_release(void)
 {
     if (s_enc) {
-        esp_h264_enc_close(s_enc);
+        if (s_enc_hw_held) {
+            esp_h264_enc_close(s_enc);
+        }
         esp_h264_enc_del(s_enc);
         s_enc = NULL;
     }
+    s_enc_hw_held = false;
     s_param = NULL;
     s_enc_w = 0;
     s_enc_h = 0;
+}
+
+/*
+ * Keep the encoder whole across a codec switch.
+ *
+ * Building it needs one CONTIGUOUS internal block for the reference frame -
+ * 135 KB at 1080p, 90 KB at 720p - and the component asks for internal only,
+ * with no fall back to PSRAM. Internal RAM is what this chip has least of, and
+ * it fragments as the device runs. A device that had H.264 open, spent a while
+ * on MJPEG and then came back could not get that block again: seen on the bench
+ * at 323 KB free with the longest run only 132 KB, after which the codec
+ * silently stayed on MJPEG.
+ *
+ * Closing the encoder is not a way out. esp_h264_enc_close() resets the H.264
+ * block and deinits its DMA, while esp_h264_enc_open() only takes the interrupt
+ * back: the DMA and its descriptors are set up in esp_h264_enc_hw_new(). A
+ * closed-then-opened encoder drives a dead DMA and takes the device down with
+ * it, which is what the bench showed - every switch back rebooted the board.
+ *
+ * So a codec switch leaves the encoder alone. It costs the memory we were using
+ * anyway while H.264 ran, plus an idle interrupt, and the switch back cannot
+ * fail. The buffers are freed for real when the resolution changes, which is
+ * the one case they are the wrong size.
+ */
+static void encoder_park(void)
+{
+    /* Deliberately nothing: the point is to keep both memory and hardware. */
 }
 
 /** Keyframe interval: two seconds of the current frame rate, within the byte
@@ -182,14 +216,33 @@ static uint32_t wanted_bitrate(void)
 
 static esp_err_t encoder_open(uint32_t w, uint32_t h)
 {
-    encoder_release();
-
     int32_t fps = kvm_setting_int("vid_fps_max");
     if (fps < 1 || fps > 255) {
         fps = 30;
     }
     s_gop = wanted_gop();
     s_bitrate = wanted_bitrate();
+
+    /* A parked encoder of the right size is taken back rather than rebuilt: it
+     * still holds the internal block that a rebuild might not find. Settings
+     * that changed while it was parked are applied here, and the first frame
+     * out is an IDR because opening resets the frame counter. */
+    if (s_enc && s_enc_hw_held && s_enc_w == w && s_enc_h == h) {
+        (void)esp_h264_enc_hw_get_param_hd(s_enc, &s_param);
+        if (s_param) {
+            (void)esp_h264_enc_set_fps(&s_param->base, (uint8_t)fps);
+            (void)esp_h264_enc_set_gop(&s_param->base, s_gop);
+            (void)esp_h264_enc_set_bitrate(&s_param->base, s_bitrate);
+        }
+        s_enc_broken = false;
+        ESP_LOGI(CAPTURE_LOG_TAG,
+                 "h264 encoder %" PRIu32 "x%" PRIu32 " taken back @%" PRId32 " fps, %" PRIu32
+                 " kbit/s, gop %u", w, h, fps, s_bitrate / 1000u, s_gop);
+        return ESP_OK;
+    }
+
+    /* Wrong size, or nothing parked: build one. */
+    encoder_release();
 
     esp_h264_enc_cfg_hw_t cfg = {
         .pic_type = (esp_h264_raw_format_t)capture_pixfmt()->h264_pic,
@@ -229,6 +282,7 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
         return ESP_FAIL;
     }
     (void)esp_h264_enc_hw_get_param_hd(s_enc, &s_param);
+    s_enc_hw_held = true;
     s_enc_w = w;
     s_enc_h = h;
     s_enc_broken = false;
@@ -376,7 +430,7 @@ static void h264_close(void)
         s_enc_done = NULL;
     }
 #endif
-    encoder_release();
+    encoder_park();
     h264_free_buffers();
 #if !CAPTURE_DIRECT_ENCODE
     if (s_ppa) {
