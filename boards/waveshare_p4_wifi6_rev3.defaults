@@ -1,0 +1,18 @@
+# Waveshare ESP32-P4-WIFI6 on rev 3.x silicon
+#
+# Everything in boards/waveshare_p4_wifi6.defaults, with the chip revision
+# moved. Build it with:
+#   idf.py -B build.waveshare_wifi6_rev3 \
+#     -D SDKCONFIG=build.waveshare_wifi6_rev3/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare_p4_wifi6.defaults;boards/waveshare_p4_wifi6_rev3.defaults" \
+#     build
+#
+# The board reported here is rev 1.3, and every Waveshare P4 board seen so far
+# has been pre-3.0 - but the NANO taught us that one product code ships both
+# (#24), and neither image starts on the other's silicon: a pre-3.0 image
+# declares max chip rev 1.99, a rev-3 image declares min 3.0. So both are
+# published, and a rev 3.x owner flashes this one. It also gets the faster
+# capture path (UYVY straight into the encoder) and a writable microSD.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-wifi6-rev3/manifest.json"

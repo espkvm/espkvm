@@ -5,6 +5,28 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.40.0] - 2026-08-28
+
+### Added
+- **The Waveshare ESP32-P4-WIFI6, contributed by [@nwomn](https://github.com/nwomn),**
+  who has the board. Capture through the C790 and the USB keyboard and mouse are
+  confirmed on hardware, and the header and pin reservations are checked against
+  the real thing rather than guessed from a drawing. Published for both silicon
+  revisions, and offered by the browser flasher.
+
+  **Its WiFi is not dependable yet, and it is the only link this board has.** The
+  co-processor associates and hands out an address, then the data path can stall:
+  the SDIO interrupt from the C6 stops arriving while commands still work. It
+  looks like a board-level problem rather than firmware - the SDIO lines there
+  are pulled up through 51K where Espressif ask for 10K - but it is not settled,
+  so treat the board as experimental.
+
+- **A drag keeps its path.** Pointer reports were merged into the latest
+  position, which is right while no button is down and wrong while one is: a
+  drag reached the target as a press and a release with nothing in between, so
+  drawing and drag-and-drop lost everything in the middle. Also from @nwomn
+  (#28), validated by drawing on a tablet through the KVM.
+
 ## [0.39.0] - 2026-08-28
 
 ### Added

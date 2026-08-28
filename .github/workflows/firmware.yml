@@ -145,6 +145,9 @@ jobs:
           - id: p4-wifi6-devkit-rev3
             build_dir: build.wifi6devkit_rev3
             sdkconfig_defaults: sdkconfig.defaults;boards/wifi6devkit_p4.defaults;boards/wifi6devkit_p4_rev3.defaults
+          - id: p4-wifi6-rev3
+            build_dir: build.waveshare_wifi6_rev3
+            sdkconfig_defaults: sdkconfig.defaults;boards/waveshare_p4_wifi6.defaults;boards/waveshare_p4_wifi6_rev3.defaults
     steps:
       - uses: actions/checkout@v4
         with:
