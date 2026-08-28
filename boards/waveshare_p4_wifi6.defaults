@@ -1,0 +1,37 @@
+# Waveshare ESP32-P4-WIFI6 (SKU 32020, 32 MB flash, 32 MB PSRAM)
+#
+# Deltas from sdkconfig.defaults. Build in a separate directory:
+#   idf.py -B build.waveshare_wifi6 \
+#     -D SDKCONFIG=build.waveshare_wifi6/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare_p4_wifi6.defaults" \
+#     build
+#
+# Verified against the vendor schematic and a physical board's ROM report:
+#   ESP32-P4 rev 1.3; 32 MB flash; ESP32-C6 over SDIO on 14-19 with reset 54;
+#   microSD CLK/CMD/D0-D3 on 43/44/39/40/41/42 with active-low power on 45;
+#   BOOT on 35; capture I2C on 7/8; no Ethernet PHY.
+
+# 32 MB flash/partitions and pre-v3 silicon are inherited from sdkconfig.defaults.
+
+# This board has no wired link. Its first boot therefore opens the setup hotspot;
+# after provisioning, the console can switch it to WiFi station mode.
+CONFIG_KVM_ETH_ENABLE=n
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# GPIO45 drives the microSD VDD P-channel MOSFET and is active low (base default).
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# Keep the default UART console: the board's flashing Type-C reaches GPIO37/38
+# through its CH343 bridge. The separate four-pin USB connector is target HID.
+
+# The CSI connector exposes the bridge's I2C bus and two camera control signals,
+# but neither control signal is routed to GPIO23 on this board. The C790 uses its
+# own power-on reset, so do not toggle or reserve an unrelated expansion GPIO.
+CONFIG_KVM_TC358743_RST_GPIO=-1
+
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-wifi6/manifest.json"
+CONFIG_KVM_BOARD_WAVESHARE_WIFI6=y

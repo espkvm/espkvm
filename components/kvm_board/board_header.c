@@ -11,6 +11,7 @@
  *
  * Sources:
  *   Waveshare ESP32-P4-ETH   https://www.waveshare.com/wiki/ESP32-P4-ETH
+ *   Waveshare ESP32-P4-WIFI6 https://docs.waveshare.com/ESP32-P4-WIFI6
  *   Waveshare PoE            https://www.waveshare.com/wiki/ESP32-P4-WIFI6-POE-ETH
  *   Waveshare ESP32-P4-NANO  https://www.waveshare.com/esp32-p4-nano.htm
  *   ESP32-P4 Function EV     https://docs.espressif.com/projects/esp-dev-kits/
@@ -87,6 +88,36 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_NAME "Waveshare ESP32-P4-WIFI6-DEV-KIT"
 #define BOARD_ID_BASE "p4-wifi6-devkit"
 #define BOARD_VERIFIED false
+
+#elif CONFIG_KVM_BOARD_WAVESHARE_WIFI6
+/*
+ * Two rows of twenty down the long edges. Waveshare prints the carried signal
+ * beside each pad instead of numbering the connector, so expose the two rows in
+ * the same top-to-bottom orientation as the board's official pinout image.
+ */
+static const kvm_board_pin_t s_wifi6_left[] = {
+    IO(52), IO(51), PWR("GND"), IO(31), IO(30), IO(29), IO(28),
+    PWR("GND"), IO(50), IO(49), IO(5), IO(4), PWR("GND"), IO(3),
+    IO(2), IO(8), IO(7), PWR("GND"),
+    IO_NOTE(24, "USB DM"), IO_NOTE(25, "USB DP"),
+};
+_Static_assert(sizeof(s_wifi6_left) / sizeof(s_wifi6_left[0]) == 20,
+               "s_wifi6_left: the column must hold exactly 20 pins");
+static const kvm_board_pin_t s_wifi6_right[] = {
+    PWR("VBUS"), PWR("VSYS"), PWR("GND"), PWR("EN"), PWR("3V3"),
+    IO(20), IO(21), PWR("GND"), IO(22), IO(23), PWR("RUN"), IO(26),
+    PWR("GND"), IO(27), IO(32), IO(33), IO(46), PWR("GND"), IO(47), IO(48),
+};
+_Static_assert(sizeof(s_wifi6_right) / sizeof(s_wifi6_right[0]) == 20,
+               "s_wifi6_right: the column must hold exactly 20 pins");
+static const kvm_board_header_t s_headers[] = {
+    {.name = "", .rows = 20, .numbered = false, .left = s_wifi6_left,
+     .right = s_wifi6_right},
+};
+#define BOARD_HAS_HEADERS 1
+#define BOARD_NAME "Waveshare ESP32-P4-WIFI6"
+#define BOARD_ID_BASE "p4-wifi6"
+#define BOARD_VERIFIED true
 
 #elif CONFIG_KVM_BOARD_WAVESHARE_NANO
 /*

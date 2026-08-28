@@ -117,6 +117,11 @@ jobs:
           - id: p4-wifi6-devkit
             build_dir: build.wifi6devkit
             sdkconfig_defaults: sdkconfig.defaults;boards/wifi6devkit_p4.defaults
+          # Waveshare ESP32-P4-WIFI6 - no Ethernet; ESP32-C6 SDIO WiFi and a
+          # setup hotspot are the only management link.
+          - id: p4-wifi6
+            build_dir: build.waveshare_wifi6
+            sdkconfig_defaults: sdkconfig.defaults;boards/waveshare_p4_wifi6.defaults
           # The same two Waveshare boards on rev 3.x silicon. Espressif is still
           # ramping that revision up (volume expected around October 2026) and a
           # product code does not tell you which one is in the box, so both have
