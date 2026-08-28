@@ -20,6 +20,7 @@ __attribute__((unused)) static const char *TAG = "wifi";
 
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_hosted.h"
@@ -454,6 +455,40 @@ static esp_err_t wifi_start_ap(void)
     ESP_LOGI(TAG, "WiFi hotspot \"%s\" up (%s) - connect and open http://192.168.4.1/", s_ssid,
              ap.ap.authmode == WIFI_AUTH_OPEN ? "open" : "WPA2");
     return ESP_OK;
+}
+
+/*
+ * Put the chip's own pull-ups on the SDIO lines to the co-processor.
+ *
+ * SDIO holds its lines high through resistors, and Espressif ask for 10k on CMD
+ * and the data lines. The ESP32-P4-WIFI6 fits 51k, weak enough that how fast a
+ * line returns to 3.3 V depends on the capacitance of the trace. The line that
+ * suffers first is D1: that is how the co-processor says "I have data", and a
+ * missed edge there leaves the link associated, addressed and silent while
+ * commands still work - which is what that board reports.
+ *
+ * The internal pull-up is about 45k, so in parallel this makes roughly 24k. Not
+ * the 10k the board should have had, but twice what it has, and it costs nothing
+ * where the board is already right: the internal one just sits beside a stronger
+ * external resistor.
+ *
+ * esp-hosted does not do this itself - it takes SDMMC_SLOT_CONFIG_DEFAULT() and
+ * never sets SDMMC_SLOT_FLAG_INTERNAL_PULLUP, with no setting to ask for it - so
+ * the pins are set here, before the driver claims them.
+ */
+static void sdio_add_internal_pullups(void)
+{
+#if CONFIG_KVM_WIFI_SDIO_INTERNAL_PULLUP
+    static const int pins[] = {
+        CONFIG_ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MIN, CONFIG_ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MIN,
+        CONFIG_ESP_HOSTED_SDIO_D0_GPIO_RANGE_MIN,  CONFIG_ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN,
+        CONFIG_ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN,  CONFIG_ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN,
+    };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        (void)gpio_set_pull_mode((gpio_num_t)pins[i], GPIO_PULLUP_ONLY);
+    }
+    ESP_LOGI(TAG, "SDIO: internal pull-ups added on CLK/CMD/D0-D3");
+#endif
 }
 
 esp_err_t kvm_wifi_init(void)

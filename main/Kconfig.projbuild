@@ -234,6 +234,28 @@ menu "ESP-KVM"
             default y
             depends on SOC_EMAC_SUPPORTED
 
+        config KVM_WIFI_SDIO_INTERNAL_PULLUP
+            bool "Add the chip's internal pull-ups to the co-processor's SDIO lines"
+            depends on KVM_WIFI
+            default y if KVM_BOARD_WAVESHARE_WIFI6
+            default n
+            help
+                SDIO needs its lines pulled up, and Espressif ask for 10k on CMD
+                and the data lines. The ESP32-P4-WIFI6 uses 51k, which is weak
+                enough that a line climbs back to 3.3 V slowly - and the one that
+                matters most is D1, because that is how the co-processor rings
+                the doorbell for "I have data". Miss the doorbell and the link
+                sits there: associated, addressed, and silent.
+
+                The chip's own pull-ups are about 45k. In parallel with 51k that
+                is roughly 24k, which is not the 10k a board should have had, but
+                is twice what it has. Whether it is enough is a question for the
+                board, not for us - so this is a switch, on by default only where
+                the schematic says the resistors are weak.
+
+                Costs nothing where the board is already correct; the internal
+                pull-up simply sits in parallel with a stronger external one.
+
         config KVM_MDNS_HOSTNAME
             string "mDNS hostname (device is <name>.local)"
             default "espkvm"
