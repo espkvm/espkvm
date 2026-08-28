@@ -581,6 +581,17 @@ static const kvm_setting_t s_settings[] = {
         .help = "How often telemetry is published.",
         .min = 5, .max = 3600, .def = 30, .requires_cap = -1,
     },
+    {
+        .key = "mqtt_snap", .section = "mqtt", .type = KVM_VT_BOOL,
+        .title = "Send a picture with a screen alert",
+        .help = "When the screen watch fires, publish a still of the screen as a "
+                "camera in Home Assistant, so the notification carries what the "
+                "machine actually shows. The button is always there; this only "
+                "decides whether an alert takes a picture by itself. Needs the "
+                "MJPEG codec - there is no still to take while H.264 runs - and a "
+                "1080p frame is a few hundred kilobytes over the broker.",
+        .def = 0, .requires_cap = -1,
+    },
 
     /* ---- security ------------------------------------------------------- */
     {

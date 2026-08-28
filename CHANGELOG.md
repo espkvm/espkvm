@@ -5,6 +5,30 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.41.0] - 2026-08-28
+
+### Added
+- **Home Assistant gets a firmware update entity.** It shows what is installed
+  and what the project has published, with a button that installs it. The device
+  reads the manifest itself now, at most once every six hours - until now only
+  the console did that, from the browser, which is no use to a dashboard. Only
+  where the device is allowed to fetch (Settings -> the same switch that lets it
+  install a published release); with that off there is no entity, because one
+  that can never answer is worse than none.
+- **A camera with a still of the target's screen.** A button takes one on
+  demand, and there is a setting to take one by itself when the screen watch
+  matches a phrase - so the notification that says `kernel panic` carries the
+  screen along with it. Needs the MJPEG codec: while H.264 runs there is no
+  still to take. Off by default, because a 1080p frame is a few hundred
+  kilobytes over the broker.
+- **The mouse jiggler as a switch, with its interval beside it.** The point is
+  an automation: quiet during the day, awake overnight. Turning the switch back
+  on restores the last interval you set.
+- **Diagnostics worth having when something is wrong:** free internal memory and
+  the largest unbroken block in it - the gap between those two is what decides
+  whether the H.264 encoder can start - along with skipped frames, which
+  firmware slot is running, and why the device last booted.
+
 ## [0.40.1] - 2026-08-28
 
 ### Fixed

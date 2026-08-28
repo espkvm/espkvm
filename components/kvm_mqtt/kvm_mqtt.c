@@ -24,6 +24,7 @@
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -38,6 +39,7 @@
 #include "kvm_settings.h"
 #include "kvm_thermal.h"
 #include "usb_hid.h"
+#include "fw_install.h"
 #include "video_frame.h"
 
 #define TAG "mqtt"
@@ -102,8 +104,35 @@ static void json_escape(char *dst, size_t cap, const char *src)
     dst[o] = '\0';
 }
 
+/* Which app slot is running, for the diagnostics sensor. */
+static const char *running_slot(void)
+{
+    const esp_partition_t *p = esp_ota_get_running_partition();
+    return p ? p->label : "?";
+}
+
+/* Why the device started last time. A box that quietly reboots in the night is
+ * worth seeing in Home Assistant, not only in the log. */
+static const char *boot_reason(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:    return "power on";
+    case ESP_RST_EXT:        return "reset pin";
+    case ESP_RST_SW:         return "software restart";
+    case ESP_RST_PANIC:      return "panic";
+    case ESP_RST_INT_WDT:    return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:   return "task watchdog";
+    case ESP_RST_WDT:        return "watchdog";
+    case ESP_RST_BROWNOUT:   return "brownout";
+    case ESP_RST_SDIO:       return "SDIO";
+    case ESP_RST_DEEPSLEEP:  return "deep sleep";
+    default:                 return "unknown";
+    }
+}
+
 static void build_state(char *b, size_t n)
 {
+    const int32_t jiggle_s = kvm_setting_int("jiggle_s");
     kvm_video_status_t v;
     capture_status_get(&v);
     kvm_atx_status_t a;
@@ -139,13 +168,25 @@ static void build_state(char *b, size_t n)
                 because it is not characters - a stop screen, a blanked output -
                 which shows up as one flat colour that stays. Half a minute of
                 it is a state rather than a repaint. */
-             "\"screenFlat\":\"%s\",\"screenFlatSec\":%u}",
+             "\"screenFlat\":\"%s\",\"screenFlatSec\":%u,"
+             /* Diagnostics. Internal memory gets both figures: the encoder asks
+                for one unbroken block, so "free" alone can look healthy while
+                the longest run is too short - which is how H.264 came to refuse
+                to start after a spell on MJPEG. */
+             "\"internalKb\":%u,\"internalLargestKb\":%u,\"skippedFps\":%u.%02u,"
+             "\"slot\":\"%s\",\"bootReason\":\"%s\","
+             "\"jiggler\":\"%s\",\"jigglerSec\":%d,\"jigglerNudges\":%u}",
              t_int, t_dec, kvm_thermal_state_name(kvm_thermal_state()), viewers,
              v.signal ? "ON" : "OFF", res, (unsigned)(v.fps_x100 / 100),
              (unsigned)(v.fps_x100 % 100), codec, (unsigned)v.kbps,
              usb_hid_ready() ? "ON" : "OFF", a.have_led ? (a.power_on ? "ON" : "OFF") : "OFF",
              uptime, psram_kb, alerting ? "ON" : "OFF", alert_json,
-             v.flat_ms >= 30000u ? "ON" : "OFF", (unsigned)(v.flat_ms / 1000u));
+             v.flat_ms >= 30000u ? "ON" : "OFF", (unsigned)(v.flat_ms / 1000u),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(v.skipped_fps_x100 / 100u), (unsigned)(v.skipped_fps_x100 % 100u),
+             running_slot(), boot_reason(), jiggle_s > 0 ? "ON" : "OFF", (int)jiggle_s,
+             (unsigned)usb_hid_jiggler_nudges());
 }
 
 /*
@@ -164,6 +205,9 @@ static void build_state(char *b, size_t n)
  * long list would have been published as truncated, unparseable JSON.
  */
 #define STATE_JSON_MAX (SCREENTEXT_ALERT_MAX * 2 + 384)
+static void publish_snapshot(void);      /* defined with the discovery helpers below */
+static void publish_update_state(bool force);
+
 static void publish_state(void)
 {
     if (!s_connected) {
@@ -193,6 +237,12 @@ static void alert_cb(void *arg)
     if (seq != s_seen) {
         s_seen = seq;
         publish_state();
+        /* A phrase matched. If the operator asked for it, send the screen with
+         * it - the alert says what was found, the picture says what it looks
+         * like. Only on the way in: clearing an alert needs no photograph. */
+        if (kvm_setting_bool("mqtt_snap") && screentext_alert_get(NULL, 0, NULL)) {
+            publish_snapshot();
+        }
     }
 }
 
@@ -200,6 +250,7 @@ static void timer_cb(void *arg)
 {
     (void)arg;
     publish_state();
+    publish_update_state(false);
 }
 
 /* ---- Home Assistant discovery ------------------------------------------- */
@@ -244,6 +295,94 @@ static void disco_button(const char *obj, const char *name, const char *cmd, con
     pub(topic, j, 1);
 }
 
+/* A switch: state comes from the shared JSON, commands go to <base>/cmd/<cmd>
+ * as ON or OFF. */
+static void disco_switch(const char *obj, const char *name, const char *cmd, const char *val_tpl,
+                         const char *icon, const char *ent_cat)
+{
+    char j[512];
+    int o = snprintf(j, sizeof(j),
+                     "{\"~\":\"%s\",\"name\":\"%s\",\"stat_t\":\"~/state\",\"cmd_t\":\"~/cmd/%s\","
+                     "\"avty_t\":\"~/availability\",\"val_tpl\":\"%s\",\"uniq_id\":\"%s_%s\"",
+                     s_base_topic, name, cmd, val_tpl, s_devid, obj);
+    if (icon) o += snprintf(j + o, sizeof(j) - o, ",\"ic\":\"%s\"", icon);
+    if (ent_cat) o += snprintf(j + o, sizeof(j) - o, ",\"ent_cat\":\"%s\"", ent_cat);
+    o += snprintf(j + o, sizeof(j) - o, ",\"dev\":%s}", s_dev_json);
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "%s/switch/%s/%s/config", s_disco, s_devid, obj);
+    pub(topic, j, 1);
+}
+
+/* A number box. The payload is the value itself. */
+static void disco_number(const char *obj, const char *name, const char *cmd, const char *val_tpl,
+                         int min, int max, const char *unit, const char *icon, const char *ent_cat)
+{
+    char j[640];
+    int o = snprintf(j, sizeof(j),
+                     "{\"~\":\"%s\",\"name\":\"%s\",\"stat_t\":\"~/state\",\"cmd_t\":\"~/cmd/%s\","
+                     "\"avty_t\":\"~/availability\",\"val_tpl\":\"%s\",\"min\":%d,\"max\":%d,"
+                     "\"mode\":\"box\",\"uniq_id\":\"%s_%s\"",
+                     s_base_topic, name, cmd, val_tpl, min, max, s_devid, obj);
+    if (unit) o += snprintf(j + o, sizeof(j) - o, ",\"unit_of_meas\":\"%s\"", unit);
+    if (icon) o += snprintf(j + o, sizeof(j) - o, ",\"ic\":\"%s\"", icon);
+    if (ent_cat) o += snprintf(j + o, sizeof(j) - o, ",\"ent_cat\":\"%s\"", ent_cat);
+    o += snprintf(j + o, sizeof(j) - o, ",\"dev\":%s}", s_dev_json);
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "%s/number/%s/%s/config", s_disco, s_devid, obj);
+    pub(topic, j, 1);
+}
+
+/* An MQTT camera: HA shows whatever JPEG last landed on the topic. */
+static void disco_camera(const char *obj, const char *name, const char *icon)
+{
+    char j[512];
+    int o = snprintf(j, sizeof(j),
+                     "{\"~\":\"%s\",\"name\":\"%s\",\"t\":\"~/snapshot\","
+                     "\"avty_t\":\"~/availability\",\"uniq_id\":\"%s_%s\"",
+                     s_base_topic, name, s_devid, obj);
+    if (icon) o += snprintf(j + o, sizeof(j) - o, ",\"ic\":\"%s\"", icon);
+    o += snprintf(j + o, sizeof(j) - o, ",\"dev\":%s}", s_dev_json);
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "%s/camera/%s/%s/config", s_disco, s_devid, obj);
+    pub(topic, j, 1);
+}
+
+/*
+ * Publish one still of the target's screen.
+ *
+ * Only possible while MJPEG is the codec - H.264 has no still to hand out, the
+ * same reason /api/v1/video/frame.jpg refuses there. Published at QoS 0 and not
+ * retained: the client sends a large message in fragments rather than copying it
+ * whole, which matters on a chip with this little internal memory, and a stale
+ * screenshot sitting on the broker forever helps nobody.
+ */
+static void publish_snapshot(void)
+{
+    if (!s_connected || !s_client) {
+        return;
+    }
+    if (video_frame_payload() != VIDEO_PAYLOAD_JPEG) {
+        ESP_LOGI(TAG, "snapshot skipped: needs the MJPEG codec");
+        return;
+    }
+    video_frame_viewer_enter();
+    (void)video_frame_wait_new(video_frame_seq(), 2000);
+    video_frame_ref_t ref;
+    if (video_frame_acquire(&ref)) {
+        if (ref.payload == VIDEO_PAYLOAD_JPEG && ref.len > 0) {
+            char topic[96];
+            snprintf(topic, sizeof(topic), "%s/snapshot", s_base_topic);
+            esp_mqtt_client_publish(s_client, topic, (const char *)ref.data, (int)ref.len, 0, 0);
+            ESP_LOGI(TAG, "snapshot published (%u bytes)", (unsigned)ref.len);
+        }
+        video_frame_release(&ref);
+    }
+    video_frame_viewer_leave();
+}
+
 static void publish_discovery(void)
 {
     disco_sensor("sensor", "temp", "Temperature", "{{ value_json.tempC }}", "temperature", "°C",
@@ -286,9 +425,92 @@ static void publish_discovery(void)
         disco_button("btn_wol", "Wake on LAN", "wol", "mdi:lan-connect", NULL);
     }
     disco_button("btn_restart", "Restart ESP-KVM", "restart", "mdi:restart", "diagnostic");
+
+    /* The jiggler, as a switch and the interval beside it: the point of having
+     * it here is an automation - quiet during the day, awake at night. */
+    disco_switch("jiggler", "Mouse jiggler", "jiggler", "{{ value_json.jiggler }}",
+                 "mdi:mouse-move-vertical", NULL);
+    disco_number("jiggler_s", "Jiggle every", "jiggler_s", "{{ value_json.jigglerSec }}", 0, 3600,
+                 "s", "mdi:timer-outline", "config");
+    disco_sensor("sensor", "nudges", "Jiggler nudges", "{{ value_json.jigglerNudges }}", NULL, NULL,
+                 "mdi:counter", "diagnostic");
+
+    /* Diagnostics. Both internal-memory figures, because the gap between them is
+     * what decides whether the H.264 encoder can start. */
+    disco_sensor("sensor", "internal", "Free internal RAM", "{{ value_json.internalKb }}", NULL,
+                 "kB", NULL, "diagnostic");
+    disco_sensor("sensor", "internal_big", "Largest internal block",
+                 "{{ value_json.internalLargestKb }}", NULL, "kB", NULL, "diagnostic");
+    disco_sensor("sensor", "skipped", "Skipped frames", "{{ value_json.skippedFps }}", NULL, "fps",
+                 NULL, "diagnostic");
+    disco_sensor("sensor", "slot", "Firmware slot", "{{ value_json.slot }}", NULL, NULL,
+                 "mdi:chip", "diagnostic");
+    disco_sensor("sensor", "bootreason", "Last boot", "{{ value_json.bootReason }}", NULL, NULL,
+                 "mdi:restart", "diagnostic");
+
+    /* A still of the target's screen, and the button that asks for one. The
+     * picture is what makes a "kernel panic" notification worth opening. */
+    disco_camera("screen", "Target screen", "mdi:monitor-screenshot");
+    disco_button("btn_snap", "Take a screenshot", "snapshot", "mdi:camera", NULL);
+
+    /* Firmware updates, but only where the device is allowed to look: with
+     * fw_fetch off it cannot see what has been published, and an update entity
+     * that never knows the answer is worse than none. */
+    if (kvm_setting_bool("fw_fetch")) {
+        char j[640];
+        int o = snprintf(j, sizeof(j),
+                         "{\"~\":\"%s\",\"name\":\"Firmware\",\"stat_t\":\"~/update\","
+                         "\"cmd_t\":\"~/cmd/install\",\"avty_t\":\"~/availability\","
+                         "\"dev_cla\":\"firmware\",\"ent_cat\":\"config\",\"uniq_id\":\"%s_fw\"",
+                         s_base_topic, s_devid);
+        o += snprintf(j + o, sizeof(j) - o, ",\"dev\":%s}", s_dev_json);
+        char topic[128];
+        snprintf(topic, sizeof(topic), "%s/update/%s/fw/config", s_disco, s_devid);
+        pub(topic, j, 1);
+    }
+}
+
+/*
+ * What is running and what is published, for the update entity.
+ *
+ * The check goes out at most once every six hours: the answer changes on the
+ * day of a release and never in between, and this is a device that is meant to
+ * be able to sit on a network with no internet at all.
+ */
+static void publish_update_state(bool force)
+{
+    if (!s_connected || !kvm_setting_bool("fw_fetch")) {
+        return;
+    }
+    static int64_t s_checked_us;
+    static char s_latest[FW_INSTALL_VERSION_MAX];
+    const int64_t now = esp_timer_get_time();
+    if (force || s_checked_us == 0 || now - s_checked_us > (int64_t)6 * 3600 * 1000000) {
+        s_checked_us = now;
+        char latest[FW_INSTALL_VERSION_MAX] = {0};
+        if (fw_latest_version(latest, sizeof(latest)) == ESP_OK) {
+            snprintf(s_latest, sizeof(s_latest), "%s", latest);
+        }
+    }
+
+    const esp_app_desc_t *app = esp_app_get_description();
+    const char *installed = app ? app->version : "?";
+    char j[192];
+    snprintf(j, sizeof(j), "{\"installed_version\":\"%s\",\"latest_version\":\"%s\"}",
+             installed, s_latest[0] ? s_latest : installed);
+    char topic[96];
+    snprintf(topic, sizeof(topic), "%s/update", s_base_topic);
+    pub(topic, j, 1);
 }
 
 /* ---- commands ------------------------------------------------------------ */
+
+/** Does this command's payload say @p want (ON/OFF)? */
+static bool payload_is(esp_mqtt_event_handle_t e, const char *want)
+{
+    const size_t n = strlen(want);
+    return e->data_len == (int)n && strncasecmp(e->data, want, n) == 0;
+}
 
 static void handle_command(esp_mqtt_event_handle_t e)
 {
@@ -317,6 +539,47 @@ static void handle_command(esp_mqtt_event_handle_t e)
         pub(s_avail_topic, "offline", 1);
         vTaskDelay(pdMS_TO_TICKS(300)); /* let the offline notice go out first */
         esp_restart();
+    } else if (strcmp(action, "install") == 0) {
+        /* HA sends "install" here. The version to install is whatever the
+         * manifest last named; fw_install_start does the fetching, the writing
+         * and the restart, and refuses if the device may not fetch. */
+        char latest[FW_INSTALL_VERSION_MAX] = {0};
+        if (fw_latest_version(latest, sizeof(latest)) == ESP_OK) {
+            const esp_err_t err = fw_install_start(latest);
+            ESP_LOGW(TAG, "install %s requested from Home Assistant: %s", latest,
+                     esp_err_to_name(err));
+        } else {
+            ESP_LOGW(TAG, "install requested but the manifest could not be read");
+        }
+    } else if (strcmp(action, "snapshot") == 0) {
+        publish_snapshot();
+    } else if (strcmp(action, "jiggler") == 0) {
+        /* The switch carries no interval, so turning it on restores the last one
+         * the operator set - or a minute, which is under every screen lock we
+         * have met. Turning it off keeps that number in mind rather than in the
+         * setting, so the next ON does not have to be told again. */
+        static int32_t s_last_interval;
+        const bool on = payload_is(e, "ON");
+        const int32_t now = kvm_setting_int("jiggle_s");
+        if (!on && now > 0) {
+            s_last_interval = now;
+        }
+        const int32_t want = on ? (s_last_interval > 0 ? s_last_interval : 60) : 0;
+        (void)kvm_setting_set_int("jiggle_s", want);
+        publish_state();
+    } else if (strcmp(action, "jiggler_s") == 0) {
+        char v[12];
+        const int n = e->data_len < (int)sizeof(v) - 1 ? e->data_len : (int)sizeof(v) - 1;
+        memcpy(v, e->data, n);
+        v[n] = '\0';
+        long secs = strtol(v, NULL, 10);
+        if (secs < 0) {
+            secs = 0;
+        } else if (secs > 3600) {
+            secs = 3600;
+        }
+        (void)kvm_setting_set_int("jiggle_s", (int32_t)secs);
+        publish_state();
     } else {
         ESP_LOGW(TAG, "unknown command: %s", action);
     }
@@ -334,6 +597,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         s_connected = true;
         pub(s_avail_topic, "online", 1);
         publish_discovery();
+        publish_update_state(true);
         char sub[104];
         snprintf(sub, sizeof(sub), "%s/cmd/+", s_base_topic);
         xSemaphoreTake(s_mtx, portMAX_DELAY);

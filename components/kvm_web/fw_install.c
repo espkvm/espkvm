@@ -11,6 +11,7 @@
  * is up. An image that cannot get that far is reverted by the bootloader with
  * nothing for the operator to do.
  */
+#include "cJSON.h"
 #include "fw_install.h"
 
 #include "esp_app_desc.h"
@@ -345,6 +346,74 @@ static void install_task(void *arg)
      */
     vTaskDelay(pdMS_TO_TICKS(1500));
     esp_restart();
+}
+
+/*
+ * Read the update manifest and hand back the version it names.
+ *
+ * The console has always done this from the browser, which is fine while
+ * somebody is looking at it. Home Assistant is not: for the device to say "a
+ * newer build exists" on its own, the device has to ask. Same URL as the
+ * console reads (the upd_url setting), same rule as the rest of this file - the
+ * device only reaches outside when fw_fetch says it may.
+ *
+ * Small answer, one request, no redirect handling: the manifest is served by
+ * Pages from the URL as given.
+ */
+esp_err_t fw_latest_version(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    out[0] = '\0';
+    if (!kvm_setting_bool("fw_fetch")) {
+        return ESP_ERR_NOT_ALLOWED;
+    }
+    const char *url = kvm_setting_str("upd_url");
+    if (!url || !url[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .timeout_ms = HTTP_TIMEOUT_MS,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = HTTP_BUF,
+        .buffer_size_tx = HTTP_BUF,
+        .keep_alive_enable = false,
+    };
+    esp_http_client_handle_t http = esp_http_client_init(&cfg);
+    if (!http) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t res = ESP_FAIL;
+    char body[512] = {0};
+    if (esp_http_client_open(http, 0) == ESP_OK) {
+        const int64_t len = esp_http_client_fetch_headers(http);
+        (void)len;
+        if (esp_http_client_get_status_code(http) == 200) {
+            const int n = esp_http_client_read(http, body, sizeof(body) - 1);
+            if (n > 0) {
+                body[n] = '\0';
+                cJSON *j = cJSON_Parse(body);
+                if (j) {
+                    const cJSON *v = cJSON_GetObjectItem(j, "version");
+                    if (cJSON_IsString(v) && v->valuestring && v->valuestring[0]) {
+                        snprintf(out, out_len, "%s", v->valuestring);
+                        res = ESP_OK;
+                    }
+                    cJSON_Delete(j);
+                }
+            }
+        }
+        esp_http_client_close(http);
+    }
+    esp_http_client_cleanup(http);
+    if (res != ESP_OK) {
+        ESP_LOGW(TAG, "update check failed (%s)", url);
+    }
+    return res;
 }
 
 esp_err_t fw_install_start(const char *version)

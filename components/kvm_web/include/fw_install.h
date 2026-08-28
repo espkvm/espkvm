@@ -52,6 +52,16 @@ typedef struct {
  *         ESP_ERR_INVALID_STATE if one is already running,
  *         ESP_ERR_NO_MEM if the task will not start.
  */
+/**
+ * Ask the update manifest what the newest published version is.
+ *
+ * @param out     receives the version string, e.g. "v.0.40.1"
+ * @param out_len size of @p out
+ * @return ESP_OK, ESP_ERR_NOT_ALLOWED when the device may not fetch, or a
+ *         failure from the request.
+ */
+esp_err_t fw_latest_version(char *out, size_t out_len);
+
 esp_err_t fw_install_start(const char *version);
 
 /** Where it has got to. Safe to call at any time. */
