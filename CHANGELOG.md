@@ -5,6 +5,22 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.40.1] - 2026-08-28
+
+### Fixed
+- **The ESP32-P4-WIFI6 now gets the chip's own pull-ups on its link to the WiFi
+  co-processor.** That board holds all six SDIO lines high through 51k, where
+  Espressif ask for 10k, and one of those lines is how the co-processor says it
+  has data. Miss that signal and the link sits there associated, addressed and
+  silent, while ordinary commands still work - which is what the board's owner
+  measured. esp-hosted never switches the internal pull-ups on and offers no
+  setting for it, so the firmware now does, before the driver claims the pins:
+  about 45k in parallel with the board's 51k, which lands near 24k.
+
+  Whether that is enough is a question for the board rather than the firmware,
+  and it is not settled yet - if it is not, the honest answer is a resistor. On
+  by default for that board only, and free where a board is already wired right.
+
 ## [0.40.0] - 2026-08-28
 
 ### Added
