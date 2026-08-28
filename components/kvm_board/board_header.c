@@ -81,6 +81,13 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_ID_BASE "p4-poe"
 #define BOARD_VERIFIED false
 
+#elif CONFIG_KVM_BOARD_WAVESHARE_WIFI6_DEVKIT
+/* Ethernet and a C6 on one board; its 2x20 header is not described either. */
+#define BOARD_HAS_HEADERS 0
+#define BOARD_NAME "Waveshare ESP32-P4-WIFI6-DEV-KIT"
+#define BOARD_ID_BASE "p4-wifi6-devkit"
+#define BOARD_VERIFIED false
+
 #elif CONFIG_KVM_BOARD_WAVESHARE_NANO
 /*
  * Two headers of 2x13 rather than one of 2x20, and some of the pins on the

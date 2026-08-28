@@ -1,0 +1,11 @@
+# Waveshare ESP32-P4-WIFI6-DEV-KIT on rev 3.x silicon
+#
+# Everything in boards/wifi6devkit_p4.defaults, with the chip revision moved:
+#   idf.py -B build.wifi6devkit_rev3 -D SDKCONFIG=build.wifi6devkit_rev3/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/wifi6devkit_p4.defaults;boards/wifi6devkit_p4_rev3.defaults" build
+#
+# Neither image starts on the other's silicon, so both are published. On rev 3.x
+# the capture path feeds the encoder UYVY directly and the microSD is writable.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-wifi6-devkit-rev3/manifest.json"

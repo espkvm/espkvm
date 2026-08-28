@@ -80,17 +80,16 @@ esp_err_t kvm_wol_send(const char *mac)
     return ESP_OK;
 }
 
-#if CONFIG_KVM_ETH_ENABLE
-static esp_eth_netif_glue_handle_t s_eth_glue;
-static esp_netif_t *s_eth_netif;
-static esp_eth_handle_t s_eth_handle;
-
 /*
  * The IPv4 address, recorded so the certificate can name it.
  *
  * Writing NVS needs more stack than the system event task's 2.3 KB, so it goes
  * on a task made for the purpose and thrown away after - the same shape the
  * IPv6 recorder uses, and for the same reason.
+ *
+ * Outside the Ethernet block on purpose: a board with no wired port records its
+ * address the same way, from the WiFi event, and the certificate needs it just
+ * as much there.
  */
 static kvm_net_ip4_identity_cb_t s_ip4_cb;
 static volatile bool s_ip4_busy;
@@ -126,6 +125,11 @@ void kvm_net_record_ip4(const char *ip)
         free(copy); /* the next lease or the next boot tries again */
     }
 }
+
+#if CONFIG_KVM_ETH_ENABLE
+static esp_eth_netif_glue_handle_t s_eth_glue;
+static esp_netif_t *s_eth_netif;
+static esp_eth_handle_t s_eth_handle;
 
 static void eth_on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {

@@ -204,6 +204,28 @@ product code does not tell you which chip is inside; ask the seller.
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="50%"><img src="docs/board-wifi6-devkit.webp" alt="Waveshare ESP32-P4-WIFI6-DEV-KIT board"></td>
+<td width="50%" valign="top">
+
+**[Waveshare ESP32-P4-WIFI6-DEV-KIT](https://www.waveshare.com/esp32-p4-wifi6-dev-kit.htm)**
+&mdash; *built from the schematic, not yet run on one*
+
+Both links on one board: 100M Ethernet on a PoE-capable magjack, and an
+ESP32-C6 for WiFi 6. Every pin that matters is the same as the boards above -
+Ethernet as on the P4-ETH, the C6 on GPIO 14-19, the card slot with its power
+gate on GPIO 45; 32 MB PSRAM, 32 MB flash. Build overlay:
+`boards/wifi6devkit_p4.defaults`, or `boards/wifi6devkit_p4_rev3.defaults` on
+rev 3.x silicon.
+
+One thing to check before wiring: the USB OTG port is switched between HOST and
+DEVICE **by a jumper**, and the KVM needs DEVICE.
+
+</td>
+</tr>
+</table>
+
 ### Companion boards
 
 <table>

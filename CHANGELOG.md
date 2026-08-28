@@ -5,6 +5,32 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.39.0] - 2026-08-28
+
+### Added
+- **The Waveshare ESP32-P4-WIFI6-DEV-KIT is a build target.** It carries both
+  links: 100M Ethernet on a PoE-capable magjack and an ESP32-C6 for WiFi 6. Its
+  pins are the ones we already use - Ethernet as on the ESP32-P4-ETH, the C6 on
+  GPIO 14-19, the card slot gated on GPIO 45 - so the overlay declares almost
+  nothing. One thing to check before wiring: the USB OTG port is switched
+  between HOST and DEVICE by a jumper, and the KVM needs DEVICE. Configured
+  from the published schematic and not yet run on one, in both silicon
+  revisions (`p4-wifi6-devkit`, `p4-wifi6-devkit-rev3`).
+
+  Two more boards in that family were looked at and left out: the ESP32-P4-Pico
+  and the ESP32-P4-Core-DEV-KIT have neither Ethernet nor a WiFi co-processor,
+  and a KVM nobody can reach over the network is not much of a KVM.
+
+### Fixed
+- **The capture reset pin is not driven on this board.** GPIO 23 is the
+  TC358743's RESETN on the ESP32-P4-ETH; here it is an ordinary expansion pin.
+  GPIO 6 is also no longer offered as free - it goes to the WiFi
+  co-processor's IO2.
+- **A board with no wired port can be built at all.** The hostname setting and
+  the recorder that puts the IPv4 address in the certificate both assumed
+  Ethernet, though both also serve WiFi. Groundwork for boards with no wired
+  port; nothing changes for the ones that have one.
+
 ## [0.38.1] - 2026-08-28
 
 ### Fixed

@@ -2,6 +2,7 @@
   { "id": "p4-eth",     "label": "Waveshare ESP32-P4-ETH",             "image": "docs/board-p4.webp" },
   { "id": "funcev",     "label": "Espressif ESP32-P4 Function EV",     "image": "docs/board-funcev.webp" },
   { "id": "p4-poe",     "label": "Waveshare ESP32-P4-WIFI6-POE-ETH",   "image": "docs/board-poe.jpg", "untested": true },
+  { "id": "p4-wifi6-devkit", "label": "Waveshare ESP32-P4-WIFI6-DEV-KIT", "image": "docs/board-wifi6-devkit.webp", "untested": true },
   { "id": "p4-nano",    "label": "Waveshare ESP32-P4-NANO",            "image": "docs/board-nano.jpg" },
   { "id": "p4-guition", "label": "Guition ESP32-P4-M3-Dev",            "image": "docs/board-guition.webp" }
 ]

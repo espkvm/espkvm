@@ -1,0 +1,53 @@
+# Waveshare ESP32-P4-WIFI6-DEV-KIT
+#
+# Both links on one board: 100M Ethernet (with PoE on the magjack) and an
+# ESP32-C6 for WiFi 6. Build it with:
+#   idf.py -B build.wifi6devkit -D SDKCONFIG=build.wifi6devkit/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/wifi6devkit_p4.defaults" build
+#
+# Read off the published schematic (ESP32-P4-WIFI6-DEV-KIT-datasheet.pdf), and
+# there is almost nothing to declare: every pin that matters is already the
+# default, because this board wires the same parts the same way.
+#   Ethernet: TX_EN 49, TXD0 34, TXD1 35, CRS_DV 28, RXD0 29, RXD1 30, MDC 31,
+#             MDIO 52, REF_CLK 50 - identical to the ESP32-P4-ETH.
+#   microSD: CLK 43, CMD 44, D0 39, D1 40, D2 41, D3 42, with SD1_VDD through an
+#            AO3401 P-channel MOSFET on GPIO 45, so active low.
+#   ESP32-C6 over SDIO: GPIO 14-19, C6_CHIP_PU from GPIO 54 through a 0R.
+#   Capture I2C: SCL 8, SDA 7. BOOT button: GPIO 35. Console: CH343P on the
+#   Type-C, so UART.
+# 32 MB PSRAM in package and 32 MB flash, so the base partition table fits.
+#
+# One thing to know that is not a config: the USB OTG port is switched between
+# HOST and DEVICE by a jumper. The KVM needs DEVICE - that is how it presents a
+# keyboard and mouse to the target.
+#
+# NOT YET VERIFIED ON HARDWARE. Configured from the schematic and published so
+# owners can try it.
+
+# --- WiFi co-processor ------------------------------------------------------
+# Same C6-over-SDIO arrangement as the PoE and WIFI6 boards, so the same
+# esp-hosted configuration - including the guard against its eager constructor
+# init, which otherwise races the microSD for the SD host.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- microSD ----------------------------------------------------------------
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# --- capture reset ----------------------------------------------------------
+# The base default drives GPIO 23 as the TC358743's RESETN, which is how the
+# ESP32-P4-ETH is wired. Here that pin is an ordinary expansion pin: the CSI
+# connector carries the bridge's I2C and two camera control lines, and neither
+# reaches 23. Driving it would fight whatever an owner has plugged in, and the
+# C790 has its own power-on reset, so leave it alone.
+CONFIG_KVM_TC358743_RST_GPIO=-1
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-wifi6-devkit/manifest.json"
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_WIFI6_DEVKIT=y

@@ -345,7 +345,16 @@ static const kvm_setting_t s_settings[] = {
                 "network to join. If WiFi is unreachable: reset the board, then hold "
                 "the button for two seconds - that returns it to Ethernet, and "
                 "clears the password too. Hold it AFTER the reset, not through it.",
-        .min = 0, .max = ENUM_MAX(s_netmode_choices), .def = 0, .choices = s_netmode_choices,
+        .min = 0, .max = ENUM_MAX(s_netmode_choices),
+#if CONFIG_KVM_ETH_ENABLE
+        .def = 0,
+#else
+        /* No wired port on this board: booting into "ethernet" would leave no
+         * console at all, so it starts as its own hotspot and WiFi is set from
+         * there. The button reset returns here for the same reason. */
+        .def = 2,
+#endif
+        .choices = s_netmode_choices,
         .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
     {

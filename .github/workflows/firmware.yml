@@ -112,6 +112,11 @@ jobs:
           - id: p4-poe
             build_dir: build.poe
             sdkconfig_defaults: sdkconfig.defaults;boards/poe_p4.defaults
+          # Waveshare ESP32-P4-WIFI6-DEV-KIT - both links on one board, Ethernet
+          # and a C6, on pins we already use.
+          - id: p4-wifi6-devkit
+            build_dir: build.wifi6devkit
+            sdkconfig_defaults: sdkconfig.defaults;boards/wifi6devkit_p4.defaults
           # The same two Waveshare boards on rev 3.x silicon. Espressif is still
           # ramping that revision up (volume expected around October 2026) and a
           # product code does not tell you which one is in the box, so both have
@@ -132,6 +137,9 @@ jobs:
           - id: p4-guition-rev3
             build_dir: build.guition_rev3
             sdkconfig_defaults: sdkconfig.defaults;boards/guition_p4.defaults;boards/guition_p4_rev3.defaults
+          - id: p4-wifi6-devkit-rev3
+            build_dir: build.wifi6devkit_rev3
+            sdkconfig_defaults: sdkconfig.defaults;boards/wifi6devkit_p4.defaults;boards/wifi6devkit_p4_rev3.defaults
     steps:
       - uses: actions/checkout@v4
         with:
