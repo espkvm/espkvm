@@ -53,6 +53,12 @@ So the trade at 1080p is 20 fps of MJPEG against 6 fps of H.264 - and, on an
 idle desktop, 8.5 Mbit/s against **170 kbit/s**. H.264 is for links too narrow
 to carry MJPEG at all, not for smoothness.
 
+**That last line is about rev v1.3 silicon only.** On rev 3.x the capture hands
+the encoder YUV422 directly, the PPA step goes away, and 1080p H.264 runs at
+22-24 fps (28 at 720p) - see the frame-rate table in the README. Numbers quoted
+from this page have been read as the project's H.264 speed more than once; they
+are the speed of the board at the top of it.
+
 Verified end to end by capturing the Annex-B stream off the WebSocket and
 decoding it with ffmpeg: `Constrained Baseline, 1920x1080, yuv420p`, correct
 colours, no stride or cropping artefacts (the encoder pads 1080 to 1088 and
