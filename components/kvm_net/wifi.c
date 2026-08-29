@@ -501,6 +501,7 @@ esp_err_t kvm_wifi_init(void)
      * the point a WiFi mode needs it. esp-hosted 3.0 split the bring-up: esp_hosted_init
      * opens the transport, esp_hosted_connect_to_slave completes the handshake with the
      * C6 (older versions did both from esp_hosted_init). */
+    sdio_add_internal_pullups();
     int herr = esp_hosted_init();
     if (herr == 0) {
         herr = esp_hosted_connect_to_slave();
