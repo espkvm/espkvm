@@ -232,7 +232,7 @@ DEVICE **by a jumper**, and the KVM needs DEVICE.
 <td width="50%" valign="top">
 
 **[Waveshare ESP32-P4-WIFI6](https://www.waveshare.com/esp32-p4-wifi6.htm)**
-&mdash; *capture and HID confirmed on hardware; WiFi not stable yet*
+&mdash; *confirmed on hardware; WiFi tested on one board only*
 
 The PoE board without its wired half, contributed by
 [@nwomn](https://github.com/nwomn), who has one: capture through the C790 and
@@ -241,10 +241,14 @@ checked against the board. 32 MB PSRAM, 32 MB flash. Build overlay:
 `boards/waveshare_p4_wifi6.defaults`, or `boards/waveshare_p4_wifi6_rev3.defaults`
 on rev 3.x silicon.
 
-**The WiFi link is not dependable on this board yet.** It associates and gets an
-address, then the data path can stall - the SDIO interrupt from the co-processor
-goes missing. It is the only link this board has, so treat it as experimental
-until that is understood. USB OTG-HS is on an **MX1.25 4-pin header**, so the
+**About the WiFi.** The board pulls its SDIO lines up through 51k where
+Espressif ask for 10k, which was enough to lose the co-processor's data-ready
+interrupt and stall the link. Since 0.41.1 the chip's own pull-ups are switched
+on for this board and the stall is gone: resets, reassociations and a hundred
+requests in a row, at the full 40 MHz. That is one board and one client, so if
+yours behaves differently, say so in
+[issue #27](https://github.com/espkvm/espkvm/issues/27). WiFi is the only link
+this board has. USB OTG-HS is on an **MX1.25 4-pin header**, so the
 target needs an MX1.25-to-USB-A cable.
 
 </td>

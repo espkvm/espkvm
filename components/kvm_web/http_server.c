@@ -2104,21 +2104,67 @@ static char *s_cert_pem;
 /** Port 80, answering only with redirects while TLS is on. */
 static httpd_handle_t s_redirect_httpd;
 
+/*
+ * The sockets that may still be written to, and the lock that says so.
+ *
+ * esp_http_server frees a session's TLS context in httpd_sess_clear_ctx(),
+ * immediately after it calls the close callback below. Sends do not all come
+ * from the server's own task - the video pump has one, and the keyboard-LED
+ * callback pushes status from the USB task - so a send could be inside
+ * mbedtls_ssl_write() on a context that had just been freed. It was: a build
+ * with heap poisoning caught the jump through ssl->f_send read back as
+ * 0xfefefefe, the pattern IDF fills freed memory with.
+ *
+ * So every send goes through ws_send_frame(), which holds s_tx_mu and checks
+ * the socket is still listed. http_sess_close_cb takes the same lock to unlist
+ * it, which also waits out a send already under way before the teardown
+ * continues. A send is bounded by the 400 ms SO_SNDTIMEO set in
+ * video_add_client(), so that wait is short.
+ *
+ * The table only has to hold one server's sessions: max_open_sockets is 12
+ * plain and 7 with TLS, and the port 80 redirect server has its own config
+ * with neither callback.
+ */
+#define TX_MAX_SOCKETS 16
+static SemaphoreHandle_t s_tx_mu;
+static int s_tx_fds[TX_MAX_SOCKETS];
+
 /** Defined with the video channel below; the session close callback needs it. */
 static void video_remove_client(int fd);
 
+/**
+ * Send one frame, unless the session has started closing. Returns what
+ * httpd_ws_send_frame_async() returned, or an error if there was nobody left
+ * to send to - callers drop the client either way.
+ */
+static esp_err_t ws_send_frame(httpd_handle_t server, int fd, httpd_ws_frame_t *frame)
+{
+    if (!server || fd < 0 || !s_tx_mu) {
+        return ESP_FAIL;
+    }
+    if (xSemaphoreTake(s_tx_mu, portMAX_DELAY) != pdTRUE) {
+        return ESP_FAIL;
+    }
+    esp_err_t err = ESP_ERR_INVALID_STATE; /* closed under us */
+    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+        if (s_tx_fds[i] == fd) {
+            err = httpd_ws_send_frame_async(server, fd, frame);
+            break;
+        }
+    }
+    xSemaphoreGive(s_tx_mu);
+    return err;
+}
+
 static void ws_send_binary(int fd, const uint8_t *data, size_t len)
 {
-    if (!s_httpd || fd < 0) {
-        return;
-    }
     httpd_ws_frame_t frame = {
         .final = true,
         .type = HTTPD_WS_TYPE_BINARY,
         .payload = (uint8_t *)data,
         .len = len,
     };
-    (void)httpd_ws_send_frame_async(s_httpd, fd, &frame);
+    (void)ws_send_frame(s_httpd, fd, &frame);
 }
 
 static void ws_send_pong(int fd)
@@ -2163,10 +2209,51 @@ static void on_hid_leds(uint8_t leds, void *user)
  * twenty of them - a handful of page reloads - the device still answers ping
  * but the web interface is gone for good.
  */
+/** A new session may be written to from now on. See s_tx_fds. */
+static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
+{
+    (void)hd;
+    if (!s_tx_mu || sockfd < 0 || xSemaphoreTake(s_tx_mu, portMAX_DELAY) != pdTRUE) {
+        return ESP_OK;
+    }
+    bool listed = false;
+    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+        if (s_tx_fds[i] == sockfd) {
+            listed = true;
+            break;
+        }
+    }
+    if (!listed) {
+        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+            if (s_tx_fds[i] < 0) {
+                s_tx_fds[i] = sockfd;
+                break;
+            }
+        }
+    }
+    xSemaphoreGive(s_tx_mu);
+    return ESP_OK;
+}
+
 static void http_sess_close_cb(httpd_handle_t hd, int sockfd)
 {
     (void)hd;
     bool was_control_session = false;
+
+    /*
+     * Nothing may write into this session from here on: the server frees its
+     * TLS context as soon as this returns. Unlisting the socket under s_tx_mu
+     * stops the next send and waits out the one that may be running. See
+     * s_tx_fds.
+     */
+    if (s_tx_mu && xSemaphoreTake(s_tx_mu, portMAX_DELAY) == pdTRUE) {
+        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+            if (s_tx_fds[i] == sockfd) {
+                s_tx_fds[i] = -1;
+            }
+        }
+        xSemaphoreGive(s_tx_mu);
+    }
 
     /*
      * Waited for rather than attempted, like video_remove_client: this one must
@@ -2948,7 +3035,7 @@ static void text_send(httpd_handle_t server, const int *fds, int count, const ch
         .len = strlen(json),
     };
     for (int i = 0; i < count; i++) {
-        if (httpd_ws_send_frame_async(server, fds[i], &frame) != ESP_OK) {
+        if (ws_send_frame(server, fds[i], &frame) != ESP_OK) {
             video_remove_client(fds[i]);
         }
     }
@@ -3253,7 +3340,7 @@ static void video_pump_task(void *arg)
 
         for (int i = 0; i < target_count; i++) {
             const int64_t send_t0 = esp_timer_get_time();
-            const esp_err_t send_r = httpd_ws_send_frame_async(server, targets[i], &frame);
+            const esp_err_t send_r = ws_send_frame(server, targets[i], &frame);
             const int64_t send_ms = (esp_timer_get_time() - send_t0) / 1000;
             if (send_ms > 500) {
                 /* Diagnostic: a send this slow is the watchdog culprit. */
@@ -3611,6 +3698,17 @@ httpd_handle_t http_server_start(void)
             return NULL;
         }
     }
+    if (!s_tx_mu) {
+        for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+            s_tx_fds[i] = -1;
+        }
+        s_tx_mu = xSemaphoreCreateMutex();
+        if (!s_tx_mu) {
+            /* Without it every send would be racing the session teardown. */
+            ESP_LOGE(TAG, "tx mutex");
+            return NULL;
+        }
+    }
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     /* Browsers send >1 KiB of headers; Vite dev proxy forwards them. Default 1024 -> 431. */
@@ -3626,6 +3724,7 @@ httpd_handle_t http_server_start(void)
     cfg.recv_wait_timeout = 5;
     cfg.keep_alive_enable = true;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
+    cfg.open_fn = http_sess_open_cb;
     cfg.close_fn = http_sess_close_cb;
     /*
      * Sessions must be reclaimable. Upstream disabled LRU purging to protect the

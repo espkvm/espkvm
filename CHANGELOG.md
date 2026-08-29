@@ -5,13 +5,27 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.41.1] - 2026-08-29
 
 ### Fixed
-- **Enable Waveshare ESP32-P4-WIFI6 SDIO internal pull-ups before WiFi starts.**
-  The board's 51k external pull-ups can leave the C6 data-ready interrupt line
-  too weak; the existing board-specific setting now takes effect before
-  ESP-Hosted claims the SDIO controller.
+- **The device no longer reboots when an H.264 viewer disappears.** A tab closed
+  at the wrong moment, or a link that drops, could take the whole device down.
+  The video task was still writing a frame into a TLS session while the web
+  server was freeing it, and the crash landed later, in whatever code asked for
+  memory next. Sends and session teardown are now serialised. Twenty-four
+  disconnects in a row, with heap poisoning on, no crash - the same build
+  without the fix died on the second.
+- **The SDIO pull-ups on the Waveshare ESP32-P4-WIFI6 now actually happen.**
+  0.40.1 added the setting and the code behind it but never called it, so it
+  changed nothing on the board it was written for. With the call in place the
+  WiFi link stops stalling: @nwomn, who owns one, went through resets and
+  reassociations, ten disconnect cycles and a hundred requests without an error,
+  at the full 40 MHz. Found and fixed by @nwomn.
+
+### Changed
+- Our own components now build with unreachable code as an error. The pull-up
+  bug was a function nobody called, and the only sign of it was a warning nobody
+  read.
 
 ## [0.41.0] - 2026-08-28
 
