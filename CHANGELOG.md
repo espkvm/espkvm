@@ -5,6 +5,14 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Fixed
+- **Enable Waveshare ESP32-P4-WIFI6 SDIO internal pull-ups before WiFi starts.**
+  The board's 51k external pull-ups can leave the C6 data-ready interrupt line
+  too weak; the existing board-specific setting now takes effect before
+  ESP-Hosted claims the SDIO controller.
+
 ## [0.41.0] - 2026-08-28
 
 ### Added
