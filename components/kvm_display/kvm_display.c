@@ -43,11 +43,13 @@
 extern const kvm_display_driver_t kvm_display_ssd1306;
 extern const kvm_display_driver_t kvm_display_sh1106;
 extern const kvm_display_driver_t kvm_display_gc9a01;
+extern const kvm_display_driver_t kvm_display_ssd1315;
 
 static const kvm_display_driver_t *const s_drivers[] = {
     &kvm_display_ssd1306,
     &kvm_display_sh1106,
     &kvm_display_gc9a01,
+    &kvm_display_ssd1315,
 };
 
 #define RENDER_TICK_MS 1000 /* how often the driver is handed fresh telemetry */
@@ -252,6 +254,11 @@ static void display_task(void *arg)
     const kvm_display_driver_t *drv = NULL;
     void *ctx = NULL;
     int fails = 0;
+    /* Say "off" even when no panel was ever attached. Without this the
+       capability keeps its boot value, "not probed yet", which reads like a
+       failure - a user reported exactly that against a display he had not
+       switched on. */
+    bool told_off = false;
 
     for (;;) {
         const bool want = kvm_setting_bool("disp_enable");
@@ -264,14 +271,16 @@ static void display_task(void *arg)
             ctx = NULL;
         }
         if (!want) {
-            if (drv) {
+            if (drv || !told_off) {
                 kvm_cap_report(KVM_CAP_DISPLAY, false, "switched off in settings");
                 drv = NULL;
                 panel = NULL;
+                told_off = true;
             }
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
+        told_off = false;
         panel = sel;
         drv = s_drivers[sel->drv];
 

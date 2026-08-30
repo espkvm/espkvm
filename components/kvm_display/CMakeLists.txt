@@ -4,6 +4,7 @@ idf_component_register(
         "kvm_panels.c"
         "drivers/mono_oled.c"
         "drivers/ssd1306/ssd1306.c"
+        "drivers/ssd1315/ssd1315.c"
         "drivers/sh1106/sh1106.c"
         "drivers/gc9a01/gc9a01.c"
     INCLUDE_DIRS "include"

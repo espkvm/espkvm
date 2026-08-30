@@ -32,6 +32,8 @@ static const kvm_panel_t k_panels[] = {
     {KVM_PANEL_DRV_SH1106, 128, 32, 0},
     {KVM_PANEL_DRV_SH1106, 96, 16, 0},
     {KVM_PANEL_DRV_SH1106, 64, 48, 32},
+    /* Appended, and it has to stay appended: the index is what NVS holds. */
+    {KVM_PANEL_DRV_SSD1315, 128, 64, 0}, /* 0.96", untested */
 };
 
 const kvm_panel_t *kvm_panel_selected(void)

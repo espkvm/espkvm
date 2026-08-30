@@ -34,6 +34,7 @@ static const char *const s_display_choices[] = {
     "SSD1306 128x32", "SSD1306 96x16", "SSD1306 72x40",
     "SSD1306 64x48",  "SSD1306 64x32", "SH1106 128x32",
     "SH1106 96x16",   "SH1106 64x48",
+    "SSD1315 128x64 (untested)",
 };
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};

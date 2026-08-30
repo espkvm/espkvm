@@ -13,6 +13,7 @@ typedef enum {
     KVM_PANEL_DRV_SSD1306 = 0,
     KVM_PANEL_DRV_SH1106 = 1,
     KVM_PANEL_DRV_GC9A01 = 2,
+    KVM_PANEL_DRV_SSD1315 = 3,
 } kvm_panel_drv_t;
 
 typedef struct {

@@ -5,6 +5,31 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.41.2] - 2026-08-30
+
+### Added
+- **An SSD1315 entry for the status display, marked untested.** The SSD1315 is
+  the SSD1306's near-twin and the existing entry should already drive it; the
+  one command it has that the SSD1306 does not is `0xAD`, which says where the
+  current reference comes from, and a module without an external resistor stays
+  dark until it is told to use the internal one. Nobody here has one, so the
+  choice says so until somebody reports back (discussion #15).
+
+### Fixed
+- **The keyboard stayed captured under the login window.** When a session ended
+  while the console had control, the login screen appeared but every keystroke
+  was still swallowed and sent to the target, so the password could not be
+  typed into the form in front of you. Esc released it, which is no way to find
+  out. It now releases itself. Reported in #31.
+- **Signing in could leave the form sitting there.** After the password is
+  accepted the console asks the device who it is now; a failure of that second
+  request went unhandled and the form just stayed up, with a page reload the
+  only way on. It says what went wrong instead. Also #31.
+- **A display that was never switched on said "not probed yet".** The line stayed
+  at its boot value forever, which reads like a panel that failed rather than one
+  nobody asked for. It now says it is switched off, from the start. Found in a
+  user's log in discussion #15.
+
 ## [0.41.1] - 2026-08-29
 
 ### Fixed
