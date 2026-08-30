@@ -5,6 +5,20 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.41.3] - 2026-08-30
+
+### Fixed
+- **The pointer landed in the wrong place when the window was not the target's
+  shape.** The console maps a click into the rectangle the picture actually
+  occupies, so the black bars around it are skipped - but on the MJPEG stream it
+  asked the `<img>` for its width, and on an image that property is the size it
+  is drawn at, not the frame's. So the bars counted as picture, and the further
+  from the centre you clicked the further off it landed: two cursors, drifting
+  apart. A window at the target's own aspect has no bars, which is why resizing
+  appeared to fix it. The H.264 path draws into a canvas, which reports the
+  frame honestly, and was never affected. The arithmetic now has tests.
+  Reported in #32.
+
 ## [0.41.2] - 2026-08-30
 
 ### Added
