@@ -5,6 +5,17 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Changed
+- The Geekworm C792 is named in the hardware list. It is the same TC358743 with
+  a splitter in front, so it should work; nobody here has one, and the note says
+  so, along with what its EDID may do to a 1080p60 source.
+- The device now says why a session check came back negative - "no cookie sent"
+  against "cookie holds no session I know". A console that drops to the login
+  screen is only repeating that answer, and until now there was no way to tell
+  the two apart from a log (#31).
+
 ## [0.41.3] - 2026-08-30
 
 ### Fixed

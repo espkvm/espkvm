@@ -784,7 +784,8 @@ static esp_err_t auth_session_get(httpd_req_t *req)
     bool authenticated = false;
     bool must_change = false;
 
-    if (cookie_token(req, token, sizeof(token))) {
+    const bool had_cookie = cookie_token(req, token, sizeof(token));
+    if (had_cookie) {
         lock();
         const session_t *s = session_find(token);
         if (s) {
@@ -792,6 +793,17 @@ static esp_err_t auth_session_get(httpd_req_t *req)
             must_change = s->must_change;
         }
         unlock();
+    }
+    /*
+     * A console that suddenly shows the login screen is only repeating this
+     * answer, so say which of the two reasons it was. Without it the report is
+     * "it signed me out" and there is no way to tell a browser that sent no
+     * cookie from a session the device no longer has (#31). The console asks
+     * this at start-up and after a 401, not on a timer, so it cannot flood.
+     */
+    if (!authenticated && kvm_auth_required()) {
+        ESP_LOGI(TAG, "session check: %s", had_cookie ? "cookie holds no session I know"
+                                                      : "no cookie sent");
     }
 
     char body[224];

@@ -269,7 +269,16 @@ target needs an MX1.25-to-USB-A cable.
 
 A TC358743 HDMI -> MIPI CSI-2 bridge that turns the target's HDMI output into a
 camera stream the ESP32-P4 can read. Any other TC358743 capture board should do
-just as well.
+just as well: the firmware talks to that chip, not to the board around it.
+
+The [Geekworm C792](https://wiki.geekworm.com/C792) is the same TC358743 with a
+GSV2001 splitter in front, so it should work too - **not tested here**, and
+with one thing to watch. This firmware limits the input by writing an EDID into
+the TC358743, because two CSI lanes carry about 81 Mpixel/s and a mode above
+that gives a black frame rather than a slower one. With a splitter ahead of the
+bridge the source may be reading the splitter's EDID instead, so if you see a
+black screen at 1080p60, that is the first thing to suspect. Use its 15-pin
+(2-lane) connector, and power it from its own 5 V input as Geekworm advises.
 
 </td>
 <td valign="top">
