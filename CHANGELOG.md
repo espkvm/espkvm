@@ -8,6 +8,10 @@ bumps the patch).
 ## [Unreleased]
 
 ### Changed
+- **A relay module is documented as an alternative for the power and reset
+  buttons** ([docs/wiring.md](docs/wiring.md)). It needs no firmware change -
+  the pins are driven the same way - but it cannot sense the power LED, so that
+  wire stays an optocoupler or goes unused.
 - The Geekworm C792 is named in the hardware list. It is the same TC358743 with
   a splitter in front, so it should work; nobody here has one, and the note says
   so, along with what its EDID may do to a 1080p60 source.

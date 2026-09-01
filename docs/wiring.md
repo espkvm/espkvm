@@ -22,16 +22,31 @@ The target and the KVM must not share a ground through these signals: the front
 panel switches sit at the motherboard's own reference, and tying the ESP32
 directly to them risks ground loops and, if anything is miswired, the P4. An
 optocoupler passes the signal as light, so the two sides stay electrically
-isolated. A relay would also isolate, but it has no polarity to get wrong on the
-switch side - and it cannot sense the LED, and some motherboards do not like the
-contact bounce for a momentary power press. Optocouplers cover both directions
-with one kind of part.
+isolated. A relay isolates too, and has no polarity to get wrong on the switch
+side, but it cannot sense the LED - so an optocoupler is the one kind of part
+that covers both directions. If you already own a relay board, see the section
+below.
 
 A **PC817 two-channel optocoupler module** (the small board with screw
 terminals, about a euro) is all you need - one for the two outputs (power,
 reset), one for the LED input. These are "high-level trigger" boards: driving
 the input high turns the optocoupler on, which is the firmware default
 (`atx_active_high` on). If yours presses on a low instead, flip that setting.
+
+## A relay module instead
+
+A two-channel relay board works for the power and reset buttons, and needs no
+firmware change: the pins are driven the same way, and `atx_active_high` covers
+a board that triggers on a low. Use one if that is what you have.
+
+What it does not do is the third wire. A relay is a switch, so it cannot sense
+the power LED - `atx_led_gpio` stays -1 and the console shows the controls
+without a power state. Two other things to expect: the coils want a few tens of
+milliamperes each, more than the P4 pin can give, so the board needs its own 5 V
+(any relay module worth buying already drives the coil from a transistor), and
+the contacts bounce for a millisecond or two on each press. A motherboard
+debounces its own front-panel switch and will not care; if yours does something
+odd on a press, that is the first suspect.
 
 ## The front-panel header
 

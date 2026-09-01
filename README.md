@@ -286,7 +286,8 @@ black screen at 1080p60, that is the first thing to suspect. Use its 15-pin
 **ATX power control — an optocoupler module** (optional)
 
 A small board that presses the target's power and reset buttons and senses the
-power LED without a direct electrical connection. Wiring is in
+power LED without a direct electrical connection. A relay board does the two
+buttons just as well, but cannot sense the LED. Wiring for both is in
 [docs/wiring.md](docs/wiring.md).
 
 </td>
@@ -828,7 +829,8 @@ thanks, you can [buy me a coffee](https://buymeacoffee.com/dexif) - entirely opt
 and contributions of code, issues and ideas are just as welcome.
 
 Release notes and work in progress go out on
-[Telegram](https://t.me/espkvm) and [X](https://x.com/espkvm).
+[Telegram](https://t.me/espkvm) and [X](https://x.com/espkvm); the short clips of
+features running are on [YouTube](https://youtube.com/@espkvm).
 
 ## Licence
 
