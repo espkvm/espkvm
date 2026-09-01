@@ -383,14 +383,25 @@ The author is asking for feedback on the fit.
 </tr>
 </table>
 
-There is a second one for the same pair of boards:
-**[KVM case for ESP32-P4-ETH and C790](https://makerworld.com/en/models/3238485-kvm-case-for-esp32-p4-eth-and-c790)**
-on MakerWorld, adapted for this project by
-[Fabrion365](https://makerworld.com/en/@Fabrion365) at a user's request.
+<table>
+<tr>
+<td width="50%"><a href="https://makerworld.com/en/models/3238485-kvm-case-for-esp32-p4-eth-and-c790"><img src="docs/case-p4eth-makerworld.webp" alt="A second 3D-printed case for the same two boards: a black box with a hex-vented side, an orange lid and cutouts for HDMI and Ethernet"></a></td>
+<td valign="top">
+
+**[KVM case for ESP32-P4-ETH and C790](https://makerworld.com/en/models/3238485-kvm-case-for-esp32-p4-eth-and-c790)** (optional)
+
+A second box for the same pair of boards, adapted for this project by
+[Fabrion365](https://makerworld.com/en/@Fabrion365) after a user asked. Vented
+along one side, with the ports coming out of the ends.
+
+</td>
+</tr>
+</table>
 
 <sub>Board and module photos (c) their makers, taken from product pages and used
-only to identify the hardware. The case photo is by its author,
-[Colin Hickey](https://github.com/chickey), CC BY-NC. ESP-KVM is not affiliated with
+only to identify the hardware. The case photos are by their authors:
+[Colin Hickey](https://github.com/chickey), CC BY-NC, and
+[Fabrion365](https://makerworld.com/en/@Fabrion365). ESP-KVM is not affiliated with
 [Espressif](https://github.com/espressif), [Waveshare](https://github.com/waveshareteam),
 [Geekworm](https://github.com/geekworm-com) or [Guition](https://github.com/guitionofficial).
 The pin map is in `components/kvm_board/include/kvm_board.h`.</sub>
@@ -766,6 +777,9 @@ docs/             what the hardware actually does
 - [EdigE](http://edige.xyz/news/esp32-p4-hdmi-ip-kvm) - *An ESP32-P4 turned into a real IP-KVM with HDMI, H.264, USB HID and boot images* (in Russian, and it goes into the capture path and the frame budget rather than only the feature list)
 - [LearningBot](https://learningbot.tech/newsletter/every-ai-output-in-europe-needs-a-receipt-starting-today/) - *Build of the Week* (a newsletter about the EU AI Act's transparency rules picks ESP-KVM as its build, and likes that one chip has to be a USB peripheral and a capture pipeline at once)
 - [RISC-V International](https://www.linkedin.com/pulse/week-risc-v-july-31-2026-risc-v-international-zzxze) - *This Week in RISC-V* (July 31, 2026)
+- [私人定制 Blog](https://jinbel.cn/post/1487.html) - *GitHub 开源 ESP-KVM：$45 把 ESP32-P4 变成 IP 远程控制卡* (in Chinese)
+- [log8.kr](https://log8.kr/library/esp32-ip-kvm-out-of-band-recovery-2026/) - *ESP32 IP-KVM 홈랩 원격 복구 설계* (in Korean; a recovery-and-security checklist built around the device rather than a review of it)
+- [BearBlogtech](https://bearblogtech.ca/espkvm.html) - *ESPKVM an Open Source Kvm with IP and an ESp32* (a build log written after the author's own datacentre KVM died)
 
 On video: **Wels** covered it in
 [5 Minutos de Miercoles #22](https://youtu.be/nw-8a1GmJLE?t=342), from 5:42.
