@@ -12,6 +12,8 @@ bumps the patch).
   buttons** ([docs/wiring.md](docs/wiring.md)). It needs no firmware change -
   the pins are driven the same way - but it cannot sense the power LED, so that
   wire stays an optocoupler or goes unused.
+- A second printed case is listed - Fabrion365's on MakerWorld, adapted for this
+  project at a user's request (discussion #18), next to Colin Hickey's.
 - The Geekworm C792 is named in the hardware list. It is the same TC358743 with
   a splitter in front, so it should work; nobody here has one, and the note says
   so, along with what its EDID may do to a 1080p60 source.

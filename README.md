@@ -383,6 +383,11 @@ The author is asking for feedback on the fit.
 </tr>
 </table>
 
+There is a second one for the same pair of boards:
+**[KVM case for ESP32-P4-ETH and C790](https://makerworld.com/en/models/3238485-kvm-case-for-esp32-p4-eth-and-c790)**
+on MakerWorld, adapted for this project by
+[Fabrion365](https://makerworld.com/en/@Fabrion365) at a user's request.
+
 <sub>Board and module photos (c) their makers, taken from product pages and used
 only to identify the hardware. The case photo is by its author,
 [Colin Hickey](https://github.com/chickey), CC BY-NC. ESP-KVM is not affiliated with
