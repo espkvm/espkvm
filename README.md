@@ -507,6 +507,15 @@ the output on. So power the KVM first, or replug HDMI once the KVM is up. If the
 picture arrives but the source refuses a mode, try a capped **EDID profile** in
 Settings -> Video.
 
+While a source is powered and sending nothing, the device offers it a fresh
+hotplug by itself - ten seconds in, then twenty, then forty. That is all one end
+of a cable can do, and some machines never look at the connection again once
+they have started: an Orange Pi 4 Pro reported here would not come back after a
+re-plug into this device, and would not come back for a television either.
+The fix for that one is on the machine, and somebody has written it up - a udev
+rule that re-applies the mode when the connector changes state:
+[check456-beep/orangepi-hdmi-fix](https://github.com/check456-beep/orangepi-hdmi-fix).
+
 **A pin you picked in Settings does nothing.** It may not be a pin at all. The P4
 has 55 GPIOs and a board brings out maybe half. **Settings -> Pins** draws the
 board's expansion header the way it is printed, with what holds each pin, so you

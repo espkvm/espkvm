@@ -929,8 +929,57 @@ static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
     return true;
 }
 
+/*
+ * Ask a sleeping target to wake before typing at it.
+ *
+ * The descriptor has always said this device can wake the host, and hosts take
+ * it - the log shows them enabling remote wakeup on their way down - but
+ * nothing ever asked. So a machine that went to sleep stayed asleep while the
+ * console dutifully sent keystrokes into a suspended bus. Pressing a key on a
+ * KVM should wake the target, the way pressing one on a keyboard plugged
+ * straight in does.
+ *
+ * Two things this cannot do. A host that never enabled remote wakeup refuses,
+ * and one that cut the port's power entirely is not listening on any wire -
+ * that is the case Wake-on-LAN and the ATX button exist for.
+ */
+static void wake_target_if_asleep(void)
+{
+    static bool refused;
+
+    if (!tud_suspended()) {
+        refused = false;
+        return;
+    }
+    if (!tud_remote_wakeup()) {
+        if (!refused) {
+            ESP_LOGW(TAG, "the target is asleep and will not be woken over USB");
+            refused = true;
+        }
+        return;
+    }
+    ESP_LOGI(TAG, "asked the sleeping target to wake");
+    /* Give the resume somewhere to land. The host drives the bus back up in a
+     * few tens of milliseconds; a second is generous and costs nothing, because
+     * nothing was getting through anyway. */
+    for (int i = 0; i < 100 && tud_suspended(); i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
 static void dispatch(const q_msg_t *m)
 {
+    /* Every kind of input counts as a nudge: moving the mouse wakes a machine
+     * as readily as typing, and an operator who reaches for either expects the
+     * same thing to happen. The report itself still goes out afterwards.
+     *
+     * Releasing the keys is the exception. It is sent when a session ends, not
+     * by anybody's hand, and waking a machine to tell it that nothing is held
+     * down would be the device deciding on its own that sleep was over. */
+    if (m->type != Q_RELEASE_ALL) {
+        wake_target_if_asleep();
+    }
+
     switch (m->type) {
     case Q_MOUSE_ABS:
         send_abs(&m->u.abs);
@@ -995,6 +1044,11 @@ bool usb_hid_ready(void)
      * working (the worker only checks tud_mounted()) but the status indicator and
      * the REST "no USB target" checks wrongly reported no target until a replug. */
     return tud_mounted();
+}
+
+bool usb_hid_target_suspended(void)
+{
+    return tud_suspended();
 }
 
 bool usb_hid_bus_alive(void)

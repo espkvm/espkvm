@@ -43,6 +43,9 @@ esp_err_t usb_hid_init(void);
 /** The target has enumerated and configured the device. */
 bool usb_hid_ready(void);
 
+/** The target has suspended the bus: it is asleep, or has parked the port. */
+bool usb_hid_target_suspended(void);
+
 /**
  * There is a live USB bus on the target's side.
  *

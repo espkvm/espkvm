@@ -5,6 +5,23 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.42.2] - 2026-09-03
+
+### Added
+- **A key press wakes a sleeping target.** The device always said it could wake
+  a host and never asked. Now any input asks first - a key, a click, a mouse
+  move. A host that did not arm remote wakeup refuses, and one that cut the
+  port's power hears nothing; that is what Wake-on-LAN and the ATX button are
+  for. The jiggler does not wake anything, nor does the key release at the end
+  of a session.
+- **Home Assistant gets the target's port power as its own entity.** "Target
+  USB" only says whether the target enumerated us, which reads as a fault here
+  when it is a port that went down with a sleeping machine.
+
+### Changed
+- The README says what to do about a source that ignores hotplug, with the
+  Orange Pi 4 Pro as the case and a link to a fix for it.
+
 ## [0.42.1] - 2026-09-03
 
 ### Added

@@ -97,6 +97,16 @@ static void tick(void *arg)
         return;
     }
 
+    /*
+     * Not at a sleeping target. Input now wakes one, and a jiggler is for
+     * keeping a machine awake through a session, not for overruling somebody
+     * who put it to sleep on purpose. Wait for it to come back instead.
+     */
+    if (usb_hid_target_suspended()) {
+        s_next_us = now + every_us;
+        return;
+    }
+
     usb_hid_mouse_rel(0, 1, 0, 0, 0);
     usb_hid_mouse_rel(0, -1, 0, 0, 0);
     s_seen = usb_hid_last_input_us();

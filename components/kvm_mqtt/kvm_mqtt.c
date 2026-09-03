@@ -162,7 +162,8 @@ static void build_state(char *b, size_t n)
     snprintf(b, n,
              "{\"tempC\":%d.%u,\"thermal\":\"%s\",\"viewers\":%d,\"signal\":\"%s\","
              "\"resolution\":\"%s\",\"fps\":%u.%02u,\"codec\":\"%s\",\"kbps\":%u,"
-             "\"usb\":\"%s\",\"power\":\"%s\",\"uptime\":%llu,\"psramKb\":%u,"
+             "\"usb\":\"%s\",\"usbBus\":\"%s\",\"power\":\"%s\",\"uptime\":%llu,"
+             "\"psramKb\":%u,"
              "\"screenAlert\":\"%s\",\"screenText\":\"%s\","
              /* The other kind of bad screen: one the reader cannot read at all
                 because it is not characters - a stop screen, a blanked output -
@@ -179,7 +180,8 @@ static void build_state(char *b, size_t n)
              t_int, t_dec, kvm_thermal_state_name(kvm_thermal_state()), viewers,
              v.signal ? "ON" : "OFF", res, (unsigned)(v.fps_x100 / 100),
              (unsigned)(v.fps_x100 % 100), codec, (unsigned)v.kbps,
-             usb_hid_ready() ? "ON" : "OFF", a.have_led ? (a.power_on ? "ON" : "OFF") : "OFF",
+             usb_hid_ready() ? "ON" : "OFF", usb_hid_bus_alive() ? "ON" : "OFF",
+             a.have_led ? (a.power_on ? "ON" : "OFF") : "OFF",
              uptime, psram_kb, alerting ? "ON" : "OFF", alert_json,
              v.flat_ms >= 30000u ? "ON" : "OFF", (unsigned)(v.flat_ms / 1000u),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
@@ -413,6 +415,12 @@ static void publish_discovery(void)
                  "mdi:hdmi-port", NULL);
     disco_sensor("binary_sensor", "usb", "Target USB", "{{ value_json.usb }}", "connectivity", NULL,
                  NULL, NULL);
+    /* The other half of a dead keyboard, and the half worth automating on: with
+       no power on the target's port there is nothing to re-plug into, and the
+       fix is at the target - a machine that slept and took its port down with
+       it is a thing to be told about rather than to discover a day later. */
+    disco_sensor("binary_sensor", "usbbus", "Target USB port power", "{{ value_json.usbBus }}",
+                 "connectivity", NULL, "mdi:usb-port", "diagnostic");
 
     if (kvm_cap_available(KVM_CAP_ATX)) {
         disco_sensor("binary_sensor", "power", "Target power", "{{ value_json.power }}", "power",
