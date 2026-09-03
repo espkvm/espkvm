@@ -16,6 +16,7 @@ repository.
 | PSRAM / flash | 32 MB @ 200 MHz / **32 MB present**, 16 MB configured |
 | Capture | Geekworm C790, TC358743 HDMI -> MIPI CSI-2, 2 lanes @ 972 Mbit/s |
 | USB | one USB-C: the CH343 flashing/console bridge (`/dev/ttyACM0`). The USB 2.0 OTG HS that presents the keyboard/mouse to the target is on the **MX1.25 connector**, not a USB port |
+| OTG power | the target's 5 V comes back down that OTG lead, so **pulling it at the target's end reboots the device**. Worth knowing before telling somebody to re-plug the cable to fix a keyboard: it takes the KVM with it |
 | Network | NetworkManager profile `espkvm-link` shares `enp0s31f6`; device lands on **10.42.0.151** |
 | Toolchain | ESP-IDF 6.1-rc1 in `~/esp/esp-idf`; cmake and ninja live in the IDF python env, not the distro |
 
@@ -80,6 +81,23 @@ RSA would have been minutes rather than milliseconds; the P4's ECC accelerator
 is what makes generating on-device reasonable. The handshake is the part the
 operator feels - a console opens several connections - so session tickets are
 enabled.
+
+## A sleeping target can take its port's power with it
+
+Seen on the desktop this device is wired to, 2026-09-03. The machine slept; the
+keyboard and mouse were dead when it woke, and stayed dead through three
+re-plugs from the console, a device restart, and a cable pull at the target's
+end. What fixed it was pulling every cable and giving the board a cold start.
+
+`tud_connected()` is what settles it - there was **no live bus at all**, so
+every re-plug was toggling a pull-up on a wire with nobody on the other end. The
+target had suspended the bus on its way down (the log says so now) and its port
+came back from sleep without power. Nothing on this end can reach that: the port
+has to be re-powered, by re-plugging at the target or restarting it.
+
+The lesson for the firmware was the diagnosis, not a fix: the device knew the
+difference all along and did not say it. It says it now, in the console and in
+`GET /api/v1/system/usbprobe`.
 
 ## The bridge's audio output - read off the wiki, not off a board
 

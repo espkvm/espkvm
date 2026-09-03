@@ -839,8 +839,13 @@ static esp_err_t api_system_usbprobe_get(httpd_req_t *req)
     char trace[500];
     usb_hid_probe_trace(trace, sizeof(trace));
     char body[600];
-    int n = snprintf(body, sizeof(body), "{\"os\":\"%s\",\"trace\":\"%s\"}",
-                     usb_hid_target_os(), trace);
+    /* `bus` is whether the target's port is live at all, `mounted` whether it
+       has enumerated us. A dead keyboard is one of those two, and they want
+       opposite things done, so both belong next to the trace. */
+    int n = snprintf(body, sizeof(body),
+                     "{\"os\":\"%s\",\"trace\":\"%s\",\"bus\":%s,\"mounted\":%s}",
+                     usb_hid_target_os(), trace, usb_hid_bus_alive() ? "true" : "false",
+                     usb_hid_ready() ? "true" : "false");
     if (n < 0 || n >= (int)sizeof(body)) {
         n = (int)sizeof(body) - 1; /* truncated: send only what actually fits */
     }
@@ -2182,7 +2187,12 @@ static void ws_send_status(void)
     if (fd < 0) {
         return;
     }
-    const uint8_t msg[] = {WS_D2C_STATUS, usb_hid_ready() ? 1u : 0u, usb_hid_leds()};
+    /* bit0: the target has enumerated us. bit1: there is a live bus at all -
+       without it the console would say "USB is not active" for a target port
+       with no power and for a host that stopped listening alike, and only one
+       of those is worth pressing re-plug over. */
+    const uint8_t flags = (uint8_t)((usb_hid_ready() ? 1u : 0u) | (usb_hid_bus_alive() ? 2u : 0u));
+    const uint8_t msg[] = {WS_D2C_STATUS, flags, usb_hid_leds()};
     ws_send_binary(fd, msg, sizeof(msg));
 }
 

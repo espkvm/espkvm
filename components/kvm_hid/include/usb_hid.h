@@ -44,6 +44,15 @@ esp_err_t usb_hid_init(void);
 bool usb_hid_ready(void);
 
 /**
+ * There is a live USB bus on the target's side.
+ *
+ * True while the device controller sees the target's port, whether or not the
+ * target has got as far as enumerating us. False means the port is unpowered or
+ * the cable is out - which no amount of re-plugging from this end will fix.
+ */
+bool usb_hid_bus_alive(void);
+
+/**
  * Absolute pointer position in 0..@ref USB_HID_ABS_MAX, origin top-left.
  * @param wheel vertical scroll clicks, @param pan horizontal scroll clicks.
  */

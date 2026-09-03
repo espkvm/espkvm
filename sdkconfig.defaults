@@ -105,3 +105,8 @@ CONFIG_LWIP_IPV6_RDNSS_MAX_DNS_SERVERS=2
 CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y
+
+# See both sides of a target going to sleep: the bus falling quiet and coming
+# back are the first two questions when a keyboard dies after a wake.
+CONFIG_TINYUSB_SUSPEND_CALLBACK=y
+CONFIG_TINYUSB_RESUME_CALLBACK=y

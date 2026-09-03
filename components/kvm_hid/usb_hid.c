@@ -58,6 +58,18 @@ enum {
  * host needs to see SE0 - the margin is for hub debounce, not for the spec. */
 #define USB_REATTACH_MS 100
 
+/*
+ * The same trick when a person asks for it, and when nothing has enumerated us.
+ *
+ * A hub debounces a port change for 100 ms before it will report it (USB 2.0,
+ * 7.1.7.3), so the startup figure sits exactly on the limit a host is allowed
+ * to ignore. It is proved on hardware for the case it was written for - a warm
+ * restart under a target that stayed on - and it is left alone. But a button
+ * press has no deadline to meet, and a host that has already stopped listening
+ * is the case where the extra margin is worth having.
+ */
+#define USB_REATTACH_LONG_MS 1000
+
 /* MSC bulk endpoints, sharing endpoint number 4 (IN 0x84, OUT 0x04) beside the
  * three HID interrupt IN endpoints 0x81/0x82/0x83. */
 #define EPNUM_MSC_OUT 0x04
@@ -453,6 +465,16 @@ size_t usb_hid_probe_trace(char *out, size_t len)
     return off;
 }
 
+/*
+ * True from the moment we drop off the bus until we are back on it.
+ *
+ * The bus falling quiet during our own re-plug is a suspend as far as TinyUSB
+ * is concerned, and logging it as one puts a false clue - "host suspended the
+ * bus" - right where somebody is reading the log to find out whether the host
+ * did anything. So the suspend line is only written when the quiet is not ours.
+ */
+static volatile bool s_replugging;
+
 static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
 {
     (void)arg;
@@ -468,6 +490,26 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
         s_probe_n = 0; /* next host's enumeration starts a fresh trace */
         ESP_LOGI(TAG, "target detached");
         break;
+#ifdef CONFIG_TINYUSB_SUSPEND_CALLBACK
+    /*
+     * The bus going quiet is what a target's sleep looks like from here, and it
+     * was invisible: an operator whose keyboard died after the machine woke had
+     * a log that said nothing at all between the last keystroke and the
+     * complaint. Whether the host ever came back is the first question, so
+     * write both down.
+     */
+    case TINYUSB_EVENT_SUSPENDED:
+        if (!s_replugging) {
+            ESP_LOGW(TAG, "host suspended the bus (remote wakeup %s)",
+                     event->suspended.remote_wakeup ? "enabled" : "disabled");
+        }
+        break;
+#endif
+#ifdef CONFIG_TINYUSB_RESUME_CALLBACK
+    case TINYUSB_EVENT_RESUMED:
+        ESP_LOGI(TAG, "host resumed the bus");
+        break;
+#endif
     default:
         break;
     }
@@ -487,16 +529,18 @@ static void reconnect_cb(void *arg)
 {
     (void)arg;
     tud_connect();
+    s_replugging = false;
 }
 
-static void reattach(void)
+static void reattach(uint32_t off_ms)
 {
     if (!s_reconnect_timer) {
         return;
     }
+    s_replugging = true;
     tud_disconnect();
     (void)esp_timer_stop(s_reconnect_timer);
-    (void)esp_timer_start_once(s_reconnect_timer, USB_REATTACH_MS * 1000);
+    (void)esp_timer_start_once(s_reconnect_timer, (int64_t)off_ms * 1000);
 }
 
 /*
@@ -519,6 +563,7 @@ static const int64_t k_reattach_delay_us[REATTACH_TRIES] = {10000000, 20000000, 
 static esp_timer_handle_t s_watchdog_timer;
 static int s_watchdog_try;   /* attempts already scheduled, 0..REATTACH_TRIES */
 static int s_watchdog_probe; /* s_probe_n as of the last check */
+static bool s_no_bus_said;   /* the "no bus" line is written once per spell */
 
 static void watchdog_arm(void)
 {
@@ -530,11 +575,42 @@ static void watchdog_arm(void)
     s_watchdog_try++;
 }
 
+/* Look again after the same wait, without spending one of the three tries. */
+static void watchdog_wait_again(void)
+{
+    if (!s_watchdog_timer) {
+        return;
+    }
+    const int i = s_watchdog_try < REATTACH_TRIES ? s_watchdog_try : REATTACH_TRIES - 1;
+    s_watchdog_probe = s_probe_n;
+    (void)esp_timer_start_once(s_watchdog_timer, k_reattach_delay_us[i]);
+}
+
 static void watchdog_cb(void *arg)
 {
     (void)arg;
     if (tud_mounted()) {
         return; /* enumerated: nothing to fix and nothing more to schedule */
+    }
+    /*
+     * No bus at all - the target's port has no power, or the cable is out.
+     * Re-plugging is toggling a pull-up on a wire nobody is listening to, so
+     * spending a try on it only fills the log with attempts that cannot work.
+     * Keep looking instead, and keep all three tries for when the port comes
+     * back: a machine that slept for an hour deserves them more than the first
+     * forty seconds after it went away did.
+     */
+    if (!tud_connected()) {
+        if (!s_no_bus_said) {
+            ESP_LOGW(TAG, "no live bus on the target's port - a re-plug from here cannot help");
+            s_no_bus_said = true;
+        }
+        watchdog_wait_again();
+        return;
+    }
+    if (s_no_bus_said) {
+        ESP_LOGI(TAG, "the target's port is live again");
+        s_no_bus_said = false;
     }
     if (s_probe_n != s_watchdog_probe) {
         /* Mid-enumeration. Give it another window instead of interrupting it. */
@@ -543,14 +619,15 @@ static void watchdog_cb(void *arg)
     }
     ESP_LOGW(TAG, "no host enumeration yet; re-attaching (try %d of %d)", s_watchdog_try,
              REATTACH_TRIES);
-    reattach();
+    reattach(USB_REATTACH_LONG_MS);
     watchdog_arm();
 }
 
 void usb_hid_reattach(void)
 {
-    ESP_LOGI(TAG, "re-attaching to the target on request");
-    reattach();
+    ESP_LOGI(TAG, "re-attaching to the target on request (%d ms off the bus)",
+             USB_REATTACH_LONG_MS);
+    reattach(USB_REATTACH_LONG_MS);
 }
 
 /* ---- MSC (virtual media) callbacks -------------------------------------- */
@@ -693,7 +770,7 @@ void usb_hid_msc_set_type(bool cdrom)
     /* Drop off the bus and come back, so the host re-issues INQUIRY and picks up
      * the new device type. The HID endpoints blink out for the ~100 ms this
      * takes, which is the cost of swapping an ISO for a disk image. */
-    reattach();
+    reattach(USB_REATTACH_MS);
 }
 
 /* ---- report emission ---------------------------------------------------- */
@@ -918,6 +995,19 @@ bool usb_hid_ready(void)
      * working (the worker only checks tud_mounted()) but the status indicator and
      * the REST "no USB target" checks wrongly reported no target until a replug. */
     return tud_mounted();
+}
+
+bool usb_hid_bus_alive(void)
+{
+    /*
+     * Whether there is a live bus at all, which is a different question from
+     * whether the target has enumerated us. A port with no power and a host
+     * that has stopped listening look identical from the console - "USB is not
+     * active" - and they want opposite things done about them: one is the
+     * target's port, the other is a replug. TinyUSB tracks it as `connected`,
+     * set when the device controller sees the bus and cleared on unplug.
+     */
+    return tud_connected();
 }
 
 uint8_t usb_hid_leds(void)

@@ -5,6 +5,41 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.42.1] - 2026-09-03
+
+### Added
+- **The console tells the two dead keyboards apart.** "USB is not active" was
+  said both when the target had stopped listening and when its port had no power
+  at all, and those want opposite things done: one is fixed by re-plugging, the
+  other cannot be reached from this end however hard you press. The device knows
+  which - TinyUSB tracks whether there is a live bus - and now says so, in the
+  status pill and in what the popup offers. `GET /api/v1/system/usbprobe` grew
+  `bus` and `mounted` beside the enumeration trace.
+- **The log says when the bus goes quiet and when it comes back.** A target going
+  to sleep left nothing in the log at all, so a keyboard that died over a lunch
+  break began with no idea whether the host had ever said anything. The suspend
+  and resume the host sends are written down now. Our own re-plug makes the bus
+  go quiet too, and that one is deliberately not logged: a false "the host
+  suspended the bus" in the middle of a repair is worse than no line.
+
+### Changed
+- **A re-plug asked for by hand is a second off the bus, not 100 ms.** A hub is
+  allowed to ignore a port change shorter than 100 ms while it debounces, and the
+  startup figure sits exactly on that limit. It stays there, where it is proved,
+  because start-up has a deadline; a button press has none.
+- **No more re-plugging into a port that has no power.** The retry after start-up
+  used to spend all three of its attempts whatever the state of the bus, so a
+  machine that was simply asleep burnt them in the first forty seconds and had
+  none left when it woke. It now waits instead, keeps its tries, and writes one
+  line saying why - rather than three that could not have worked.
+
+### Fixed
+- The wiring notes now say that on the p4-eth the target's 5 V comes back down
+  the OTG lead, so pulling it at the target's end reboots the device - worth
+  knowing before anyone is told to re-plug a cable to fix a keyboard. The notes
+  also carry the case this release came from: a target that slept, woke with no
+  power on its USB port, and could not be reached from this end at all.
+
 ## [0.42.0] - 2026-09-03
 
 ### Added
