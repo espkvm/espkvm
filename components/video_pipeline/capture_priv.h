@@ -8,7 +8,7 @@
 #include "driver/isp_core.h"
 #include "esp_cam_ctlr.h"
 #include "esp_cam_ctlr_csi.h"
-#include "tc358743.h"
+#include "kvm_bridge.h"
 #include "video_frame.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -85,7 +85,7 @@ typedef struct {
     volatile int ready_fb_idx; /* newest completed buffer, -1 = none yet */
     volatile int held_fb_idx;  /* buffer the encode is reading, -1 = none */
     SemaphoreHandle_t csi_done_sem;
-    tc358743_t *tc;
+    kvm_bridge_t bridge;
     /** Serialises TC358743 I2C between the monitor task and the capture task. */
     SemaphoreHandle_t tc_mu;
     volatile uint32_t csi_dma_done_irqs;

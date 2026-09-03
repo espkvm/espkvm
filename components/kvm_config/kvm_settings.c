@@ -12,8 +12,10 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "kvm_board_header.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "pin_conflict.h"
 
 static const char *TAG = "kvm_cfg";
 
@@ -421,6 +423,94 @@ char *kvm_settings_values_json(void)
     return out;
 }
 
+/* The most pin settings this can weigh at once. There are nine today (three
+ * ATX, six for the round LCD); anything past this is dropped rather than
+ * checked, so raise it if the table ever grows that far. */
+#define MAX_PIN_CLAIMS 32
+
+/** The value @p idx will hold once @p root is applied. */
+static int32_t resulting_int(const cJSON *root, size_t idx)
+{
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(root, s_table[idx].key);
+    if (it) {
+        if (cJSON_IsBool(it)) {
+            return cJSON_IsTrue(it) ? 1 : 0;
+        }
+        if (cJSON_IsNumber(it)) {
+            return (int32_t)it->valuedouble;
+        }
+    }
+    return s_values[idx].i;
+}
+
+/*
+ * Whether a pin setting counts.
+ *
+ * A setting the console hides is one the operator cannot see, so holding them
+ * to it would be unfair: the round LCD's five pins are stored even on a device
+ * running an I2C OLED, where they drive nothing at all. The rule here is the
+ * console's rule - a setting with a showIf condition counts only while that
+ * condition holds.
+ */
+static bool pin_setting_applies(const cJSON *root, const kvm_setting_t *d)
+{
+    if (!d->visible_key) {
+        return true;
+    }
+    int j = find_index(d->visible_key);
+    if (j < 0) {
+        return true;
+    }
+    return resulting_int(root, (size_t)j) == d->visible_val;
+}
+
+/**
+ * Refuse a write that would put two things on one pin.
+ *
+ * Pins are weighed as a set and after the request is imagined applied, because
+ * moving the display off a pin the buttons want arrives as one body: each half
+ * is legal only because the other changed with it.
+ *
+ * @return ESP_OK when the resulting wiring is sound.
+ */
+static esp_err_t check_pins(const cJSON *root, char *err, size_t err_len)
+{
+    kvm_pin_claim_t claims[MAX_PIN_CLAIMS];
+    size_t n = 0;
+
+    lock();
+    for (size_t i = 0; i < s_count && n < MAX_PIN_CLAIMS; i++) {
+        const kvm_setting_t *d = &s_table[i];
+        if (!(d->flags & KVM_SF_PIN) || !pin_setting_applies(root, d)) {
+            continue;
+        }
+        claims[n].key = d->key;
+        claims[n].gpio = (int)resulting_int(root, i);
+        claims[n].changing = cJSON_GetObjectItemCaseSensitive(root, d->key) != NULL;
+        n++;
+    }
+    unlock();
+
+    kvm_pin_conflict_t c;
+    if (!kvm_pin_conflict_find(claims, n, kvm_board_reserved_by, &c)) {
+        return ESP_OK;
+    }
+
+    char msg[128];
+    if (c.held_by) {
+        snprintf(msg, sizeof(msg), "'%s' cannot use GPIO %d: it is the %s", c.key, c.gpio,
+                 c.held_by);
+    } else {
+        snprintf(msg, sizeof(msg), "'%s' and '%s' cannot both use GPIO %d", c.key, c.other,
+                 c.gpio);
+    }
+    ESP_LOGW(TAG, "refused: %s", msg);
+    if (err && err_len) {
+        strlcpy(err, msg, err_len);
+    }
+    return ESP_ERR_INVALID_ARG;
+}
+
 esp_err_t kvm_settings_apply_json(const char *json, char *err, size_t err_len)
 {
     if (err && err_len) {
@@ -480,6 +570,12 @@ esp_err_t kvm_settings_apply_json(const char *json, char *err, size_t err_len)
             cJSON_Delete(root);
             return ESP_ERR_INVALID_ARG;
         }
+    }
+
+    esp_err_t pin_err = check_pins(root, err, err_len);
+    if (pin_err != ESP_OK) {
+        cJSON_Delete(root);
+        return pin_err;
     }
 
     for (cJSON *it = root->child; it; it = it->next) {

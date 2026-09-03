@@ -5,9 +5,95 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.42.0] - 2026-09-03
+
+### Added
+- **Two settings can no longer be put on one pin.** The ATX buttons and the
+  round LCD are both wired by hand and both pick their GPIOs from the console,
+  and until now nothing noticed when they named the same one - or when one of
+  them named a pin the board's own hardware holds, like the capture bus or the
+  Ethernet PHY. Neither shows up as an error: the panel simply stays dark, or
+  the network stops. A settings write that would do it is now refused, naming
+  the pin and what already has it. The pins are weighed as a set and after the
+  request is imagined applied, so moving the display off a pin the buttons want
+  still goes through in one go; a clash a device already has stored does not
+  block unrelated changes; and a setting the console hides - the LCD's pins on a
+  device running an I2C OLED - is left out of it. The rule has host tests
+  (`tools/test.sh`).
+
+- **A capture bridge driver announces itself.** The capture path used to call
+  the TC358743 by name and know its I2C address, so a second bridge would have
+  meant editing every one of those call sites. Now a driver registers a detect
+  function, and the capture path asks for whatever answers on the bus, getting
+  back a name to show and a table of operations to drive it with. Adding a
+  bridge is adding a component. Nothing about the picture changes - one driver
+  is registered and it is the same one - and the interface is honestly a guess
+  until a second bridge exists to shape it. The idea comes from Espressif's
+  esp_cam_sensor (#34), though not the mechanics: a constructor does for a
+  handful of drivers what a linker section does for dozens, without a section to
+  place by hand.
+
+- **A source that is on but sending nothing now gets a fresh hotplug.** The
+  bridge holds HPD low until this firmware has booted and started the capture,
+  some fourteen seconds in - eight of them the password-reset window. A machine
+  that boots faster looks at the input, finds no monitor, and configures no
+  output; single-board computers in particular probe once at start and never
+  look again, and raising HPD afterwards is not the edge they act on. The
+  monitor now watches for that exact case and pretends to be unplugged and
+  plugged back in - at ten seconds of silence, then twenty, then forty, and then
+  it stops. It only does this while DDC5V says the source is powered and
+  attached, so a target that is simply switched off is left in peace, and the
+  count starts again when the picture returns or the input is unplugged. Found
+  from a report of a C790 with an Orange Pi: DDC5V present, TMDS never.
+- **The console says which silence it is.** "No signal" was followed by "it may
+  be powered off, asleep, or its cable unplugged", which sends somebody whose
+  machine is plainly running to check the wrong things. The device already knew
+  better - DDC5V is in the status it serves, shown until now only as a raw hex
+  byte - so the page now separates "nothing is plugged into the HDMI input" from
+  "the cable is connected and the target has power, but it is not sending".
+
+- **A dead keyboard can be re-plugged from the console.** A restart resets this
+  side of the USB cable while the target's power never drops, and this OTG port
+  does not always give the target a clean detach - so the target goes on holding
+  a connection this side has forgotten, and every keystroke goes nowhere. The
+  firmware already came back as a new device once at start-up to head that off.
+  That is one attempt, and a target busy with its own boot can miss it, so it is
+  now tried again while nothing has enumerated us: ten seconds after the last
+  try, then twenty, then forty, and then it stops. A target in the middle of
+  talking to us is left alone - the enumeration trace tells us it is - and one
+  that is simply switched off is not poked forever. And clicking the USB dot in
+  the status bar now offers "Re-plug USB", which does the same thing on demand:
+  off the bus for 100 ms and back, without restarting either machine. Also on
+  the API, as `POST /api/v1/hid/reattach`.
 
 ### Changed
+- **The ATX buttons now start on pins that are free, per board.** They defaulted
+  to "unassigned" with the wiring page suggesting GPIO 20, 21 and 22 - which is
+  where the round LCD starts, so a device wearing both and set up by following
+  that page ended up with three pins claimed twice. The power and reset buttons
+  now default to 46 and 47, chosen clear of everything else on every board. The
+  LED sense stays unassigned: its input is biased toward "off", so a pin nobody
+  wired would report the target as powered down for ever, and a relay board
+  cannot sense the LED at all - 48 is simply documented as free for it. The
+  Guition, whose header brings out ten usable pins in all, gets its own set; its
+  display defaults were wrong in the same way and are fixed, three of the five
+  pins it offered not being on that board's connector at all, so a panel wired
+  by them could never have worked. Nothing moves on a device that is already set
+  up - a default is only consulted when nothing is stored - and nothing is driven
+  until ATX control is switched on.
+- The console leaves a hidden setting's pin out of the free-pin arithmetic, the
+  way the device now does. The round LCD's five pins are stored even on a device
+  running an I2C OLED, and they were being held back from the ATX pickers there
+  for a panel that is not connected.
+- **The C790's audio connector is written down**
+  ([docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md)): the bridge hands HDMI
+  audio out as I2S on a 5-pin header of its own, with a cable in the box, and
+  the notes now carry its pinout and what wiring it would take. MCLK is not
+  connected there, so the P4 would have to receive as the slave. Nothing
+  captures audio yet.
+- The ATX wiring page no longer claims GPIO 9-13 are held back for that audio.
+  Those pins do not come out on any board this firmware builds for, so the
+  sentence only sent people looking for a header that is not there.
 - **A relay module is documented as an alternative for the power and reset
   buttons** ([docs/wiring.md](docs/wiring.md)). It needs no firmware change -
   the pins are driven the same way - but it cannot sense the power LED, so that
@@ -21,6 +107,17 @@ bumps the patch).
   against "cookie holds no session I know". A console that drops to the login
   screen is only repeating that answer, and until now there was no way to tell
   the two apart from a log (#31).
+- A write refused for the wrong reason no longer says "authentication
+  required". A POST or PUT must carry JSON or the console's own header - that is
+  what keeps a form on another site from riding a cookie - and a request without
+  either was answered as if the password were wrong, which sends whoever wrote
+  the script hunting a login problem they do not have. It now says which rule
+  turned it away, and a request that really did come from another site says that
+  instead. Found calling `POST /api/v1/hid/reattach` with curl, which has no
+  body to declare.
+- A pin with two fixed uses is one row in the pins list, not two. On the p4-eth
+  GPIO 35 is the BOOT button and Ethernet TXD1 both, and the console drew it
+  twice.
 
 ## [0.41.3] - 2026-08-30
 

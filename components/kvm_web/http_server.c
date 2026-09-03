@@ -156,10 +156,31 @@ static esp_err_t api_settings_schema_get(httpd_req_t *req)
     return send_json_owned(req, kvm_settings_schema_json());
 }
 
-/* Add a fixed-peripheral pin to the reserved list (skipped when disabled, -1). */
+/* Add a fixed-peripheral pin to the reserved list (skipped when absent, -1). */
 static void pins_add_reserved(cJSON *arr, int pin, const char *use)
 {
     if (pin < 0) {
+        return;
+    }
+    /* One pin can carry two fixed uses: on the p4-eth GPIO 35 is the BOOT button
+     * and Ethernet TXD1 both. The console draws a row per pin, so the second use
+     * joins the first rather than showing the same pin twice. */
+    cJSON *had = NULL;
+    cJSON_ArrayForEach(had, arr) {
+        const cJSON *p = cJSON_GetObjectItem(had, "pin");
+        if (!cJSON_IsNumber(p) || p->valueint != pin) {
+            continue;
+        }
+        const cJSON *was = cJSON_GetObjectItem(had, "use");
+        if (!cJSON_IsString(was)) {
+            return;
+        }
+        char both[96];
+        snprintf(both, sizeof(both), "%s / %s", was->valuestring, use);
+        cJSON *joined = cJSON_CreateString(both);
+        if (joined) {
+            cJSON_ReplaceItemInObject(had, "use", joined);
+        }
         return;
     }
     cJSON *o = cJSON_CreateObject();
@@ -224,61 +245,13 @@ static esp_err_t api_pins_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "usableMax", 54);
     cJSON *r = cJSON_AddArrayToObject(root, "reserved");
     if (r) {
-        pins_add_reserved(r, CONFIG_KVM_I2C_SDA_GPIO, "Capture I2C SDA");
-        pins_add_reserved(r, CONFIG_KVM_I2C_SCL_GPIO, "Capture I2C SCL");
-        pins_add_reserved(r, CONFIG_KVM_TC358743_RST_GPIO, "Capture reset");
-        pins_add_reserved(r, CONFIG_KVM_SD_CLK_GPIO, "microSD CLK");
-        pins_add_reserved(r, CONFIG_KVM_SD_CMD_GPIO, "microSD CMD");
-        pins_add_reserved(r, CONFIG_KVM_SD_D0_GPIO, "microSD D0");
-        pins_add_reserved(r, CONFIG_KVM_SD_D1_GPIO, "microSD D1");
-        pins_add_reserved(r, CONFIG_KVM_SD_D2_GPIO, "microSD D2");
-        pins_add_reserved(r, CONFIG_KVM_SD_D3_GPIO, "microSD D3");
-        pins_add_reserved(r, CONFIG_KVM_SD_PWR_GPIO, "microSD power");
-#if CONFIG_KVM_ETH_ENABLE
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_CLK_GPIO, "Ethernet REFCLK");
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_TX_EN_GPIO, "Ethernet TX_EN");
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_TXD0_GPIO, "Ethernet TXD0");
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_TXD1_GPIO, "Ethernet TXD1");
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_CRS_DV_GPIO, "Ethernet CRS_DV");
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_RXD0_GPIO, "Ethernet RXD0");
-        pins_add_reserved(r, CONFIG_KVM_ETH_RMII_RXD1_GPIO, "Ethernet RXD1");
-        pins_add_reserved(r, CONFIG_KVM_ETH_MDC_GPIO, "Ethernet MDC");
-        pins_add_reserved(r, CONFIG_KVM_ETH_MDIO_GPIO, "Ethernet MDIO");
-        pins_add_reserved(r, CONFIG_KVM_ETH_PHY_RST_GPIO, "Ethernet PHY reset");
-#endif
-        pins_add_reserved(r, CONFIG_KVM_BUTTON_GPIO, "BOOT button");
-#if CONFIG_ESP_CONSOLE_UART_DEFAULT
-        pins_add_reserved(r, 37, "Console UART TX");
-        pins_add_reserved(r, 38, "Console UART RX");
-#endif
-#if CONFIG_KVM_WIFI
-        /* The SDIO link to the WiFi co-processor. These are held by esp-hosted
-         * rather than by anything of ours, which is exactly why they were missing
-         * here: nothing in our own config mentions them, so the console offered
-         * them as free pins and picking one silently killed WiFi. */
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_CLK_GPIO_RANGE_MIN, "WiFi co-processor CLK");
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_CMD_GPIO_RANGE_MIN, "WiFi co-processor CMD");
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D0_GPIO_RANGE_MIN, "WiFi co-processor D0");
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D1_GPIO_RANGE_MIN, "WiFi co-processor D1");
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D2_GPIO_RANGE_MIN, "WiFi co-processor D2");
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_SDIO_D3_GPIO_RANGE_MIN, "WiFi co-processor D3");
-        pins_add_reserved(r, CONFIG_ESP_HOSTED_HOST_RESET_GPIO, "WiFi co-processor reset");
-#if CONFIG_KVM_BOARD_WAVESHARE_WIFI6_DEVKIT || CONFIG_KVM_BOARD_WAVESHARE_WIFI6
-        /* The schematic ties P4 GPIO 6 to the C6's IO2 through a 0R. esp-hosted
-         * does not claim it, but offering it as free would let something an
-         * owner plugs in fight the co-processor. */
-        pins_add_reserved(r, 6, "WiFi co-processor IO2");
-#endif
-        /*
-         * GPIO 45 carries SD_PWRn on the Function EV board. Our firmware never
-         * drives it (the slot is always powered, so KVM_SD_PWR_GPIO is -1), but the
-         * net is still attached to the pin unless a resistor is moved - so anything
-         * else wired there fights the SD power circuit and never reaches a clean
-         * logic level. Found the hard way: it was this driver's default DC pin, and
-         * a panel on it stayed dark.
-         */
-        pins_add_reserved(r, 45, "SD_PWRn (needs a resistor move to free)");
-#endif
+        /* The same list the settings check refuses a write against, so the pin
+         * picker and the device cannot disagree about what is free. */
+        size_t reserved_count = 0;
+        const kvm_board_reserved_t *reserved = kvm_board_reserved(&reserved_count);
+        for (size_t i = 0; i < reserved_count; i++) {
+            pins_add_reserved(r, reserved[i].gpio, reserved[i].use);
+        }
     }
 
     /*
@@ -1901,6 +1874,24 @@ static esp_err_t api_video_frame_get(httpd_req_t *req)
     }
     video_frame_viewer_leave();
     return r;
+}
+
+/*
+ * Present the keyboard and mouse to the target again, as if the cable had been
+ * pulled and put back. Needed when this side restarted while the target stayed
+ * on: it kept the address it gave us and we forgot it, so every report goes
+ * nowhere. The firmware already does this once at boot and retries it a few
+ * times on its own; this is the operator's way to ask for it at any point,
+ * without restarting either machine. No control lease: it fixes input rather
+ * than being input, and the operator who is locked out is exactly who needs it.
+ */
+static esp_err_t api_hid_reattach_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    usb_hid_reattach();
+    return send_ok(req);
 }
 
 static esp_err_t api_hid_move_post(httpd_req_t *req)
@@ -3918,6 +3909,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/hid/click", .method = HTTP_POST, .handler = api_hid_click_post},
         {.uri = "/api/v1/hid/key", .method = HTTP_POST, .handler = api_hid_key_post},
         {.uri = "/api/v1/hid/type", .method = HTTP_POST, .handler = api_hid_type_post},
+        {.uri = "/api/v1/hid/reattach", .method = HTTP_POST, .handler = api_hid_reattach_post},
     };
     for (size_t i = 0; i < sizeof(api_uris) / sizeof(api_uris[0]); i++) {
         register_route(h, &api_uris[i]);

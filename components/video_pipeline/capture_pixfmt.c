@@ -39,7 +39,7 @@ static const capture_pixfmt_t k_rgb888 = {
  * whose bytes are U-Y-V-Y) is exactly UYVY - so a single capture serves both. The
  * frame is padded to macroblock height for the H.264 encoder.
  *
- * The TC358743 emits UYVY only when capture_hw enables it (tc358743_set_csi_uyvy422),
+ * The TC358743 emits UYVY only when capture_hw enables it (kvm_bridge_set_csi_uyvy422),
  * which it keys off this profile; on rev < 3.0 nothing here compiles and the bridge
  * stays RGB888.
  */

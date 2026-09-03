@@ -473,6 +473,86 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
     }
 }
 
+/* ---- coming back as a new device ---------------------------------------- */
+/*
+ * Holding D+ low long enough to read as a detach and then attaching again is
+ * electrically all a replug ever did: the host drops what it knew about us and
+ * enumerates from scratch. Three callers want it - the end of usb_hid_init(),
+ * the watchdog below, and the operator - and none of them may block (one is a
+ * web request, two are timer callbacks), so the reconnect half is deferred.
+ */
+static esp_timer_handle_t s_reconnect_timer;
+
+static void reconnect_cb(void *arg)
+{
+    (void)arg;
+    tud_connect();
+}
+
+static void reattach(void)
+{
+    if (!s_reconnect_timer) {
+        return;
+    }
+    tud_disconnect();
+    (void)esp_timer_stop(s_reconnect_timer);
+    (void)esp_timer_start_once(s_reconnect_timer, USB_REATTACH_MS * 1000);
+}
+
+/*
+ * The replug at the end of usb_hid_init() is one attempt, and it can be missed:
+ * a target that is itself booting, or is in the middle of its own bus reset,
+ * looks at the input at the wrong moment and never comes back to it. The
+ * operator then finds a keyboard that is dead until the cable is pulled by
+ * hand - which is the whole thing this is here to avoid. So while nothing has
+ * enumerated us, try again: ten seconds after the last attempt, then twenty,
+ * then forty, and then stop. A target that is simply switched off is left in
+ * peace rather than poked forever.
+ *
+ * A host that is talking to us right now is left alone too: the enumeration
+ * trace grows with every descriptor request, so a trace that moved since the
+ * last check means a conversation is under way and a replug would cut it off.
+ */
+#define REATTACH_TRIES 3
+static const int64_t k_reattach_delay_us[REATTACH_TRIES] = {10000000, 20000000, 40000000};
+
+static esp_timer_handle_t s_watchdog_timer;
+static int s_watchdog_try;   /* attempts already scheduled, 0..REATTACH_TRIES */
+static int s_watchdog_probe; /* s_probe_n as of the last check */
+
+static void watchdog_arm(void)
+{
+    if (!s_watchdog_timer || s_watchdog_try >= REATTACH_TRIES) {
+        return;
+    }
+    s_watchdog_probe = s_probe_n;
+    (void)esp_timer_start_once(s_watchdog_timer, k_reattach_delay_us[s_watchdog_try]);
+    s_watchdog_try++;
+}
+
+static void watchdog_cb(void *arg)
+{
+    (void)arg;
+    if (tud_mounted()) {
+        return; /* enumerated: nothing to fix and nothing more to schedule */
+    }
+    if (s_probe_n != s_watchdog_probe) {
+        /* Mid-enumeration. Give it another window instead of interrupting it. */
+        watchdog_arm();
+        return;
+    }
+    ESP_LOGW(TAG, "no host enumeration yet; re-attaching (try %d of %d)", s_watchdog_try,
+             REATTACH_TRIES);
+    reattach();
+    watchdog_arm();
+}
+
+void usb_hid_reattach(void)
+{
+    ESP_LOGI(TAG, "re-attaching to the target on request");
+    reattach();
+}
+
 /* ---- MSC (virtual media) callbacks -------------------------------------- */
 /*
  * The target sees one removable LUN. Its medium is whatever kvm_storage has open;
@@ -493,7 +573,6 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
  */
 static bool s_msc_cdrom;
 static bool s_msc_present;
-static esp_timer_handle_t s_msc_reconnect_timer;
 
 static uint32_t msc_block_size(void)
 {
@@ -601,12 +680,6 @@ uint32_t tud_msc_inquiry2_cb(uint8_t lun, scsi_inquiry_resp_t *resp, uint32_t bu
     return sizeof(scsi_inquiry_resp_t);
 }
 
-static void msc_reconnect_cb(void *arg)
-{
-    (void)arg;
-    tud_connect();
-}
-
 void usb_hid_msc_set_type(bool cdrom)
 {
     if (cdrom == s_msc_cdrom) {
@@ -614,16 +687,13 @@ void usb_hid_msc_set_type(bool cdrom)
     }
     s_msc_cdrom = cdrom;
     /* Nothing for the host to re-read until the drive exists and is enumerated. */
-    if (!s_msc_present || !s_msc_reconnect_timer || !tud_mounted()) {
+    if (!s_msc_present || !tud_mounted()) {
         return;
     }
     /* Drop off the bus and come back, so the host re-issues INQUIRY and picks up
-     * the new device type. Deferred reconnect keeps the caller (a settings write
-     * on the web task) from blocking; the HID endpoints blink out for the ~100 ms
-     * this takes, which is the cost of swapping an ISO for a disk image. */
-    tud_disconnect();
-    (void)esp_timer_stop(s_msc_reconnect_timer);
-    (void)esp_timer_start_once(s_msc_reconnect_timer, 100 * 1000);
+     * the new device type. The HID endpoints blink out for the ~100 ms this
+     * takes, which is the cost of swapping an ISO for a disk image. */
+    reattach();
 }
 
 /* ---- report emission ---------------------------------------------------- */
@@ -961,10 +1031,6 @@ esp_err_t usb_hid_init(void)
      */
     const bool with_msc = kvm_setting_bool("msc_enable");
     s_msc_present = with_msc;
-    if (with_msc) {
-        const esp_timer_create_args_t args = {.callback = msc_reconnect_cb, .name = "msc_reconn"};
-        (void)esp_timer_create(&args, &s_msc_reconnect_timer);
-    }
     build_config_descriptor(s_fs_config_descriptor, with_msc, k_msc_iface_fs, sizeof(k_msc_iface_fs));
     build_config_descriptor(s_hs_config_descriptor, with_msc, k_msc_iface_hs, sizeof(k_msc_iface_hs));
     ESP_LOGI(TAG, "USB functions: HID%s", with_msc ? " + mass storage" : " only");
@@ -996,10 +1062,18 @@ esp_err_t usb_hid_init(void)
      * again puts the host through a fresh enumeration, which is all a replug
      * ever did. Same trick as usb_hid_msc_set_type, for the same reason.
      */
+    const esp_timer_create_args_t reconn_args = {.callback = reconnect_cb, .name = "usb_reconn"};
+    (void)esp_timer_create(&reconn_args, &s_reconnect_timer);
+    const esp_timer_create_args_t watch_args = {.callback = watchdog_cb, .name = "usb_watch"};
+    (void)esp_timer_create(&watch_args, &s_watchdog_timer);
+
     tud_disconnect();
     vTaskDelay(pdMS_TO_TICKS(USB_REATTACH_MS));
     tud_connect();
     ESP_LOGI(TAG, "re-attached to the target so it enumerates this boot");
+
+    /* And keep an eye on whether that took. */
+    watchdog_arm();
 
     /* Above stream/httpd work so HID reports are not delayed by MJPEG or WS parsing. */
     BaseType_t ok = xTaskCreate(hid_worker, "usb_hid", HID_WORKER_STACK, NULL, HID_WORKER_PRIO, &s_hid_task);

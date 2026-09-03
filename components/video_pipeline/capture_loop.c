@@ -23,7 +23,7 @@
 #include "kvm_caps.h"
 #include "kvm_settings.h"
 #include "kvm_thermal.h"
-#include "tc358743_hdmi_debug.h"
+#include "kvm_bridge.h"
 #include "video_frame.h"
 
 /** vid_codec enum, in the order of s_codec_choices in the settings table. */
@@ -136,10 +136,10 @@ void capture_loop_run(capture_ctx_t *c)
 #if CONFIG_KVM_TC358743_ADV_DEBUG
             static uint32_t s_csi_timeout_logs;
             capture_debug_csi_timeout(c, capture_csi_bpp(), c->frame_bytes);
-            tc358743_debug_stall_extras(c->tc);
+            kvm_bridge_debug_stall_extras(&c->bridge);
             if ((s_csi_timeout_logs++ % 8u) == 0u) {
-                tc358743_debug_status(c->tc);
-                tc358743_debug_bridge(c->tc);
+                kvm_bridge_debug_status(&c->bridge);
+                kvm_bridge_debug_bridge(&c->bridge);
             }
 #endif
             int64_t now = (int64_t)esp_timer_get_time();

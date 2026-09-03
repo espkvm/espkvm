@@ -2,10 +2,10 @@
 #
 # Everything that can be checked without a device, in one command.
 #
-# Three kinds of thing live here: the C that reads a screen and the C that
-# decides a screen has gone flat, both of which are plain arithmetic over a
-# pixel buffer; the console's own logic, run by node's test runner; and the
-# paste tables, which are checked against the real keyboard layouts.
+# Three kinds of thing live here: the C that is plain enough to run on a host -
+# reading a screen, deciding a screen has gone flat, and refusing two settings
+# on one pin; the console's own logic, run by node's test runner; and the paste
+# tables, which are checked against the real keyboard layouts.
 #
 # The firmware itself is not built here - that needs ESP-IDF and takes minutes.
 # Run this before you push and CI will rarely tell you anything you did not
@@ -25,6 +25,9 @@ if [ "$what" = all ] || [ "$what" = host ]; then
     echo
     echo "== noticing a screen gone flat =="
     sh "$here/components/video_pipeline/test/run.sh"
+    echo
+    echo "== two things on one pin =="
+    sh "$here/components/kvm_config/test/run.sh"
     echo
 fi
 

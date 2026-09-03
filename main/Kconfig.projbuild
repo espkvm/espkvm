@@ -96,6 +96,34 @@ menu "ESP-KVM"
             range -1 ENV_GPIO_RANGE_MAX
             default 33
 
+        # The ATX pins are offered the same way, and for the same reason: which
+        # pins are free differs per board. They are kept clear of the display's
+        # defaults above, because a device wearing both is the ordinary case and
+        # the firmware refuses a pin claimed twice - overlapping defaults would
+        # put a new owner in an argument the first time they touch one.
+        config KVM_ATX_PWR_GPIO
+            int "ATX power button default GPIO"
+            depends on KVM_ENABLE_ATX
+            range -1 ENV_GPIO_RANGE_MAX
+            default 46
+
+        config KVM_ATX_RST_GPIO
+            int "ATX reset button default GPIO"
+            depends on KVM_ENABLE_ATX
+            range -1 ENV_GPIO_RANGE_MAX
+            default 47
+
+        # The LED is the one of the three that stays unassigned by default. It is
+        # the optional wire - a relay board cannot sense it at all - and the input
+        # is biased toward "off", so a pin nobody wired would report the target as
+        # powered down for ever. No reading is better than a wrong one. GPIO 48 is
+        # free for it on every board but the Guition, where 3 is.
+        config KVM_ATX_LED_GPIO
+            int "ATX power LED sense default GPIO (-1 to leave unassigned)"
+            depends on KVM_ENABLE_ATX
+            range -1 ENV_GPIO_RANGE_MAX
+            default -1
+
         config KVM_ENABLE_HTTPS
             bool "HTTPS and authentication"
             default y

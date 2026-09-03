@@ -43,7 +43,38 @@ Run `idf.py menuconfig` and open **ESP-KVM**:
 - RMII REFCLK, TX_EN, TXD0/1, CRS_DV, RXD0/1
 - mDNS hostname
 
+**Where the hand-wired things start**
+- ATX power and reset button GPIOs, and the round LCD's five SPI pins
+
+These are runtime settings - the operator picks them in the console - and these
+Kconfig options only choose what a fresh device starts with. Set them anyway.
+The device refuses a pin two things want, so defaults that overlap put a new
+owner in an argument on their first edit; defaults naming a pin the header does
+not bring out are worse, because the wire has nowhere to go and nothing says so.
+Pick seven that are free - two buttons and five for the LCD - and check them
+against the header, not against the chip. The LED sense is left unassigned on
+purpose and needs no default.
+
 Take the pin numbers straight from your board's schematic.
+
+## Another capture bridge
+
+The TC358743 is the only one this firmware ships a driver for, but it is no
+longer the only one it can hold. A driver lives in its own component, fills in
+`kvm_bridge_ops_t` with whatever its chip needs doing, and ends with
+`KVM_BRIDGE_DRIVER(name, detect_fn)`; the capture path asks `kvm_bridge_detect()`
+for whatever answers on the I2C bus and never names a chip. Two things a new
+driver must not forget: the `-u kvm_bridge_reg_<name>` line in its CMakeLists,
+or the linker drops an object nothing references and the driver is silently
+absent, and a `PRIV_REQUIRES` entry in `video_pipeline` so the component is in
+the image at all.
+
+Worth knowing before starting: the operations were shaped around the one driver
+that exists, so a second is likely to want something that is not there yet.
+Espressif's `esp_cam_sensor` carries a TC358743 driver of its own and one for
+the Lontium LT6911 - the same p4kvm ancestry as this one - and is worth reading,
+though its bridges are fixed-mode and the LT6911 has no EDID control at all,
+which a KVM needs to hold a source inside what the CSI lanes can carry.
 
 ## What stays in code
 

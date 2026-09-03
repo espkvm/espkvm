@@ -72,7 +72,7 @@ Useful for what it does today, and honest about the rest.
 | A viewing token for dashboards | works; off until you make one (Settings &rarr; Security). One long random string that opens the MJPEG stream, a single frame and the capture's figures - enough for a camera card in Home Assistant - and no endpoint that can touch the target. Only its hash is stored, so it is shown once |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered, TLS optional. Sensors for the capture and the machine, power/reset/Wake-on-LAN buttons, the jiggler as a switch with its interval, a firmware update entity that offers what the project has published, and a camera holding a still of the target's screen - taken on demand, or by itself when the screen watch finds one of your phrases. Diagnostics too: free internal memory and the largest block in it, skipped frames, which firmware slot is running and why the device last booted |
 | VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
-| HDMI audio | not implemented |
+| HDMI audio | not implemented; the bridge already extracts it and offers it as I2S, but the signals need four wires to the ESP32-P4 and nothing reads them yet |
 
 What is coming next is in the [roadmap](ROADMAP.md).
 
@@ -270,6 +270,11 @@ target needs an MX1.25-to-USB-A cable.
 A TC358743 HDMI -> MIPI CSI-2 bridge that turns the target's HDMI output into a
 camera stream the ESP32-P4 can read. Any other TC358743 capture board should do
 just as well: the firmware talks to that chip, not to the board around it.
+
+It also brings the bridge's I2S audio out on a 5-pin connector of its own, and
+Geekworm puts a cable for it in the box. Nothing reads it yet; the pinout and
+what wiring it would take are in
+[docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
 The [Geekworm C792](https://wiki.geekworm.com/C792) is the same TC358743 with a
 GSV2001 splitter in front, so it should work too - **not tested here**, and
@@ -720,6 +725,7 @@ Everything the console does is available over HTTP.
 | `POST /api/v1/power/click`, `/hold`, `/reset` | ATX: tap power, hold power for a hard off, tap reset |
 | `GET /api/v1/video/frame.jpg` | one frame as a JPEG; 409 while H.264 is selected |
 | `POST /api/v1/hid/key`, `/type`, `/move`, `/click` | the keyboard and pointer, for automation. Off until the agent API is enabled in Settings &rarr; Security |
+| `POST /api/v1/hid/reattach` | present the keyboard and mouse to the target again, as if the cable had been pulled and put back |
 | `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, Ethernet link, ATX power state |
 | `GET /api/v1/system/log` | the device's own log, as a file |
 | `POST /api/v1/system/update` | firmware image, written to the spare slot |

@@ -116,6 +116,16 @@ const char *usb_hid_target_os(void);
  */
 void usb_hid_msc_set_type(bool cdrom);
 
+/**
+ * Come back to the target as a new device: drop off the bus for ~100 ms and
+ * attach again, which is what pulling the cable and putting it back does. The
+ * host forgets the address and configuration it handed out and enumerates from
+ * scratch. Use it when the target has stopped taking input - after a restart or
+ * an OTA above all, where this side forgets the bus but the target does not.
+ * Returns at once; the device is back a fraction of a second later.
+ */
+void usb_hid_reattach(void);
+
 #ifdef __cplusplus
 }
 #endif

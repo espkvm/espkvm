@@ -16,6 +16,37 @@
  * (the schema iterates choices[0..max]; a short array reads OOB). */
 #define ENUM_MAX(arr) ((int)(sizeof(arr) / sizeof((arr)[0]) - 1))
 
+/*
+ * The pin defaults are Kconfig values that only exist while their feature is
+ * built in, but the rows below are not compiled out with it - the setting still
+ * has to be listed so the console can say the feature is off. Unassigned is the
+ * right answer when there is nothing to assign to.
+ */
+#ifndef CONFIG_KVM_ATX_PWR_GPIO
+#define CONFIG_KVM_ATX_PWR_GPIO -1
+#endif
+#ifndef CONFIG_KVM_ATX_RST_GPIO
+#define CONFIG_KVM_ATX_RST_GPIO -1
+#endif
+#ifndef CONFIG_KVM_ATX_LED_GPIO
+#define CONFIG_KVM_ATX_LED_GPIO -1
+#endif
+#ifndef CONFIG_KVM_DISP_SCLK_GPIO
+#define CONFIG_KVM_DISP_SCLK_GPIO -1
+#endif
+#ifndef CONFIG_KVM_DISP_MOSI_GPIO
+#define CONFIG_KVM_DISP_MOSI_GPIO -1
+#endif
+#ifndef CONFIG_KVM_DISP_CS_GPIO
+#define CONFIG_KVM_DISP_CS_GPIO -1
+#endif
+#ifndef CONFIG_KVM_DISP_DC_GPIO
+#define CONFIG_KVM_DISP_DC_GPIO -1
+#endif
+#ifndef CONFIG_KVM_DISP_RST_GPIO
+#define CONFIG_KVM_DISP_RST_GPIO -1
+#endif
+
 static const char *const s_codec_choices[] = {"mjpeg", "h264"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "720p", "1024x768"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
@@ -234,27 +265,31 @@ static const kvm_setting_t s_settings[] = {
         .help = "Requires optocouplers wired to the target's front-panel header.",
         .def = 0, .requires_cap = -1,
     },
+    /* Pins, so the console offers only what is free on this board. The defaults
+     * come from Kconfig and are picked per board clear of everything else,
+     * because two settings on one GPIO is now refused rather than obeyed. */
     {
         .key = "atx_pwr_gpio", .section = "power", .type = KVM_VT_INT,
         .title = "Power button GPIO",
-        .help = "Drives the optocoupler across the target's power button. A free "
-                "pin on the Waveshare board; 20 is a safe default. -1 to disable.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .help = "Drives the optocoupler across the target's power button. -1 to disable.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_PWR_GPIO, .requires_cap = -1,
+        .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
         .key = "atx_rst_gpio", .section = "power", .type = KVM_VT_INT,
         .title = "Reset button GPIO",
-        .help = "Drives the optocoupler across the target's reset button. 21 is a "
-                "safe default. -1 to disable.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .help = "Drives the optocoupler across the target's reset button. -1 to disable.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_RST_GPIO, .requires_cap = -1,
+        .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
         .key = "atx_led_gpio", .section = "power", .type = KVM_VT_INT,
         .title = "Power LED sense GPIO",
         .help = "Reads the target's power LED through an optocoupler. Wire it to the "
-                "power LED, not the HDD LED, which only blinks on disk activity. 22 "
-                "is a safe default. -1 if you are not sensing the LED.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+                "power LED, not the HDD LED, which only blinks on disk activity. -1 if "
+                "you are not sensing the LED.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_LED_GPIO, .requires_cap = -1,
+        .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
         .key = "atx_short_ms", .section = "power", .type = KVM_VT_INT,

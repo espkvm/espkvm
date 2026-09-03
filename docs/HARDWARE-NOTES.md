@@ -47,7 +47,10 @@ Cost is linear in pixel count - the PPA is bandwidth-bound. Those figures come
 from a probe running on an otherwise idle chip. **With the capture pipeline
 actually running, one 1080p frame costs 145 ms**, because the CSI DMA is
 writing 6 MB per frame into the same PSRAM the PPA is reading. The stream
-settles at 5-7 fps.
+settles at 5-7 fps. At 1280x720 the same contention shows as a PPA pass of
+57-60 ms against the idle probe's 33.6 ms, and the stream settles at 17 fps -
+the encode, 24 ms, runs underneath it and costs nothing extra. That is the
+ceiling on this silicon: the PPA pass is the frame period.
 
 So the trade at 1080p is 20 fps of MJPEG against 6 fps of H.264 - and, on an
 idle desktop, 8.5 Mbit/s against **170 kbit/s**. H.264 is for links too narrow
@@ -77,6 +80,52 @@ RSA would have been minutes rather than milliseconds; the P4's ECC accelerator
 is what makes generating on-device reasonable. The handshake is the part the
 operator feels - a console opens several connections - so session tickets are
 enabled.
+
+## The bridge's audio output - read off the wiki, not off a board
+
+Everything above was measured here; this section was not. Nothing in the
+firmware captures audio yet, so none of it is proved.
+
+The TC358743 pulls the audio out of the HDMI stream and hands it over as I2S,
+and `set_hdmi_audio()` in `components/tc358743` already turns that on. The C790
+brings those signals out on a separate 5-pin connector on its left edge, next to
+the HDMI socket. They are not on the 15-pin CSI ribbon, which carries the video
+lanes, I2C, 3.3 V and ground and nothing else. Geekworm puts a cable for it in
+the box.
+
+| C790 | Signal | Raspberry Pi pin, per Geekworm's diagram |
+|---|---|---|
+| GND | ground | 6 |
+| OSCK | MCLK | **not connected** |
+| WFS | LRCK / word select | 35 (GPIO19) |
+| SD | data | 38 (GPIO20) |
+| SCK | BCLK | 12 (GPIO18) |
+
+**MCLK is absent, so the bridge is the master.** It drives BCLK and LRCK, and
+the P4 has to receive in slave mode. The sample rate is whatever the source
+sends, and it can change while the link runs - the TC358743 reports it over
+I2C, so it need not be guessed.
+
+**Wire the ground even though the two boards already share one.** The CSI ribbon
+ties them together and three wires would probably work. But the return current
+for I2S would then take the long way round through that ribbon, and the ribbon
+carries the MIPI pairs, which spend half their time in single-ended LP mode
+referenced to the same ground. The wire is in the cable already.
+
+A board with a Raspberry Pi header takes the cable in the positions above
+without rewiring: on the ESP32-P4 Function EV, pins 6, 12, 35 and 38 are GND,
+GPIO22, GPIO53 and GPIO27. Watch pin 12 there - GPIO22 is also the round LCD's
+default chip select, so a device wearing both wants one of the two moved.
+
+The ETH board is not arranged that way. Pick any three free pins: 15, 16 and 17
+sit together beside a ground pad, and the whole of that row stays clear of the
+display, whose five defaults are all on the other one. Every board's header
+table is still `headerVerified = false`, so read the silkscreen before
+soldering.
+
+The voltage the C790 drives those pins at has not been measured either. At
+1.8 V rather than 3.3 V the P4 would not read a logic high, and the link would
+need a level shifter.
 
 ## Things that turned out not to be true
 

@@ -88,19 +88,28 @@ needed.
 
 ## To the ESP32-P4
 
-Pick any free GPIO for each signal. On the Waveshare ESP32-P4-ETH these are safe
-defaults (not used by the capture, Ethernet, microSD, USB or console UART, and
-not strapping pins):
+Each signal takes one GPIO. The two buttons arrive filled in with pins that are
+free on the board the firmware was built for; the LED does not, because it is
+the optional wire:
 
-| Signal | Setting | Suggested GPIO |
+| Signal | Setting | Default GPIO |
 |---|---|---|
-| Power button output | `atx_pwr_gpio` | 20 |
-| Reset button output | `atx_rst_gpio` | 21 |
-| Power LED input | `atx_led_gpio` | 22 |
+| Power button output | `atx_pwr_gpio` | 46 |
+| Reset button output | `atx_rst_gpio` | 47 |
+| Power LED input | `atx_led_gpio` | unassigned - 48 is free for it (3 on the Guition) |
 
-Confirm those pins are broken out on your board's 40-pin header. GPIO 9-13 are
-left free deliberately - the board routes its I2S there for a future HDMI-audio
-capture.
+The LED is left unassigned on purpose. Its input is biased toward "off", so a
+pin that nobody wired would report the target as powered down for ever, and no
+reading is better than a wrong one. Set it when the third wire is actually
+there.
+
+Any other free pin does as well - the console's Pins tab draws the header of the
+board it is running on, so you can see where the wire actually goes.
+
+You cannot put two things on one pin: a setting naming a GPIO that the board's
+own hardware holds, or that another setting is already using, is refused and
+says which. The defaults are chosen not to collide with the status display's,
+so a device wearing both needs nothing moved.
 
 On the module, the `IN` terminals are the input (driven side) and the `V`
 terminals are the output (switched side): for the two button channels the ESP32
@@ -114,8 +123,8 @@ Under **Settings -> Power**:
 | Setting | Meaning | Default |
 |---|---|---|
 | `atx_enable` | Turn ATX control on | off |
-| `atx_pwr_gpio` | Power button GPIO | -1 (off) |
-| `atx_rst_gpio` | Reset button GPIO | -1 (off) |
+| `atx_pwr_gpio` | Power button GPIO | 46 |
+| `atx_rst_gpio` | Reset button GPIO | 47 |
 | `atx_led_gpio` | Power LED sense GPIO | -1 (no sensing) |
 | `atx_short_ms` | Normal press length | 200 ms |
 | `atx_long_ms` | Hard-off hold length | 5000 ms |

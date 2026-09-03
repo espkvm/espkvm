@@ -15,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_private/esp_cache_private.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -37,8 +38,7 @@
 
 #include "kvm_caps.h"
 #include "kvm_settings.h"
-#include "tc358743.h"
-#include "tc358743_hdmi_debug.h"
+#include "kvm_bridge.h"
 
 static esp_cam_ctlr_handle_t s_cam;
 static isp_proc_handle_t s_isp_bypass;
@@ -82,7 +82,7 @@ i2c_master_bus_handle_t capture_i2c_bus(void)
     return s_i2c_bus;
 }
 
-static void tc358743_resetn_pulse(void)
+static void bridge_resetn_pulse(void)
 {
 #if CONFIG_KVM_TC358743_RST_GPIO >= 0
     const int rst = CONFIG_KVM_TC358743_RST_GPIO;
@@ -98,21 +98,24 @@ static void tc358743_resetn_pulse(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(rst, 1);
     vTaskDelay(pdMS_TO_TICKS(200));
-    ESP_LOGI(CAPTURE_LOG_TAG, "TC358743 RESETN released on GPIO %d", rst);
+    ESP_LOGI(CAPTURE_LOG_TAG, "capture board RESETN released on GPIO %d", rst);
 #else
-    ESP_LOGW(CAPTURE_LOG_TAG, "TC358743 RESETN not wired - waiting 500 ms for internal POR");
+    ESP_LOGW(CAPTURE_LOG_TAG, "capture RESETN not wired - waiting 500 ms for internal POR");
     vTaskDelay(pdMS_TO_TICKS(500));
 #endif
 }
 
-static void wait_tc358743_pixel_stream(tc358743_t *tc, uint32_t timeout_ms)
+static void wait_bridge_pixel_stream(const kvm_bridge_t *b, uint32_t timeout_ms)
 {
     const uint32_t step = 50;
     uint32_t waited = 0;
     while (waited < timeout_ms) {
-        uint8_t st = 0;
-        if (tc358743_sys_status(tc, &st) == ESP_OK && (st & TC358743_SYS_TMDS) != 0 && (st & TC358743_SYS_SYNC) != 0) {
-            ESP_LOGI(CAPTURE_LOG_TAG, "HDMI ready SYS_STATUS=0x%02x after %u ms", st, waited);
+        /* Read the decoded flags rather than picking bits out of the status
+         * byte: which bit means what is the chip's business, not ours. */
+        kvm_bridge_timings_t t = {0};
+        if (kvm_bridge_get_timings(b, &t) == ESP_OK && t.tmds && t.sync) {
+            ESP_LOGI(CAPTURE_LOG_TAG, "HDMI ready SYS_STATUS=0x%02x after %u ms", t.sys_status,
+                     waited);
             return;
         }
         vTaskDelay(pdMS_TO_TICKS(step));
@@ -373,7 +376,7 @@ capture_ctx_t *capture_hw_init_start(void)
     };
     ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_cfg, &ldo));
 
-    tc358743_resetn_pulse();
+    bridge_resetn_pulse();
 
     /* Usually already made - the display asks for it seconds before this. */
     ESP_ERROR_CHECK(capture_i2c_bus_init());
@@ -381,7 +384,7 @@ capture_ctx_t *capture_hw_init_start(void)
 
     /* A missing capture card must not take the whole device down: without it the
      * KVM still serves HID, and the web UI explains what is wrong. */
-    esp_err_t probe_err = tc358743_probe(i2c_bus, NULL, &s_cap.tc);
+    esp_err_t probe_err = kvm_bridge_detect(i2c_bus, &s_cap.bridge);
     if (probe_err != ESP_OK) {
         /* Nothing answered, so say the thing an operator can act on: the board
            or its ribbon, not an error code. Any other failure keeps the code. */
@@ -389,20 +392,21 @@ capture_ctx_t *capture_hw_init_start(void)
             kvm_cap_report(KVM_CAP_VIDEO, false,
                            "no capture board found - check the ribbon between it and the device");
         } else {
-            kvm_cap_report(KVM_CAP_VIDEO, false, "TC358743 not responding on I2C (%s)",
+            kvm_cap_report(KVM_CAP_VIDEO, false, "capture bridge not responding on I2C (%s)",
                            esp_err_to_name(probe_err));
         }
-        ESP_LOGE(CAPTURE_LOG_TAG, "TC358743 probe failed: %s", esp_err_to_name(probe_err));
+        ESP_LOGE(CAPTURE_LOG_TAG, "bridge detect failed: %s", esp_err_to_name(probe_err));
         return NULL;
     }
     /* The setting's choices are in the same order as the driver's enum. */
     const int32_t edid_choice = kvm_setting_int("edid_prof");
-    (void)tc358743_set_edid_profile(s_cap.tc, (tc358743_edid_profile_t)edid_choice);
+    (void)kvm_bridge_set_edid_profile(&s_cap.bridge, (kvm_bridge_edid_profile_t)edid_choice);
 
-    probe_err = tc358743_init_streaming(s_cap.tc);
+    probe_err = kvm_bridge_init_streaming(&s_cap.bridge);
     if (probe_err != ESP_OK) {
-        kvm_cap_report(KVM_CAP_VIDEO, false, "TC358743 init failed (%s)", esp_err_to_name(probe_err));
-        ESP_LOGE(CAPTURE_LOG_TAG, "TC358743 init failed: %s", esp_err_to_name(probe_err));
+        kvm_cap_report(KVM_CAP_VIDEO, false, "%s init failed (%s)", s_cap.bridge.name,
+                       esp_err_to_name(probe_err));
+        ESP_LOGE(CAPTURE_LOG_TAG, "%s init failed: %s", s_cap.bridge.name, esp_err_to_name(probe_err));
         return NULL;
     }
 
@@ -410,11 +414,11 @@ capture_ctx_t *capture_hw_init_start(void)
      * leaves it at RGB888; the direct-encode profile wants native UYVY422 (0x1e).
      * The bridge remembers this and re-applies it after every HDMI recovery. On
      * the RGB888 profile this is a no-op, so the rev < 3.0 board is unaffected. */
-    tc358743_set_csi_uyvy422(s_cap.tc, capture_pixfmt()->csi_dt == 0x1eu);
+    kvm_bridge_set_csi_uyvy422(&s_cap.bridge, capture_pixfmt()->csi_dt == 0x1eu);
 
     s_cap.tc_mu = xSemaphoreCreateMutex();
     if (!s_cap.tc_mu) {
-        ESP_LOGE(CAPTURE_LOG_TAG, "TC358743 mutex");
+        ESP_LOGE(CAPTURE_LOG_TAG, "bridge mutex");
         return NULL;
     }
 
@@ -451,15 +455,15 @@ capture_ctx_t *capture_hw_init_start(void)
         return NULL;
     }
 
-    ESP_ERROR_CHECK(tc358743_enable_hdmi_output(s_cap.tc));
-    wait_tc358743_pixel_stream(s_cap.tc, 5000);
+    ESP_ERROR_CHECK(kvm_bridge_enable_hdmi_output(&s_cap.bridge));
+    wait_bridge_pixel_stream(&s_cap.bridge, 5000);
 
     /* Start in whatever mode the source is actually sending. A machine that is
      * still in its firmware screens will not be at 1080p. */
     uint32_t hres = CAPTURE_MAX_H_RES;
     uint32_t vres = CAPTURE_MAX_V_RES;
-    tc358743_timings_t t = {0};
-    if (tc358743_get_timings(s_cap.tc, &t) == ESP_OK && tc358743_timings_valid(&t)) {
+    kvm_bridge_timings_t t = {0};
+    if (kvm_bridge_get_timings(&s_cap.bridge, &t) == ESP_OK && kvm_bridge_timings_valid(&t)) {
         hres = t.hact;
         vres = t.vact;
         s_cap.signal_present = true;
@@ -546,7 +550,7 @@ static void capture_drain_csi_done_sem(SemaphoreHandle_t sem)
 
 esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
 {
-    ESP_RETURN_ON_FALSE(c && c->tc && c->csi_done_sem, ESP_ERR_INVALID_ARG, CAPTURE_LOG_TAG, "ctx");
+    ESP_RETURN_ON_FALSE(c && c->bridge.ops && c->csi_done_sem, ESP_ERR_INVALID_ARG, CAPTURE_LOG_TAG, "ctx");
 
     ESP_LOGW(CAPTURE_LOG_TAG, "recovering: CSI teardown -> HDMI hotplug -> MIPI reapply -> restart");
 
@@ -554,24 +558,24 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
     capture_drain_csi_done_sem(c->csi_done_sem);
 
     if (!capture_tc_lock(c, 2000)) {
-        ESP_LOGW(CAPTURE_LOG_TAG, "recover: TC358743 busy");
+        ESP_LOGW(CAPTURE_LOG_TAG, "recover: bridge busy");
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t er = tc358743_hdmi_hotplug_reset(c->tc);
+    esp_err_t er = kvm_bridge_hotplug_reset(&c->bridge);
     if (er != ESP_OK) {
-        ESP_LOGW(CAPTURE_LOG_TAG, "tc358743_hdmi_hotplug_reset: %s", esp_err_to_name(er));
+        ESP_LOGW(CAPTURE_LOG_TAG, "hotplug reset: %s", esp_err_to_name(er));
     }
-    wait_tc358743_pixel_stream(c->tc, 5000);
-    er = tc358743_reapply_csi_path_after_hdmi(c->tc);
+    wait_bridge_pixel_stream(&c->bridge, 5000);
+    er = kvm_bridge_reapply_csi_path(&c->bridge);
     if (er != ESP_OK) {
-        ESP_LOGW(CAPTURE_LOG_TAG, "tc358743_reapply_csi_path_after_hdmi: %s", esp_err_to_name(er));
+        ESP_LOGW(CAPTURE_LOG_TAG, "reapply CSI path: %s", esp_err_to_name(er));
     }
 
     /* The source may well have come back in a different mode than it left in. */
     uint32_t hres = c->hres;
     uint32_t vres = c->vres;
-    tc358743_timings_t t = {0};
-    if (tc358743_get_timings(c->tc, &t) == ESP_OK && tc358743_timings_valid(&t)) {
+    kvm_bridge_timings_t t = {0};
+    if (kvm_bridge_get_timings(&c->bridge, &t) == ESP_OK && kvm_bridge_timings_valid(&t)) {
         hres = t.hact;
         vres = t.vact;
     }
@@ -595,6 +599,27 @@ esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c)
 }
 
 /*
+ * How long a source that is plainly there gets to start on its own before the
+ * bridge pretends to be unplugged and plugged back in, and how many times.
+ *
+ * The case this exists for is the order things are switched on. The bridge
+ * holds HPD low until this firmware has booted and started the capture, which
+ * is some seconds in; a machine that boots faster looks at the input, finds no
+ * monitor, and configures no output. Plenty of them never look again - it is
+ * common on single-board computers, whose display drivers probe once at start.
+ * Raising HPD later is not always enough either; what such a source acts on is
+ * the edge, which is what unplugging a real monitor gives it.
+ *
+ * It happens at ten seconds of silence, then twenty, then forty, and then it
+ * stops. The first one is the likeliest to work, and a source that is on and
+ * deliberately quiet should not be poked for ever. The count starts again when
+ * the picture comes back, and when the input is unplugged or plugged in - both
+ * mean the situation is a different one.
+ */
+#define HDMI_NUDGE_FIRST_MS 10000
+#define HDMI_NUDGE_MAX 3
+
+/*
  * Polls the bridge rather than using its interrupt line: the INT pin is not
  * wired on this adapter, and 200 ms is fast enough that a mode switch is
  * invisible next to the source's own retraining time.
@@ -606,22 +631,27 @@ static void capture_monitor_task(void *arg)
     uint32_t candidate_v = 0;
     int candidate_hits = 0;
     bool had_signal = c->signal_present;
+    /* Nudging state, all of it reset the moment the picture or the cable does
+     * something. -1 means "not counting": there is nothing to wait for. */
+    int64_t quiet_since_us = had_signal ? -1 : (int64_t)esp_timer_get_time();
+    int nudges = 0;
+    bool had_ddc5v = false;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(200));
         capture_status_tick();
 
-        tc358743_timings_t t = {0};
+        kvm_bridge_timings_t t = {0};
         if (!capture_tc_lock(c, 100)) {
             continue;
         }
-        esp_err_t er = tc358743_get_timings(c->tc, &t);
+        esp_err_t er = kvm_bridge_get_timings(&c->bridge, &t);
         capture_tc_unlock(c);
         if (er != ESP_OK) {
             continue;
         }
 
-        const bool valid = tc358743_timings_valid(&t);
+        const bool valid = kvm_bridge_timings_valid(&t);
         c->signal_present = valid;
         capture_status_set_signal(valid, t.sys_status);
 
@@ -630,14 +660,52 @@ static void capture_monitor_task(void *arg)
             if (had_signal) {
                 ESP_LOGW(CAPTURE_LOG_TAG, "HDMI signal lost (SYS_STATUS=0x%02x)", t.sys_status);
                 had_signal = false;
+                quiet_since_us = (int64_t)esp_timer_get_time();
+                nudges = 0;
                 /* Whatever was read off the screen describes a picture that is
                  * gone. Keeping it would let the console offer a copy of a
                  * screen the target is no longer showing. */
                 capture_screentext_forget();
                 capture_flat_forget();
             }
+
+            /*
+             * DDC5V is the one thing that tells the two silences apart. It is
+             * the source's own +5 V on the input, so with it there is a machine
+             * on the other end of the cable with the power on - and no picture
+             * from it is worth doing something about. Without it the target is
+             * off or nothing is plugged in, and hotplug cycles would be shouting
+             * at an empty room.
+             */
+            const bool ddc5v = t.ddc5v;
+            if (ddc5v != had_ddc5v) {
+                had_ddc5v = ddc5v;
+                quiet_since_us = (int64_t)esp_timer_get_time();
+                nudges = 0;
+            }
+            if (!ddc5v || quiet_since_us < 0 || nudges >= HDMI_NUDGE_MAX) {
+                continue;
+            }
+            const int64_t due_ms = (int64_t)HDMI_NUDGE_FIRST_MS << nudges;
+            if ((int64_t)esp_timer_get_time() - quiet_since_us < due_ms * 1000) {
+                continue;
+            }
+            nudges++;
+            ESP_LOGW(CAPTURE_LOG_TAG,
+                     "powered source, no picture for %lld s - offering it a fresh hotplug (%d/%d)",
+                     (long long)(due_ms / 1000), nudges, HDMI_NUDGE_MAX);
+            if (capture_tc_lock(c, 1000)) {
+                esp_err_t ner = kvm_bridge_hotplug_reset(&c->bridge);
+                capture_tc_unlock(c);
+                if (ner != ESP_OK) {
+                    ESP_LOGW(CAPTURE_LOG_TAG, "hotplug: %s", esp_err_to_name(ner));
+                }
+            }
             continue;
         }
+        quiet_since_us = -1;
+        nudges = 0;
+        had_ddc5v = true;
 
         /* Require the same reading twice: the counters are latched live and read
          * as nonsense for a few milliseconds while a source changes mode. */

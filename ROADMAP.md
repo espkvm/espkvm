@@ -33,7 +33,7 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 
 ## Planned
 
-- **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser
+- **HDMI audio** - capture the I2S audio from the bridge and stream it to the browser. The C790 brings it out on a connector of its own, so it costs four wires to the ESP32-P4 and the P4 receives as the slave
 - **More supported boards**
 - **Tell the console how the target's monitors are arranged** - an absolute pointer addresses the target's whole desktop, so a second display makes the pointer travel further than the mouse and half the picture aim at a screen you cannot see. Give the desktop's size and where the captured screen sits inside it, and the console maps into that part instead - absolute pointing that lands where it is aimed on a multi-monitor target, without falling back to relative
 - **Install your own EDID** - the built-in profiles cover the common cases; this takes a binary from a monitor that works, for the target that only likes its own

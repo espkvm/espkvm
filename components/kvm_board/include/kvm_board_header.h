@@ -51,6 +51,33 @@ typedef struct {
     const kvm_board_pin_t *right; /**< NULL for a single column */
 } kvm_board_header_t;
 
+/**
+ * A pin the board's own hardware holds, and what holds it.
+ *
+ * These are not settings: nobody can move the Ethernet PHY or the capture bus
+ * off its pins from the console. They are listed so the pin pickers can refuse
+ * them, and so a settings write that names one comes back with the reason
+ * rather than a device that quietly stops answering.
+ */
+typedef struct {
+    int8_t gpio;      /**< negative when this build has no such peripheral */
+    const char *use;  /**< what holds it, in the words the console shows */
+} kvm_board_reserved_t;
+
+/**
+ * Every pin a fixed peripheral holds on this board.
+ *
+ * Entries with a negative @c gpio are peripherals this build does not have -
+ * skip them. The list is compiled per board out of the same Kconfig values the
+ * drivers use, so it cannot drift from what is actually claimed.
+ *
+ * @param[out] count how many entries there are
+ */
+const kvm_board_reserved_t *kvm_board_reserved(size_t *count);
+
+/** @return what holds @p gpio, or NULL when nothing fixed does. */
+const char *kvm_board_reserved_by(int gpio);
+
 /** What to call this board in the interface. */
 const char *kvm_board_name(void);
 

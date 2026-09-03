@@ -887,16 +887,6 @@ esp_err_t tc358743_get_timings(tc358743_t *d, tc358743_timings_t *out)
     return ESP_OK;
 }
 
-bool tc358743_timings_valid(const tc358743_timings_t *t)
-{
-    if (!t || !t->tmds || !t->sync) {
-        return false;
-    }
-    /* Guard against half-latched counters while the source retrains: a mode is
-     * only believable if the active area fits inside the total. */
-    return t->hact >= 320u && t->vact >= 200u && t->htotal > t->hact && t->vtotal > t->vact;
-}
-
 esp_err_t tc358743_get_avi_color_format(tc358743_t *d, uint8_t *out_y)
 {
     if (!d || !out_y) {

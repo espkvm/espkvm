@@ -14,9 +14,13 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES
-        tc358743
+        kvm_bridge
         kvm_config
     PRIV_REQUIRES
+        # The capture path never names a bridge driver - it asks kvm_bridge which
+        # one answered - but a driver still has to be in the image to register
+        # itself, so the ones this firmware ships are required here.
+        tc358743
         kvm_board
         kvm_screentext
         espressif__esp_h264

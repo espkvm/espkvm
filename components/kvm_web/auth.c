@@ -627,23 +627,34 @@ bool kvm_auth_origin_ok(httpd_req_t *req)
  * without a token to keep in sync. Uploads, which are octet-stream by nature,
  * pass on the header.
  */
-static bool intentional_write(httpd_req_t *req)
+typedef enum {
+    WRITE_MEANT,          /**< go on to check the session */
+    WRITE_FOREIGN_ORIGIN, /**< a browser sent it from another site */
+    WRITE_UNMARKED,       /**< neither JSON nor our header: it may be a form */
+} write_verdict_t;
+
+static write_verdict_t write_verdict(httpd_req_t *req)
 {
     if (req->method != HTTP_POST && req->method != HTTP_PUT && req->method != HTTP_DELETE) {
-        return true;
+        return WRITE_MEANT;
     }
     if (!kvm_auth_origin_ok(req)) {
-        return false;
+        return WRITE_FOREIGN_ORIGIN;
     }
     char v[64];
     if (httpd_req_get_hdr_value_str(req, KVM_CONSOLE_HEADER, v, sizeof(v)) == ESP_OK) {
-        return true;
+        return WRITE_MEANT;
     }
     if (httpd_req_get_hdr_value_str(req, "Content-Type", v, sizeof(v)) == ESP_OK &&
         strncasecmp(v, "application/json", strlen("application/json")) == 0) {
-        return true;
+        return WRITE_MEANT;
     }
-    return false;
+    return WRITE_UNMARKED;
+}
+
+static bool intentional_write(httpd_req_t *req)
+{
+    return write_verdict(req) == WRITE_MEANT;
 }
 
 bool kvm_auth_check(httpd_req_t *req)
@@ -701,8 +712,31 @@ esp_err_t kvm_auth_reject_ws(httpd_req_t *req)
 esp_err_t kvm_auth_challenge(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_status(req, "401 Unauthorized");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    /*
+     * "authentication required" is the wrong thing to say when the session was
+     * never looked at. A write that carries neither JSON nor our own header is
+     * refused by the rule above, and answering 401 sends whoever wrote the
+     * script hunting for a login problem they do not have - so say which rule
+     * turned them away. Nothing is given away by it: the two things a caller is
+     * told to send are exactly the two a form on another site cannot.
+     */
+    switch (write_verdict(req)) {
+    case WRITE_FOREIGN_ORIGIN:
+        httpd_resp_set_status(req, "403 Forbidden");
+        return httpd_resp_send(req, "{\"error\":\"this request came from another site\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    case WRITE_UNMARKED:
+        httpd_resp_set_status(req, "403 Forbidden");
+        return httpd_resp_send(req,
+                               "{\"error\":\"a write must say it is meant: send "
+                               "Content-Type: application/json, or the " KVM_CONSOLE_HEADER
+                               " header when the body is not JSON\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    case WRITE_MEANT:
+        break;
+    }
+    httpd_resp_set_status(req, "401 Unauthorized");
     return httpd_resp_send(req, "{\"error\":\"authentication required\"}", HTTPD_RESP_USE_STRLEN);
 }
 

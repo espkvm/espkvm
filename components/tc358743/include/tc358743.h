@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include "driver/i2c_master.h"
 #include "esp_err.h"
+#include "kvm_bridge.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,27 +25,20 @@ extern "C" {
 
 typedef struct tc358743 tc358743_t;
 
-/** Which mode list the bridge advertises to the source over DDC. */
-typedef enum {
-    TC358743_EDID_FULL = 0,     /**< 640x480 up to 1920x1080@30 */
-    TC358743_EDID_1080P30 = 1,  /**< single mode, for sources that reject the full list */
-    TC358743_EDID_720P = 2,     /**< the same list without 1080p, 1280x720 preferred */
-    TC358743_EDID_1024X768 = 3, /**< everything up to 1024x768, which is preferred */
-} tc358743_edid_profile_t;
+/*
+ * The mode list and the measured timing are the same things every bridge deals
+ * in, so they are declared once in kvm_bridge.h and named here for the code
+ * that predates it. The EDID values are what this chip's profile table is
+ * indexed by, and the enum they alias fixes the same order.
+ */
+typedef kvm_bridge_edid_profile_t tc358743_edid_profile_t;
+#define TC358743_EDID_FULL KVM_BRIDGE_EDID_FULL         /**< 640x480 up to 1920x1080@30 */
+#define TC358743_EDID_1080P30 KVM_BRIDGE_EDID_1080P30   /**< one mode, for a source that rejects a list */
+#define TC358743_EDID_720P KVM_BRIDGE_EDID_720P         /**< the same list without 1080p */
+#define TC358743_EDID_1024X768 KVM_BRIDGE_EDID_1024X768 /**< everything up to 1024x768 */
 
 /** Input timing as measured by the bridge, plus the link state that qualifies it. */
-typedef struct {
-    uint16_t hact;   /**< active pixels per line */
-    uint16_t vact;   /**< active lines per frame (per field when interlaced) */
-    uint16_t htotal; /**< including blanking */
-    uint16_t vtotal; /**< including blanking */
-    uint8_t sys_status;
-    bool ddc5v;     /**< source is powering the DDC line, i.e. a cable is attached */
-    bool tmds;      /**< TMDS clock detected */
-    bool hdmi_mode; /**< HDMI rather than DVI signalling */
-    bool sync;      /**< horizontal and vertical sync locked */
-    bool interlaced;
-} tc358743_timings_t;
+typedef kvm_bridge_timings_t tc358743_timings_t;
 
 typedef struct {
     uint32_t refclk_hz;
@@ -148,7 +142,8 @@ esp_err_t tc358743_sys_status(tc358743_t *dev, uint8_t *out_st);
 esp_err_t tc358743_get_timings(tc358743_t *dev, tc358743_timings_t *out);
 
 /** True when the measurement is usable: TMDS locked, sync locked, sane size. */
-bool tc358743_timings_valid(const tc358743_timings_t *t);
+/** The shared rule; kept under this name for the code that used it. */
+#define tc358743_timings_valid kvm_bridge_timings_valid
 
 /**
  * Read CEA-861 AVI InfoFrame colorimetry (PB1 bits 7..5: Y2:Y1:Y0).

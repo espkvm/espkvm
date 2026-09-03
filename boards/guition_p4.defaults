@@ -90,3 +90,20 @@ CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 # Which board this is: names it in the console and picks the expansion header
 # the Pins tab draws.
 CONFIG_KVM_BOARD_GUITION=y
+
+# Pin defaults, cut to what this board actually brings out.
+#
+# Its 2x13 header carries eleven P4 GPIOs and one of them (45) is the microSD's
+# power gate, so ten are free - the narrowest header of any board here. The
+# generic defaults put the round LCD on 20, 21, 22, 26 and 33, and only 20 and
+# 33 of those exist on this connector, so a panel wired by them could never
+# work. The seven below are the display and the two ATX buttons on pins that are
+# really there, none of them twice. That leaves 1, 2 and 3 - and 3 is the one to
+# use if you also want the power LED sensed.
+CONFIG_KVM_DISP_SCLK_GPIO=20
+CONFIG_KVM_DISP_MOSI_GPIO=5
+CONFIG_KVM_DISP_CS_GPIO=32
+CONFIG_KVM_DISP_DC_GPIO=33
+CONFIG_KVM_DISP_RST_GPIO=4
+CONFIG_KVM_ATX_PWR_GPIO=46
+CONFIG_KVM_ATX_RST_GPIO=47
