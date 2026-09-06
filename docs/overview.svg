@@ -7,27 +7,30 @@
     the target machine, and USB-C to a supply of its own. Drawn to scale, seven
     pixels to the millimetre; the wiring is schematic.</desc>
   <style>
-    .bg{fill:#0e1116}
-    .pcb{fill:#161b22;stroke:#2a313c;stroke-width:2}
-    .pcb-accent{stroke:#4c9aff}
-    .part{fill:none;stroke:#9aa7b4;stroke-width:1.5;stroke-linejoin:round}
-    .part-accent{fill:none;stroke:#4c9aff;stroke-width:1.5}
-    .metal{fill:#12171e;stroke:#9aa7b4;stroke-width:1.5}
-    .pad{fill:none;stroke:#9aa7b4;stroke-width:1.2}
-    .lead{fill:none;stroke:#6b7885;stroke-width:1.1}
-    .wire{fill:none;stroke:#6b7885;stroke-width:1.2;opacity:0.85}
-    .cable{fill:none;stroke:#9aa7b4;stroke-width:3;stroke-linecap:round}
-    .ffc{fill:rgba(76,154,255,0.16);stroke:#4c9aff;stroke-width:1.4}
-    .ffc-line{fill:none;stroke:#4c9aff;stroke-width:0.8;opacity:0.45}
-    .ffc-end{fill:none;stroke:#4c9aff;stroke-width:3;opacity:0.7}
-    .glass{fill:#12171e;stroke:#9aa7b4;stroke-width:1.5}
-    .screen{fill:#12171e;stroke:#4c9aff;stroke-width:1.6}
-    .lit{fill:#4c9aff}
-    .sub{fill:#9aa7b4;font-family:system-ui,sans-serif;font-size:11px}
-    .name{fill:#e6edf3;font-family:system-ui,sans-serif;font-size:13px;font-weight:600}
-    .size{fill:#6b7885;font-family:ui-monospace,monospace;font-size:11px}
-    .boxname{fill:#e6edf3;font-family:system-ui,sans-serif;font-size:13px;font-weight:600}
-    .boxsub{fill:#6b7885;font-family:system-ui,sans-serif;font-size:11px}
+  .bg{fill:#0e1116}
+  .pcb{fill:#161b22;stroke:#2a313c;stroke-width:2}
+  .pcb-accent{stroke:#4c9aff}
+  .part{fill:none;stroke:#9aa7b4;stroke-width:1.5;stroke-linejoin:round}
+  .part-accent{fill:none;stroke:#4c9aff;stroke-width:1.5}
+  .metal{fill:#12171e;stroke:#9aa7b4;stroke-width:1.5}
+  .pad{fill:none;stroke:#9aa7b4;stroke-width:1.2}
+  .lead{fill:none;stroke:#6b7885;stroke-width:1.1}
+  .tag{fill:#9aa7b4;font-family:ui-monospace,monospace;font-size:11px}
+  .tagv{fill:#9aa7b4;font-family:ui-monospace,monospace;font-size:9px}
+  .wire{fill:none;stroke:#6b7885;stroke-width:1.2;opacity:0.85}
+  .cable{fill:none;stroke:#9aa7b4;stroke-width:3;stroke-linecap:round}
+  .boxname{fill:#e6edf3;font-family:system-ui;font-size:13px;font-weight:600}
+  .boxsub{fill:#9aa7b4;font-family:system-ui;font-size:11px}
+  .ffc{fill:rgba(76,154,255,0.16);stroke:#4c9aff;stroke-width:1.4}
+  .ffc-line{fill:none;stroke:#4c9aff;stroke-width:0.8;opacity:0.45}
+  .ffc-end{fill:none;stroke:#4c9aff;stroke-width:3;opacity:0.7}
+  .glass{fill:#12171e;stroke:#9aa7b4;stroke-width:1.5}
+  .screen{fill:#12171e;stroke:#4c9aff;stroke-width:1.6}
+  .lit{fill:#4c9aff}
+  .sub{fill:#d7e0e8;font-family:system-ui;font-size:11px}
+  .name{fill:#e6edf3;font-family:system-ui;font-size:13px;font-weight:600}
+  /* board sizes are kept but not shown: drop the display line to bring them back */
+  .size{fill:#9aa7b4;font-family:ui-monospace,monospace;font-size:11px;display:none}
   </style>
   <rect class="bg" x="0" y="-40" width="1200" height="920"/>
 
@@ -119,11 +122,8 @@
     <path class="pad" d="M438 114.1h12"/>
     <path class="pad" d="M438 120.8h12"/>
     <rect class="metal" x="500" y="48" width="58" height="52" rx="13"/>
-    <rect class="part" x="512" y="60" width="34" height="28" rx="14"/>
-    <path class="lead" d="M74 123v40"/>
-    <text class="sub" x="74" y="178" text-anchor="middle">Ethernet</text>
-    <path class="lead" d="M529 48v-88"/>
-    <text class="sub" x="529" y="-48" text-anchor="middle">USB-C</text>
+    <text class="sub" x="74" y="80" text-anchor="middle">Ethernet</text>
+    <text class="sub" x="529" y="78" text-anchor="middle">USB-C</text>
   </g>
 
   <text class="name" x="120" y="304">Geekworm C790</text>
@@ -147,8 +147,12 @@
     <path class="pad" d="M250 127.4h12"/>
     <path class="pad" d="M250 134.1h12"/>
     <path class="pad" d="M250 140.8h12"/>
-    <rect class="part" x="150" y="14" width="58" height="26" rx="3"/>
-    <path class="part" d="M160 14v26M170 14v26M180 14v26M190 14v26M200 14v26"/>
+    <rect class="part" x="153" y="11" width="52" height="32" rx="2"/>
+    <circle class="part" cx="161.50" cy="27" r="3"/>
+    <circle class="part" cx="170.25" cy="27" r="3"/>
+    <circle class="part" cx="179.00" cy="27" r="3"/>
+    <circle class="part" cx="187.75" cy="27" r="3"/>
+    <circle class="part" cx="196.50" cy="27" r="3"/>
     <rect class="part" x="110" y="88" width="66" height="66" rx="4"/>
     <path class="part" d="M110 102h-9M110 116h-9M110 130h-9M110 144h-9M176 102h9M176 116h9M176 130h9M176 144h9"/>
     <path class="part" d="M124 88v-9M138 88v-9M152 88v-9M124 154v9M138 154v9M152 154v9"/>
@@ -157,12 +161,11 @@
     <circle class="part" cx="291" cy="24" r="8"/>
     <circle class="part" cx="24" cy="186" r="8"/>
     <circle class="part" cx="291" cy="186" r="8"/>
-    <path class="lead" d="M24 157v60"/>
-    <text class="sub" x="24" y="232" text-anchor="middle">HDMI in</text>
+    <text class="sub" x="24" y="110" text-anchor="middle">HDMI in</text>
     <path class="lead" d="M143 154v63"/>
     <text class="sub" x="143" y="232" text-anchor="middle">TC358743</text>
-    <path class="lead" d="M179 14v-24"/>
-    <text class="sub" x="179" y="-16" text-anchor="middle">I2S audio, unused</text>
+    <path class="lead" d="M179 43 V246 Q 179 256 189 256 H 224"/>
+    <text class="sub" x="230" y="260" text-anchor="start">I2S audio, unused</text>
   </g>
 
 
@@ -177,8 +180,8 @@
     <path class="ffc-end" d="M368 380v99"/>
   </g>
 
-  <text class="name" x="800" y="20">I2C OLED &#8212; SSD1306</text>
-  <text class="size" x="800" y="36">27 &#215; 27 mm</text>
+  <text class="name" x="800" y="256">I2C OLED &#8212; SSD1306</text>
+  <text class="size" x="800" y="272">27 &#215; 27 mm</text>
   <g transform="translate(600 -28)">
     <g>
       <rect class="pcb" x="200" y="70" width="189" height="191" rx="6"/>
@@ -190,11 +193,11 @@
       <circle class="pad" cx="284.8" cy="88" r="5"/>
       <circle class="pad" cx="302.6" cy="88" r="5"/>
       <circle class="pad" cx="320.4" cy="88" r="5"/>
-      <rect class="glass" x="208" y="106" width="173" height="116" rx="3"/>
-      <rect class="screen" x="216" y="114" width="152" height="76" rx="2"/>
-      <rect class="part" x="216" y="196" width="152" height="18" rx="2"/>
+      <rect class="glass" x="208" y="112" width="173" height="116" rx="3"/>
+      <rect class="screen" x="216" y="120" width="152" height="76" rx="2"/>
+      <rect class="part" x="216" y="202" width="152" height="18" rx="2"/>
     </g>
-    <g class="lit" transform="translate(234.7 94.7) scale(1.82)">
+    <g class="lit" transform="translate(234.7 100.7) scale(1.82)">
       <rect x="6" y="15" width="3" height="3" />
       <rect x="9" y="15" width="3" height="3" />
       <rect x="12" y="15" width="3" height="3" />
@@ -278,20 +281,20 @@
     </g>
   </g>
 
-  <text class="name" x="952" y="606" text-anchor="middle">Round LCD &#8212; GC9A01</text>
-  <text class="size" x="952" y="622" text-anchor="middle">37.5 mm across</text>
+  <text class="name" x="952" y="592" text-anchor="middle">Round LCD &#8212; GC9A01</text>
+  <text class="size" x="952" y="608" text-anchor="middle">37.5 mm across</text>
   <g transform="translate(612.0 241.0)">
     <g transform="rotate(90 340 200)">
       <rect class="pcb" x="247" y="298" width="186" height="82" rx="8"/>
-      <circle class="part" cx="267" cy="352" r="7"/>
-      <circle class="part" cx="413" cy="352" r="7"/>
-      <circle class="pad" cx="286.6" cy="352" r="5"/>
-      <circle class="pad" cx="304.4" cy="352" r="5"/>
-      <circle class="pad" cx="322.2" cy="352" r="5"/>
-      <circle class="pad" cx="340.0" cy="352" r="5"/>
-      <circle class="pad" cx="357.8" cy="352" r="5"/>
-      <circle class="pad" cx="375.6" cy="352" r="5"/>
-      <circle class="pad" cx="393.4" cy="352" r="5"/>
+      <circle class="part" cx="267" cy="366" r="7"/>
+      <circle class="part" cx="413" cy="366" r="7"/>
+      <circle class="pad" cx="286.6" cy="366" r="5"/>
+      <circle class="pad" cx="304.4" cy="366" r="5"/>
+      <circle class="pad" cx="322.2" cy="366" r="5"/>
+      <circle class="pad" cx="340.0" cy="366" r="5"/>
+      <circle class="pad" cx="357.8" cy="366" r="5"/>
+      <circle class="pad" cx="375.6" cy="366" r="5"/>
+      <circle class="pad" cx="393.4" cy="366" r="5"/>
     </g>
     <circle class="pcb" cx="340" cy="200" r="131"/>
     <circle class="glass" cx="340" cy="200" r="113"/>
@@ -381,18 +384,36 @@
   </g>
 
 
-    <g id="wires">
-    <path class="wire" d="M526.9 75 C 577 30, 807 22, 867.0 60"/>
-    <path class="wire" d="M562.5 75 C 612 40, 825 34, 884.8 60"/>
-    <path class="wire" d="M598.1 75 C 648 50, 843 46, 902.6 60"/>
-    <path class="wire" d="M633.7 75 C 684 60, 860 58, 920.4 60"/>
-    <path class="wire" d="M562.5 200 C 692 200, 712 387.6, 800 387.6"/>
-    <path class="wire" d="M580.3 200 C 710 200, 712 405.4, 800 405.4"/>
-    <path class="wire" d="M598.1 200 C 728 200, 712 423.2, 800 423.2"/>
-    <path class="wire" d="M615.9 200 C 746 200, 712 441.0, 800 441.0"/>
-    <path class="wire" d="M633.7 200 C 764 200, 712 458.8, 800 458.8"/>
-    <path class="wire" d="M651.5 200 C 782 200, 712 476.6, 800 476.6"/>
-    <path class="wire" d="M669.3 200 C 799 200, 712 494.4, 800 494.4"/>
+  
+  <g id="wiretags">
+    <text class="tag" x="797" y="390.6" text-anchor="start">33</text>
+    <text class="tag" x="797" y="408.4" text-anchor="start">22</text>
+    <text class="tag" x="797" y="426.2" text-anchor="start">26</text>
+    <text class="tag" x="797" y="444.0" text-anchor="start">21</text>
+    <text class="tag" x="797" y="461.8" text-anchor="start">20</text>
+    <text class="tag" x="797" y="479.6" text-anchor="start">GND</text>
+    <text class="tag" x="797" y="497.4" text-anchor="start">3V3</text>
+    <text class="tagv" transform="translate(869.5 82) rotate(-90)">3V3</text>
+    <text class="tagv" transform="translate(887.3 82) rotate(-90)">GND</text>
+    <text class="tagv" transform="translate(905.1 82) rotate(-90)">8</text>
+    <text class="tagv" transform="translate(922.9 82) rotate(-90)">7</text>
+  </g>
+
+  <g id="wires">
+    <!-- Right angles, one or two to a wire: straight down off the pad, then
+         straight across. GPIO 33 takes a step first, so it passes the capture
+         board rather than over it. -->
+    <path class="wire" d="M366.7 200 V290 Q 366.7 300 376.7 300 H 442 Q 452 300 452 310 V377.6 Q 452 387.6 462 387.6 H 786"/>
+    <path class="wire" d="M437.9 200 V260 Q 437.9 270 447.9 270 H 456 Q 466 270 466 280 V413.2 Q 466 423.2 476 423.2 H 786"/>
+    <path class="wire" d="M491.3 200 V395.4 Q 491.3 405.4 501.3 405.4 H 786"/>
+    <path class="wire" d="M526.9 200 V431.0 Q 526.9 441.0 536.9 441.0 H 786"/>
+    <path class="wire" d="M544.7 200 V448.8 Q 544.7 458.8 554.7 458.8 H 786"/>
+    <path class="wire" d="M562.5 200 V484.4 Q 562.5 494.4 572.5 494.4 H 786"/>
+    <path class="wire" d="M598.1 200 V466.6 Q 598.1 476.6 608.1 476.6 H 786"/>
+    <path class="wire" d="M348.9 75 V36 Q 348.9 26 358.9 26 H 910.4 Q 920.4 26 920.4 36 V 60"/>
+    <path class="wire" d="M366.7 75 V42 Q 366.7 32 376.7 32 H 892.6 Q 902.6 32 902.6 42 V 60"/>
+    <path class="wire" d="M331.1 75 V48 Q 331.1 38 341.1 38 H 874.8 Q 884.8 38 884.8 48 V 60"/>
+    <path class="wire" d="M562.5 200 V236 Q 562.5 246 572.5 246 H 690 Q 700 246 700 236 V60 Q 700 50 710 50 H 857 Q 867 50 867 60"/>
   </g>
 
 
@@ -411,7 +432,7 @@
          corridor of its own: nothing crosses a board or a caption. -->
     <path class="cable" d="M112 137 H 68 Q 36 137 36 172 V 646 Q 36 686 76 686 H 115"/>
     <path class="cable" d="M104 440 H 76 Q 56 440 56 472 V 592 Q 56 622 96 622 H 568 Q 600 622 600 660"/>
-    <path class="cable" d="M524 163 V 528 Q 524 560 556 560 H 613 Q 645 560 645 592 V 660"/>
+    <path class="cable" d="M524 163 V 219 Q 524 226 517 226 H 516.1 Q 509.1 226 509.1 233 V 528 Q 509.1 560 541.1 560 H 613 Q 645 560 645 592 V 660"/>
     <path class="cable" d="M678 138 H 712 Q 744 138 744 172 V 252 Q 744 290 784 290 H 1112 Q 1152 290 1152 330 V 606 Q 1152 640 1116 640 H 1076 Q 1040 640 1040 652"/>
 
     <!-- the router -->
@@ -443,5 +464,5 @@
     <text class="boxsub" x="1040" y="824" text-anchor="middle">its own supply, not the target</text>
   </g>
 
-  <text class="sub" x="620" y="878" text-anchor="middle">a status screen is optional &#8212; one or the other. Wiring shown schematically</text>
+  <text class="sub" x="620" y="878" text-anchor="middle">a status screen is optional &#8212; one or the other. Pins are the defaults; any free ones will do</text>
 </svg>
