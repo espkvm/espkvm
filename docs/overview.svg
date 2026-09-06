@@ -1,0 +1,447 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -40 1200 920" role="img"
+     aria-labelledby="t d">
+  <title id="t">What an ESP-KVM is made of, and what it plugs into</title>
+  <desc id="d">The Waveshare ESP32-P4-ETH board joined by a MIPI CSI-2 ribbon to a
+    Geekworm C790 capture board, with an optional status screen - an I2C OLED or a
+    round GC9A01 - wired to its pins. Ethernet goes to the network, HDMI and USB to
+    the target machine, and USB-C to a supply of its own. Drawn to scale, seven
+    pixels to the millimetre; the wiring is schematic.</desc>
+  <style>
+    .bg{fill:#0e1116}
+    .pcb{fill:#161b22;stroke:#2a313c;stroke-width:2}
+    .pcb-accent{stroke:#4c9aff}
+    .part{fill:none;stroke:#9aa7b4;stroke-width:1.5;stroke-linejoin:round}
+    .part-accent{fill:none;stroke:#4c9aff;stroke-width:1.5}
+    .metal{fill:#12171e;stroke:#9aa7b4;stroke-width:1.5}
+    .pad{fill:none;stroke:#9aa7b4;stroke-width:1.2}
+    .lead{fill:none;stroke:#6b7885;stroke-width:1.1}
+    .wire{fill:none;stroke:#6b7885;stroke-width:1.2;opacity:0.85}
+    .cable{fill:none;stroke:#9aa7b4;stroke-width:3;stroke-linecap:round}
+    .ffc{fill:rgba(76,154,255,0.16);stroke:#4c9aff;stroke-width:1.4}
+    .ffc-line{fill:none;stroke:#4c9aff;stroke-width:0.8;opacity:0.45}
+    .ffc-end{fill:none;stroke:#4c9aff;stroke-width:3;opacity:0.7}
+    .glass{fill:#12171e;stroke:#9aa7b4;stroke-width:1.5}
+    .screen{fill:#12171e;stroke:#4c9aff;stroke-width:1.6}
+    .lit{fill:#4c9aff}
+    .sub{fill:#9aa7b4;font-family:system-ui,sans-serif;font-size:11px}
+    .name{fill:#e6edf3;font-family:system-ui,sans-serif;font-size:13px;font-weight:600}
+    .size{fill:#6b7885;font-family:ui-monospace,monospace;font-size:11px}
+    .boxname{fill:#e6edf3;font-family:system-ui,sans-serif;font-size:13px;font-weight:600}
+    .boxsub{fill:#6b7885;font-family:system-ui,sans-serif;font-size:11px}
+  </style>
+  <rect class="bg" x="0" y="-40" width="1200" height="920"/>
+
+
+  <text class="name" x="120" y="32">Waveshare ESP32-P4-ETH</text>
+  <text class="size" x="120" y="48">78 &#215; 21 mm</text>
+  <g transform="translate(120,64)">
+    <rect class="pcb pcb-accent" x="0" y="0" width="546" height="147" rx="6"/>
+    <rect class="metal" x="-8" y="24" width="164" height="99" rx="3"/>
+    <circle class="part" cx="163" cy="24" r="5"/>
+    <circle class="part" cx="163" cy="123" r="5"/>
+    <circle class="pad" cx="175.5" cy="136" r="5"/>
+    <circle class="pad" cx="193.3" cy="136" r="5"/>
+    <circle class="pad" cx="211.1" cy="136" r="5"/>
+    <circle class="pad" cx="228.9" cy="136" r="5"/>
+    <circle class="pad" cx="246.7" cy="136" r="5"/>
+    <circle class="pad" cx="264.5" cy="136" r="5"/>
+    <circle class="pad" cx="282.3" cy="136" r="5"/>
+    <circle class="pad" cx="300.1" cy="136" r="5"/>
+    <circle class="pad" cx="317.9" cy="136" r="5"/>
+    <circle class="pad" cx="335.7" cy="136" r="5"/>
+    <circle class="pad" cx="353.5" cy="136" r="5"/>
+    <circle class="pad" cx="371.3" cy="136" r="5"/>
+    <circle class="pad" cx="389.1" cy="136" r="5"/>
+    <circle class="pad" cx="406.9" cy="136" r="5"/>
+    <circle class="pad" cx="424.7" cy="136" r="5"/>
+    <circle class="pad" cx="442.5" cy="136" r="5"/>
+    <circle class="pad" cx="460.3" cy="136" r="5"/>
+    <circle class="pad" cx="478.1" cy="136" r="5"/>
+    <circle class="pad" cx="495.9" cy="136" r="5"/>
+    <circle class="pad" cx="513.7" cy="136" r="5"/>
+    <circle class="pad" cx="175.5" cy="11" r="5"/>
+    <circle class="pad" cx="193.3" cy="11" r="5"/>
+    <circle class="pad" cx="211.1" cy="11" r="5"/>
+    <circle class="pad" cx="228.9" cy="11" r="5"/>
+    <circle class="pad" cx="246.7" cy="11" r="5"/>
+    <circle class="pad" cx="264.5" cy="11" r="5"/>
+    <circle class="pad" cx="282.3" cy="11" r="5"/>
+    <circle class="pad" cx="300.1" cy="11" r="5"/>
+    <circle class="pad" cx="317.9" cy="11" r="5"/>
+    <circle class="pad" cx="335.7" cy="11" r="5"/>
+    <circle class="pad" cx="353.5" cy="11" r="5"/>
+    <circle class="pad" cx="371.3" cy="11" r="5"/>
+    <circle class="pad" cx="389.1" cy="11" r="5"/>
+    <circle class="pad" cx="406.9" cy="11" r="5"/>
+    <circle class="pad" cx="424.7" cy="11" r="5"/>
+    <circle class="pad" cx="442.5" cy="11" r="5"/>
+    <circle class="pad" cx="460.3" cy="11" r="5"/>
+    <circle class="pad" cx="478.1" cy="11" r="5"/>
+    <circle class="pad" cx="495.9" cy="11" r="5"/>
+    <circle class="pad" cx="513.7" cy="11" r="5"/>
+    <rect class="part-accent" x="228" y="38" width="84" height="62" rx="4"/>
+    <rect class="part" x="198" y="50" width="22" height="22" rx="3"/>
+    <rect class="part-accent" x="352" y="20" width="20" height="107" rx="3"/>
+    <path class="pad" d="M356 27.0h12"/>
+    <path class="pad" d="M356 33.7h12"/>
+    <path class="pad" d="M356 40.4h12"/>
+    <path class="pad" d="M356 47.1h12"/>
+    <path class="pad" d="M356 53.8h12"/>
+    <path class="pad" d="M356 60.5h12"/>
+    <path class="pad" d="M356 67.2h12"/>
+    <path class="pad" d="M356 73.9h12"/>
+    <path class="pad" d="M356 80.6h12"/>
+    <path class="pad" d="M356 87.3h12"/>
+    <path class="pad" d="M356 94.0h12"/>
+    <path class="pad" d="M356 100.7h12"/>
+    <path class="pad" d="M356 107.4h12"/>
+    <path class="pad" d="M356 114.1h12"/>
+    <path class="pad" d="M356 120.8h12"/>
+    <rect class="part" x="388" y="50" width="32" height="49" rx="2"/>
+    <circle class="part" cx="404" cy="61.4" r="3"/>
+    <circle class="part" cx="404" cy="70.2" r="3"/>
+    <circle class="part" cx="404" cy="78.9" r="3"/>
+    <circle class="part" cx="404" cy="87.7" r="3"/>
+    <rect class="part" x="434" y="20" width="20" height="107" rx="3"/>
+    <path class="pad" d="M438 27.0h12"/>
+    <path class="pad" d="M438 33.7h12"/>
+    <path class="pad" d="M438 40.4h12"/>
+    <path class="pad" d="M438 47.1h12"/>
+    <path class="pad" d="M438 53.8h12"/>
+    <path class="pad" d="M438 60.5h12"/>
+    <path class="pad" d="M438 67.2h12"/>
+    <path class="pad" d="M438 73.9h12"/>
+    <path class="pad" d="M438 80.6h12"/>
+    <path class="pad" d="M438 87.3h12"/>
+    <path class="pad" d="M438 94.0h12"/>
+    <path class="pad" d="M438 100.7h12"/>
+    <path class="pad" d="M438 107.4h12"/>
+    <path class="pad" d="M438 114.1h12"/>
+    <path class="pad" d="M438 120.8h12"/>
+    <rect class="metal" x="500" y="48" width="58" height="52" rx="13"/>
+    <rect class="part" x="512" y="60" width="34" height="28" rx="14"/>
+    <path class="lead" d="M74 123v40"/>
+    <text class="sub" x="74" y="178" text-anchor="middle">Ethernet</text>
+    <path class="lead" d="M529 48v-88"/>
+    <text class="sub" x="529" y="-48" text-anchor="middle">USB-C</text>
+  </g>
+
+  <text class="name" x="120" y="304">Geekworm C790</text>
+  <text class="size" x="120" y="320">45 &#215; 30 mm</text>
+  <g transform="translate(120,336)">
+    <rect class="pcb" x="0" y="0" width="315" height="210" rx="8"/>
+    <rect class="metal" x="-16" y="52" width="80" height="105" rx="4"/>
+    <rect class="part-accent" x="246" y="40" width="20" height="107" rx="3"/>
+    <path class="pad" d="M250 47.0h12"/>
+    <path class="pad" d="M250 53.7h12"/>
+    <path class="pad" d="M250 60.4h12"/>
+    <path class="pad" d="M250 67.1h12"/>
+    <path class="pad" d="M250 73.8h12"/>
+    <path class="pad" d="M250 80.5h12"/>
+    <path class="pad" d="M250 87.2h12"/>
+    <path class="pad" d="M250 93.9h12"/>
+    <path class="pad" d="M250 100.6h12"/>
+    <path class="pad" d="M250 107.3h12"/>
+    <path class="pad" d="M250 114.0h12"/>
+    <path class="pad" d="M250 120.7h12"/>
+    <path class="pad" d="M250 127.4h12"/>
+    <path class="pad" d="M250 134.1h12"/>
+    <path class="pad" d="M250 140.8h12"/>
+    <rect class="part" x="150" y="14" width="58" height="26" rx="3"/>
+    <path class="part" d="M160 14v26M170 14v26M180 14v26M190 14v26M200 14v26"/>
+    <rect class="part" x="110" y="88" width="66" height="66" rx="4"/>
+    <path class="part" d="M110 102h-9M110 116h-9M110 130h-9M110 144h-9M176 102h9M176 116h9M176 130h9M176 144h9"/>
+    <path class="part" d="M124 88v-9M138 88v-9M152 88v-9M124 154v9M138 154v9M152 154v9"/>
+    <circle class="part" cx="119" cy="97" r="3"/>
+    <circle class="part" cx="24" cy="24" r="8"/>
+    <circle class="part" cx="291" cy="24" r="8"/>
+    <circle class="part" cx="24" cy="186" r="8"/>
+    <circle class="part" cx="291" cy="186" r="8"/>
+    <path class="lead" d="M24 157v60"/>
+    <text class="sub" x="24" y="232" text-anchor="middle">HDMI in</text>
+    <path class="lead" d="M143 154v63"/>
+    <text class="sub" x="143" y="232" text-anchor="middle">TC358743</text>
+    <path class="lead" d="M179 14v-24"/>
+    <text class="sub" x="179" y="-16" text-anchor="middle">I2S audio, unused</text>
+  </g>
+
+
+  <!-- the ribbon: out of each connector's mouth, sideways, its width the
+       length of the contact row -->
+  <g id="ribbon">
+    <path class="ffc" d="M472 84 C 372 150, 292 286, 366 376 L366 483 C 292 393, 372 257, 472 191 Z"/>
+    <path class="ffc-line" d="M472 111 C 372 177, 292 313, 366 403"/>
+    <path class="ffc-line" d="M472 138 C 372 204, 292 340, 366 430"/>
+    <path class="ffc-line" d="M472 165 C 372 231, 292 367, 366 457"/>
+    <path class="ffc-end" d="M474 88v99"/>
+    <path class="ffc-end" d="M368 380v99"/>
+  </g>
+
+  <text class="name" x="800" y="20">I2C OLED &#8212; SSD1306</text>
+  <text class="size" x="800" y="36">27 &#215; 27 mm</text>
+  <g transform="translate(600 -28)">
+    <g>
+      <rect class="pcb" x="200" y="70" width="189" height="191" rx="6"/>
+      <circle class="part" cx="216" cy="86" r="9"/>
+      <circle class="part" cx="373" cy="86" r="9"/>
+      <circle class="part" cx="216" cy="245" r="9"/>
+      <circle class="part" cx="373" cy="245" r="9"/>
+      <circle class="pad" cx="267.0" cy="88" r="5"/>
+      <circle class="pad" cx="284.8" cy="88" r="5"/>
+      <circle class="pad" cx="302.6" cy="88" r="5"/>
+      <circle class="pad" cx="320.4" cy="88" r="5"/>
+      <rect class="glass" x="208" y="106" width="173" height="116" rx="3"/>
+      <rect class="screen" x="216" y="114" width="152" height="76" rx="2"/>
+      <rect class="part" x="216" y="196" width="152" height="18" rx="2"/>
+    </g>
+    <g class="lit" transform="translate(234.7 94.7) scale(1.82)">
+      <rect x="6" y="15" width="3" height="3" />
+      <rect x="9" y="15" width="3" height="3" />
+      <rect x="12" y="15" width="3" height="3" />
+      <rect x="15" y="15" width="3" height="3" />
+      <rect x="18" y="15" width="3" height="3" />
+      <rect x="6" y="18" width="3" height="3" />
+      <rect x="6" y="21" width="3" height="3" />
+      <rect x="9" y="21" width="3" height="3" />
+      <rect x="12" y="21" width="3" height="3" />
+      <rect x="15" y="21" width="3" height="3" />
+      <rect x="6" y="24" width="3" height="3" />
+      <rect x="6" y="27" width="3" height="3" />
+      <rect x="9" y="27" width="3" height="3" />
+      <rect x="12" y="27" width="3" height="3" />
+      <rect x="15" y="27" width="3" height="3" />
+      <rect x="18" y="27" width="3" height="3" />
+      <rect x="24" y="15" width="3" height="3" />
+      <rect x="27" y="15" width="3" height="3" />
+      <rect x="30" y="15" width="3" height="3" />
+      <rect x="33" y="15" width="3" height="3" />
+      <rect x="36" y="15" width="3" height="3" />
+      <rect x="24" y="18" width="3" height="3" />
+      <rect x="24" y="21" width="3" height="3" />
+      <rect x="27" y="21" width="3" height="3" />
+      <rect x="30" y="21" width="3" height="3" />
+      <rect x="33" y="21" width="3" height="3" />
+      <rect x="36" y="21" width="3" height="3" />
+      <rect x="36" y="24" width="3" height="3" />
+      <rect x="24" y="27" width="3" height="3" />
+      <rect x="27" y="27" width="3" height="3" />
+      <rect x="30" y="27" width="3" height="3" />
+      <rect x="33" y="27" width="3" height="3" />
+      <rect x="36" y="27" width="3" height="3" />
+      <rect x="42" y="15" width="3" height="3" />
+      <rect x="45" y="15" width="3" height="3" />
+      <rect x="48" y="15" width="3" height="3" />
+      <rect x="51" y="15" width="3" height="3" />
+      <rect x="54" y="15" width="3" height="3" />
+      <rect x="42" y="18" width="3" height="3" />
+      <rect x="54" y="18" width="3" height="3" />
+      <rect x="42" y="21" width="3" height="3" />
+      <rect x="45" y="21" width="3" height="3" />
+      <rect x="48" y="21" width="3" height="3" />
+      <rect x="51" y="21" width="3" height="3" />
+      <rect x="54" y="21" width="3" height="3" />
+      <rect x="42" y="24" width="3" height="3" />
+      <rect x="42" y="27" width="3" height="3" />
+      <rect x="6" y="33" width="3" height="3" />
+      <rect x="18" y="33" width="3" height="3" />
+      <rect x="6" y="36" width="3" height="3" />
+      <rect x="15" y="36" width="3" height="3" />
+      <rect x="6" y="39" width="3" height="3" />
+      <rect x="9" y="39" width="3" height="3" />
+      <rect x="12" y="39" width="3" height="3" />
+      <rect x="6" y="42" width="3" height="3" />
+      <rect x="15" y="42" width="3" height="3" />
+      <rect x="6" y="45" width="3" height="3" />
+      <rect x="18" y="45" width="3" height="3" />
+      <rect x="24" y="33" width="3" height="3" />
+      <rect x="36" y="33" width="3" height="3" />
+      <rect x="24" y="36" width="3" height="3" />
+      <rect x="36" y="36" width="3" height="3" />
+      <rect x="24" y="39" width="3" height="3" />
+      <rect x="36" y="39" width="3" height="3" />
+      <rect x="27" y="42" width="3" height="3" />
+      <rect x="33" y="42" width="3" height="3" />
+      <rect x="30" y="45" width="3" height="3" />
+      <rect x="42" y="33" width="3" height="3" />
+      <rect x="54" y="33" width="3" height="3" />
+      <rect x="42" y="36" width="3" height="3" />
+      <rect x="45" y="36" width="3" height="3" />
+      <rect x="51" y="36" width="3" height="3" />
+      <rect x="54" y="36" width="3" height="3" />
+      <rect x="42" y="39" width="3" height="3" />
+      <rect x="48" y="39" width="3" height="3" />
+      <rect x="54" y="39" width="3" height="3" />
+      <rect x="42" y="42" width="3" height="3" />
+      <rect x="54" y="42" width="3" height="3" />
+      <rect x="42" y="45" width="3" height="3" />
+      <rect x="54" y="45" width="3" height="3" />
+    </g>
+  </g>
+
+  <text class="name" x="952" y="606" text-anchor="middle">Round LCD &#8212; GC9A01</text>
+  <text class="size" x="952" y="622" text-anchor="middle">37.5 mm across</text>
+  <g transform="translate(612.0 241.0)">
+    <g transform="rotate(90 340 200)">
+      <rect class="pcb" x="247" y="298" width="186" height="82" rx="8"/>
+      <circle class="part" cx="267" cy="352" r="7"/>
+      <circle class="part" cx="413" cy="352" r="7"/>
+      <circle class="pad" cx="286.6" cy="352" r="5"/>
+      <circle class="pad" cx="304.4" cy="352" r="5"/>
+      <circle class="pad" cx="322.2" cy="352" r="5"/>
+      <circle class="pad" cx="340.0" cy="352" r="5"/>
+      <circle class="pad" cx="357.8" cy="352" r="5"/>
+      <circle class="pad" cx="375.6" cy="352" r="5"/>
+      <circle class="pad" cx="393.4" cy="352" r="5"/>
+    </g>
+    <circle class="pcb" cx="340" cy="200" r="131"/>
+    <circle class="glass" cx="340" cy="200" r="113"/>
+    <circle class="part" cx="340" cy="200" r="104" opacity="0.3"/>
+    <g class="lit" transform="translate(251.8 111.8) scale(2.8)">
+      <rect x="6" y="15" width="3" height="3" />
+      <rect x="9" y="15" width="3" height="3" />
+      <rect x="12" y="15" width="3" height="3" />
+      <rect x="15" y="15" width="3" height="3" />
+      <rect x="18" y="15" width="3" height="3" />
+      <rect x="6" y="18" width="3" height="3" />
+      <rect x="6" y="21" width="3" height="3" />
+      <rect x="9" y="21" width="3" height="3" />
+      <rect x="12" y="21" width="3" height="3" />
+      <rect x="15" y="21" width="3" height="3" />
+      <rect x="6" y="24" width="3" height="3" />
+      <rect x="6" y="27" width="3" height="3" />
+      <rect x="9" y="27" width="3" height="3" />
+      <rect x="12" y="27" width="3" height="3" />
+      <rect x="15" y="27" width="3" height="3" />
+      <rect x="18" y="27" width="3" height="3" />
+      <rect x="24" y="15" width="3" height="3" />
+      <rect x="27" y="15" width="3" height="3" />
+      <rect x="30" y="15" width="3" height="3" />
+      <rect x="33" y="15" width="3" height="3" />
+      <rect x="36" y="15" width="3" height="3" />
+      <rect x="24" y="18" width="3" height="3" />
+      <rect x="24" y="21" width="3" height="3" />
+      <rect x="27" y="21" width="3" height="3" />
+      <rect x="30" y="21" width="3" height="3" />
+      <rect x="33" y="21" width="3" height="3" />
+      <rect x="36" y="21" width="3" height="3" />
+      <rect x="36" y="24" width="3" height="3" />
+      <rect x="24" y="27" width="3" height="3" />
+      <rect x="27" y="27" width="3" height="3" />
+      <rect x="30" y="27" width="3" height="3" />
+      <rect x="33" y="27" width="3" height="3" />
+      <rect x="36" y="27" width="3" height="3" />
+      <rect x="42" y="15" width="3" height="3" />
+      <rect x="45" y="15" width="3" height="3" />
+      <rect x="48" y="15" width="3" height="3" />
+      <rect x="51" y="15" width="3" height="3" />
+      <rect x="54" y="15" width="3" height="3" />
+      <rect x="42" y="18" width="3" height="3" />
+      <rect x="54" y="18" width="3" height="3" />
+      <rect x="42" y="21" width="3" height="3" />
+      <rect x="45" y="21" width="3" height="3" />
+      <rect x="48" y="21" width="3" height="3" />
+      <rect x="51" y="21" width="3" height="3" />
+      <rect x="54" y="21" width="3" height="3" />
+      <rect x="42" y="24" width="3" height="3" />
+      <rect x="42" y="27" width="3" height="3" />
+      <rect x="6" y="33" width="3" height="3" />
+      <rect x="18" y="33" width="3" height="3" />
+      <rect x="6" y="36" width="3" height="3" />
+      <rect x="15" y="36" width="3" height="3" />
+      <rect x="6" y="39" width="3" height="3" />
+      <rect x="9" y="39" width="3" height="3" />
+      <rect x="12" y="39" width="3" height="3" />
+      <rect x="6" y="42" width="3" height="3" />
+      <rect x="15" y="42" width="3" height="3" />
+      <rect x="6" y="45" width="3" height="3" />
+      <rect x="18" y="45" width="3" height="3" />
+      <rect x="24" y="33" width="3" height="3" />
+      <rect x="36" y="33" width="3" height="3" />
+      <rect x="24" y="36" width="3" height="3" />
+      <rect x="36" y="36" width="3" height="3" />
+      <rect x="24" y="39" width="3" height="3" />
+      <rect x="36" y="39" width="3" height="3" />
+      <rect x="27" y="42" width="3" height="3" />
+      <rect x="33" y="42" width="3" height="3" />
+      <rect x="30" y="45" width="3" height="3" />
+      <rect x="42" y="33" width="3" height="3" />
+      <rect x="54" y="33" width="3" height="3" />
+      <rect x="42" y="36" width="3" height="3" />
+      <rect x="45" y="36" width="3" height="3" />
+      <rect x="51" y="36" width="3" height="3" />
+      <rect x="54" y="36" width="3" height="3" />
+      <rect x="42" y="39" width="3" height="3" />
+      <rect x="48" y="39" width="3" height="3" />
+      <rect x="54" y="39" width="3" height="3" />
+      <rect x="42" y="42" width="3" height="3" />
+      <rect x="54" y="42" width="3" height="3" />
+      <rect x="42" y="45" width="3" height="3" />
+      <rect x="54" y="45" width="3" height="3" />
+    </g>
+  </g>
+
+
+    <g id="wires">
+    <path class="wire" d="M526.9 75 C 577 30, 807 22, 867.0 60"/>
+    <path class="wire" d="M562.5 75 C 612 40, 825 34, 884.8 60"/>
+    <path class="wire" d="M598.1 75 C 648 50, 843 46, 902.6 60"/>
+    <path class="wire" d="M633.7 75 C 684 60, 860 58, 920.4 60"/>
+    <path class="wire" d="M562.5 200 C 692 200, 712 387.6, 800 387.6"/>
+    <path class="wire" d="M580.3 200 C 710 200, 712 405.4, 800 405.4"/>
+    <path class="wire" d="M598.1 200 C 728 200, 712 423.2, 800 423.2"/>
+    <path class="wire" d="M615.9 200 C 746 200, 712 441.0, 800 441.0"/>
+    <path class="wire" d="M633.7 200 C 764 200, 712 458.8, 800 458.8"/>
+    <path class="wire" d="M651.5 200 C 782 200, 712 476.6, 800 476.6"/>
+    <path class="wire" d="M669.3 200 C 799 200, 712 494.4, 800 494.4"/>
+  </g>
+
+
+  <!-- the two things the drawing is really about -->
+  <path class="lead" d="M256 276 H 302"/>
+  <text class="sub" x="250" y="280" text-anchor="end">MIPI CSI-2 ribbon</text>
+  <path class="lead" d="M676 624 H 649"/>
+  <text class="sub" x="682" y="628" text-anchor="start">keyboard and mouse</text>
+
+  <!-- What the device is plugged into: one row along the bottom, evenly
+       spaced, tops on one line and labels on another. Every cable keeps to a
+       corridor of its own - none crosses a board or a caption. Schematic: the
+       cables say what goes where, not how they lie. -->
+  <g id="outside">
+    <!-- Every lead leaves its port square to the socket, then keeps to a
+         corridor of its own: nothing crosses a board or a caption. -->
+    <path class="cable" d="M112 137 H 68 Q 36 137 36 172 V 646 Q 36 686 76 686 H 115"/>
+    <path class="cable" d="M104 440 H 76 Q 56 440 56 472 V 592 Q 56 622 96 622 H 568 Q 600 622 600 660"/>
+    <path class="cable" d="M524 163 V 528 Q 524 560 556 560 H 613 Q 645 560 645 592 V 660"/>
+    <path class="cable" d="M678 138 H 712 Q 744 138 744 172 V 252 Q 744 290 784 290 H 1112 Q 1152 290 1152 330 V 606 Q 1152 640 1116 640 H 1076 Q 1040 640 1040 652"/>
+
+    <!-- the router -->
+    <rect class="part" x="115" y="660" width="170" height="52" rx="6"/>
+    <path class="part" d="M140.5 660 V626.5 A4.5 4.5 0 0 1 149.5 626.5 V660" transform="rotate(-22 145 660)"/>
+    <path class="part" d="M250.5 660 V626.5 A4.5 4.5 0 0 1 259.5 626.5 V660" transform="rotate(22 255 660)"/>
+    <circle class="part" cx="135" cy="700" r="3"/>
+    <circle class="part" cx="149" cy="700" r="3"/>
+    <circle class="part" cx="163" cy="700" r="3"/>
+    <path class="part" d="M200 676h60"/>
+
+    <!-- the target machine, as the box it usually is -->
+    <rect class="part" x="575" y="660" width="90" height="110" rx="6"/>
+    <path class="part" d="M589 684h62M589 698h62"/>
+    <circle class="part" cx="597" cy="726" r="6"/>
+    <path class="part" d="M615 744h36M615 754h36"/>
+
+    <!-- the supply: a plug of its own, not the target's port -->
+    <rect class="part" x="996" y="660" width="88" height="76" rx="10"/>
+    <path class="part" d="M1084 675.5 H1103.5 A4.5 4.5 0 0 1 1103.5 684.5 H1084"/>
+    <path class="part" d="M1084 711.5 H1103.5 A4.5 4.5 0 0 1 1103.5 720.5 H1084"/>
+    <rect class="part" x="1024" y="652" width="32" height="16" rx="3"/>
+
+    <text class="boxname" x="200" y="806" text-anchor="middle">your network</text>
+    <text class="boxsub" x="200" y="824" text-anchor="middle">Ethernet, 100 Mbit</text>
+    <text class="boxname" x="620" y="806" text-anchor="middle">the target machine</text>
+    <text class="boxsub" x="620" y="824" text-anchor="middle">HDMI out, and a USB port</text>
+    <text class="boxname" x="1040" y="806" text-anchor="middle">5 V power</text>
+    <text class="boxsub" x="1040" y="824" text-anchor="middle">its own supply, not the target</text>
+  </g>
+
+  <text class="sub" x="620" y="878" text-anchor="middle">a status screen is optional &#8212; one or the other. Wiring shown schematically</text>
+</svg>

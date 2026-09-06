@@ -23,6 +23,14 @@ The point is to reach a machine that has no working operating system - a BIOS
 screen, a boot menu, a kernel that will not come up - from a device that costs a
 fraction of a commercial KVM-over-IP.
 
+<p align="center">
+  <b><a href="https://espkvm.io/flash/">Flash a board from the browser &rarr;</a></b>
+  &nbsp;&middot;&nbsp;
+  <a href="https://demo.espkvm.io/">Try the console</a>
+  &nbsp;&middot;&nbsp;
+  <a href="#quick-start">Quick start</a>
+</p>
+
 <!-- The buttons sit below the description on purpose: a search engine quotes the
      first prose in this file, and that should say what the project is rather than
      ask for a star. The ask itself lives in Support, at the bottom. -->
@@ -33,6 +41,16 @@ fraction of a commercial KVM-over-IP.
 </p>
 
 ![The ESP-KVM console driving a real machine: its desktop, a right-click menu open on it, the live status bar, and the video settings panel.](docs/console.webp)
+
+**From whatever you have to hand.** The console is a web page, so the machine
+you drive the target from can be a laptop, a phone or a tablet - nothing to
+install on either end. Touch gets a trackpad and an on-screen keyboard rather
+than a shrunken desktop, the page can be installed from the browser to run
+full-screen like an app, and where the link is too thin for video the screen
+comes through as text.
+
+<!-- TODO: one image of the console on a laptop, a phone and a tablet side by
+     side. It is the fastest way to say "any device" and the table cannot. -->
 
 > **Built on [jrowny/p4kvm](https://github.com/jrowny/p4kvm).** The hard part -
 > bringing up the TC358743 and getting frames out of the ESP32-P4's CSI
@@ -47,32 +65,33 @@ Useful for what it does today, and honest about the rest.
 |---|---|
 | Video capture, following the target's resolution changes | works |
 | MJPEG streaming | works |
-| H.264 streaming | works; needs HTTPS in the browser (see below) |
+| H.264 streaming | works; needs HTTPS in the browser |
 | Keyboard, absolute and relative pointer, media keys | works |
-| Pasting text with a keyboard layout | works; US English, Russian, Czech, Ukrainian and Lithuanian. Characters the layout cannot produce are reported rather than guessed at |
-| Use from a phone or tablet (touch trackpad and on-screen keyboard) | works |
+| Waking a sleeping target from the keyboard | works; over USB, if the machine allows it. Otherwise Wake-on-LAN or the ATX button |
+| Pasting text with a keyboard layout | works; US English, Russian, Czech, Ukrainian, Lithuanian |
+| Use from a phone or tablet | works; touch trackpad and on-screen keyboard |
 | Multiple viewers, one in control at a time with takeover | works |
 | User-defined key macros | works |
 | Settings, capability reporting, diagnostics | works |
-| Settings to a file, and back | works; keep a copy of a working configuration, or bring a second device up like the first. Passwords and private keys are never in the file &mdash; the device does not serve them &mdash; and a device's own identity (hostname, static addresses) is left alone when a file is loaded |
+| Settings to a file, and back | works; no secrets in the file, and a device's own identity is left alone |
 | Firmware update over the network, with rollback | works |
-| HTTPS with a certificate the device issues itself | works; a downloadable CA you can trust to clear the warning and enable H.264 |
-| Bring your own TLS certificate | works; install your own cert and key (Settings, or `PUT /api/v1/tls/cert`), self-signed by default |
+| HTTPS with a certificate the device issues itself | works; the CA is downloadable, which also enables H.264 |
+| Bring your own TLS certificate | works; Settings, or `PUT /api/v1/tls/cert` |
 | Login, and a physical password reset | works |
 | Thermal protection | works |
-| Virtual media: boot the target from a disk image | works; from a FAT32 card (up to 4 GB each) or a small image in the device's own flash |
-| Reading a text screen as text (BIOS, boot loader, console) | works; select and copy with the mouse, or copy the whole screen, and read it *instead* of the video with the Text button &mdash; a screen is a couple of kilobytes, which is what makes a machine workable over a link that will not carry a picture. The row a menu is sitting on comes through: cells drawn the other way round are reported and shown inverted. Character modes only &mdash; a graphical UEFI setup is a picture and is not read. Screens up to 1024x768 are read as they come; wider ones, up to 1080p, are read while you ask for them |
-| Noticing a screen that is one flat colour | works; a modern Windows stop screen, a blanked output or a desktop that died into its background has no characters to read, but it is one colour and it stays &mdash; the device reports how long it has been that way, in the video readout and to Home Assistant |
-| Watching the screen for words while nobody is looking | works; off by default. Give it phrases (`no boot device`, `kernel panic`) and it alerts in the log and in Home Assistant when one appears, naming every phrase on screen, not only the first |
+| Virtual media: boot the target from a disk image | works; from a FAT32 card, or a small image in the device's own flash |
+| Reading a text screen as text (BIOS, boot loader, console) | works; select and copy with the mouse, or read the screen *instead* of the video - a couple of kilobytes where a picture will not fit. Character modes only |
+| Noticing a screen that is one flat colour | works; a stop screen or a blanked output has no characters, but it is one colour and it stays |
+| Watching the screen for words while nobody is looking | works; off by default. Give it phrases, it alerts in the log and in Home Assistant |
 | Guessing the target's OS from how it enumerates USB | works |
-| Wake-on-LAN (magic packet to the target's MAC) | works |
-| WiFi &mdash; station or its own access point, on boards with an ESP32-C6 | works; verified on the ESP32-P4 Function EV. Also built for the NANO, Guition and PoE boards, which carry the same co-processor; the Waveshare ESP32-P4-ETH has no radio at all. One link at a time (Ethernet, WiFi, or AP). A rescue hotspot keeps a device reachable if its network is out of range, and a captive portal opens the console from a phone on connect |
-| ATX power control (power/reset buttons and power LED through optocouplers) | works; wiring in [docs/wiring.md](docs/wiring.md) |
-| Small status display (IP, link, capture, health) | works; optional, off by default. An I2C OLED (SSD1306 in six sizes, SH1106 in four, found on the capture bus) or a round GC9A01 colour LCD. Enable it and assign any pins from the console |
-| A viewing token for dashboards | works; off until you make one (Settings &rarr; Security). One long random string that opens the MJPEG stream, a single frame and the capture's figures - enough for a camera card in Home Assistant - and no endpoint that can touch the target. Only its hash is stored, so it is shown once |
-| Home Assistant integration over MQTT | works; off by default, auto-discovered, TLS optional. Sensors for the capture and the machine, power/reset/Wake-on-LAN buttons, the jiggler as a switch with its interval, a firmware update entity that offers what the project has published, and a camera holding a still of the target's screen - taken on demand, or by itself when the screen watch finds one of your phrases. Diagnostics too: free internal memory and the largest block in it, skipped frames, which firmware slot is running and why the device last booted |
-| VPN &mdash; WireGuard or native Tailscale | works; off by default, pick one in Settings &rarr; VPN. WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively (a 100.x address reachable from anywhere, NAT traversal handled, no gateway or port-forward). Both share one WireGuard stack |
-| HDMI audio | not implemented; the bridge already extracts it and offers it as I2S, but the signals need four wires to the ESP32-P4 and nothing reads them yet |
+| Wake-on-LAN | works |
+| WiFi - station or its own access point | works; on boards with an ESP32-C6. One link at a time, plus a rescue hotspot and a captive portal |
+| ATX power control (power, reset, power LED) | works; wiring in [docs/wiring.md](docs/wiring.md) |
+| Small status display (IP, link, capture, health) | works; optional. An I2C OLED or a round GC9A01, pins assigned from the console |
+| A viewing token for dashboards | works; off until you make one. Opens the stream and the figures, and nothing that can touch the target |
+| Home Assistant integration over MQTT | works; off by default, auto-discovered. Sensors, buttons, an update entity, a camera holding a still of the screen |
+| VPN - WireGuard or native Tailscale | works; off by default, pick one in Settings. Tailscale needs no port forward or gateway |
+| HDMI audio | not implemented; the bridge offers it as I2S, but the wires and the code are missing |
 
 What is coming next is in the [roadmap](ROADMAP.md).
 
@@ -98,6 +117,8 @@ your hub.
 An ESP32-P4 board does the work, a TC358743 bridge turns the target's HDMI into a
 stream it can read, and a 15-pin CSI ribbon joins the two. An optocoupler module
 is an optional add-on for ATX power control.
+
+![What the whole thing is: the ESP32-P4 board and the capture board joined by a ribbon, an optional status screen on the pins, and the three things it plugs into - the network, the target machine, and a supply of its own. Drawn to scale.](docs/overview.svg)
 
 ### The device — pick one ESP32-P4 board
 
