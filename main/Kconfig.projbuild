@@ -190,6 +190,8 @@ menu "ESP-KVM"
                 bool "Guition ESP32-P4-M3-Dev"
             config KVM_BOARD_FUNCEV
                 bool "Espressif ESP32-P4 Function EV"
+            config KVM_BOARD_M5_POE_P4
+                bool "M5Stack Unit PoE-P4"
             config KVM_BOARD_OTHER
                 bool "Something else"
         endchoice

@@ -5,5 +5,7 @@
   { "id": "p4-wifi6-devkit", "label": "Waveshare ESP32-P4-WIFI6-DEV-KIT", "image": "docs/board-wifi6-devkit.webp", "untested": true },
   { "id": "p4-wifi6",   "label": "Waveshare ESP32-P4-WIFI6",           "image": "docs/board-wifi6.webp" },
   { "id": "p4-nano",    "label": "Waveshare ESP32-P4-NANO",            "image": "docs/board-nano.jpg" },
-  { "id": "p4-guition", "label": "Guition ESP32-P4-M3-Dev",            "image": "docs/board-guition.webp" }
+  { "id": "p4-guition", "label": "Guition ESP32-P4-M3-Dev",            "image": "docs/board-guition.webp" },
+  { "id": "m5-poe-p4",  "label": "M5Stack Unit PoE-P4",                "image": "docs/board-m5-poe-p4.webp", "untested": true },
+  { "id": "m5-poe-p4x", "label": "M5Stack Unit PoE-P4X",               "image": "docs/board-m5-poe-p4.webp", "untested": true }
 ]

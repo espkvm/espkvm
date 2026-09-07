@@ -1,0 +1,102 @@
+# M5Stack Unit PoE-P4, with the Add-on Display In (LT6911D) for capture
+#
+# Deltas from the Waveshare ESP32-P4-ETH build (sdkconfig.defaults). Build it with:
+#   idf.py -B build.m5poe -D SDKCONFIG=build.m5poe/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/m5_poe_p4.defaults" build
+#
+# Why this board is worth a target: it is the smallest complete KVM this project
+# can be built into. PoE carries power and network on one cable, the capture
+# board is M5Stack's own add-on rather than a ribbon to a second board, and
+# nothing has to be soldered.
+#
+# Read off M5Stack's published pin map and the two schematics
+# (SCH_StickPoE_SCH_Main_V0.2, SCH_UnitPoEP4_display_in_V0.3). The pleasant
+# surprise is the Ethernet: every RMII and SMI pin is the same GPIO as on the
+# P4-ETH, PHY reset included, so the base defaults already fit.
+#   Ethernet (IP101GRI): TX_EN 49, TXD0 34, TXD1 35, CRS_DV 28, RXD0 29,
+#                        RXD1 30, MDC 31, MDIO 52, REF_CLK 50, PHY reset 51.
+#   Capture bridge: SYS_SDA on GPIO 0, SYS_SCL on GPIO 1, reset on GPIO 18,
+#                   MCLK on GPIO 36. The bridge's own I2C runs at 1.8 V behind
+#                   a TXS0102 level shifter on the add-on.
+#   microSD: on the add-on, CLK 12, CMD 13, D0 8, D1 9, D2 10, D3 11, with card
+#            detect on GPIO 37 (no power gate, and nothing here reads detect).
+#   User button: GPIO 45, a key of its own rather than one shared with Ethernet.
+#   Free on the Hat2-Bus: 19-23 and 39-44. The display and ATX defaults below
+#   come from there.
+#
+# The USB-C reads like a device port, which is what a KVM needs. Its data pair
+# goes to the P4's OTG through a common-mode choke, both CC pins carry 5.1k to
+# ground - the sink signature, not a host's pull-ups - and its VBUS feeds the
+# board's 5 V rail through an OVP switch. So the target's port powers the device
+# and sees it as a keyboard, the same arrangement as the P4-ETH's OTG lead.
+# M5Stack's own net names call that port HOST, so this wants confirming with a
+# machine at the other end. The add-on's USB-A is a real host port - it sources
+# 5 V through an MT9700 - and is not the one to use.
+#
+# NOT YET VERIFIED ON HARDWARE.
+#
+# The capture driver is the other open piece: this build still expects a
+# TC358743, and the add-on carries an LT6911D. See the port issue.
+
+# --- flash and partitions ---------------------------------------------------
+# 16 MB here against 32 MB on the P4-ETH, so the shared 16 MB table applies -
+# same app and OTA slots, a smaller data tail.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- silicon revision -------------------------------------------------------
+# Left at the base build's pre-3.0 setting, which is what the plain "Unit PoE-P4"
+# carries; the "Unit PoE-P4X" is the rev 3.x product and has its own overlay
+# beside this one (boards/m5_poe_p4x.defaults).
+#
+# There is no forgiving choice here: the revisions are fenced off in BOTH
+# directions. A pre-3.0 image declares max chip rev 1.99 and a rev-3 image
+# declares min 3.0, so each refuses to start on the other's silicon. It is not
+# "slower but working" - it is a board that sits in the bootloader.
+
+# --- capture ----------------------------------------------------------------
+# The bridge sits on GPIO 0/1, not the 7/8 the P4-ETH uses - and 8 is a microSD
+# data line here, so leaving the default would have put two things on one pin.
+CONFIG_KVM_I2C_SDA_GPIO=0
+CONFIG_KVM_I2C_SCL_GPIO=1
+CONFIG_KVM_TC358743_RST_GPIO=18
+
+# --- microSD ----------------------------------------------------------------
+# The slot is on the add-on, wired to the base board's SDIO header. There is no
+# power gate, so the firmware never touches a power pin here.
+CONFIG_KVM_SD_CLK_GPIO=12
+CONFIG_KVM_SD_CMD_GPIO=13
+CONFIG_KVM_SD_D0_GPIO=8
+CONFIG_KVM_SD_D1_GPIO=9
+CONFIG_KVM_SD_D2_GPIO=10
+CONFIG_KVM_SD_D3_GPIO=11
+CONFIG_KVM_SD_PWR_GPIO=-1
+
+# --- button -----------------------------------------------------------------
+# The user key, and unlike the P4-ETH's BOOT button it does not share a pin with
+# Ethernet, so the password reset can read it without handing a pin back.
+CONFIG_KVM_BUTTON_GPIO=45
+
+# --- the hand-wired things --------------------------------------------------
+# Seven pins that the Hat2-Bus really brings out, so a wire has somewhere to go:
+# five for the round LCD and two for the ATX buttons. The LED sense is left
+# unassigned on purpose.
+CONFIG_KVM_DISP_SCLK_GPIO=19
+CONFIG_KVM_DISP_MOSI_GPIO=20
+CONFIG_KVM_DISP_CS_GPIO=21
+CONFIG_KVM_DISP_DC_GPIO=22
+CONFIG_KVM_DISP_RST_GPIO=23
+CONFIG_KVM_ATX_PWR_GPIO=39
+CONFIG_KVM_ATX_RST_GPIO=40
+
+# --- console ----------------------------------------------------------------
+# The download USB-C is a serial-JTAG, and UART0 (GPIO 37/38) is on the ISP bus
+# the add-on plugs into - so with capture fitted there is no UART console left.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/m5-poe-p4/manifest.json"
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_M5_POE_P4=y

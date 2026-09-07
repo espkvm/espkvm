@@ -192,6 +192,72 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_ID "funcev"
 #define BOARD_VERIFIED false
 
+#elif CONFIG_KVM_BOARD_M5_POE_P4
+/*
+ * Four connectors, all of them small.
+ *
+ * The Hat2-Bus is the one to wire to: sixteen pins in two rows of eight. The
+ * other three are single rows - a 9-pin SDIO bus, a 6-pin bus
+ * carrying the console UART and the strapping pins, and a Grove port that is an
+ * I2C pair and its power. The Display In add-on plugs into the SDIO and ISP
+ * rows, so with capture fitted nothing on those two is free; they are drawn
+ * anyway, because a board without the add-on can use them.
+ *
+ * From M5Stack's pin map (U213_PinMap_01) and their product photograph, which
+ * shows the Hat2-Bus printed on the case: two rows of names, GND beside G44
+ * through to 5V beside G22, in that order. Their documentation's tables agree.
+ *
+ * None of these connectors is drawn with numbers here, because the board does
+ * not print any - it prints what each pin carries, the way the P4-ETH does. The
+ * numbering would be a guess on top of that: M5Stack's map counts the Hat2-Bus
+ * from the end their schematic of the mating hat calls sixteen, which is what a
+ * mating pair does. The names are unambiguous, so the names are what is shown.
+ */
+static const kvm_board_pin_t s_m5_hat_odd[] = {
+    PWR("GND"), PWR("5V"), IO(21), IO(20), IO(19), NC(), PWR("3V3"), PWR("5V"),
+};
+_Static_assert(sizeof(s_m5_hat_odd) / sizeof(s_m5_hat_odd[0]) == 8,
+               "s_m5_hat_odd: the column must hold exactly 8 pins");
+static const kvm_board_pin_t s_m5_hat_even[] = {
+    IO(44), IO(43), IO(42), IO(41), IO(40), IO(39), IO(23), IO(22),
+};
+_Static_assert(sizeof(s_m5_hat_even) / sizeof(s_m5_hat_even[0]) == 8,
+               "s_m5_hat_even: the column must hold exactly 8 pins");
+static const kvm_board_pin_t s_m5_sdio[] = {
+    IO(13), IO(12), IO(11), IO(10), IO(9), IO(8),
+    IO_NOTE(27, "USB1 DP"), IO_NOTE(26, "USB1 DM"), PWR("5V"),
+};
+_Static_assert(sizeof(s_m5_sdio) / sizeof(s_m5_sdio[0]) == 9,
+               "s_m5_sdio: the row must hold exactly 9 pins");
+static const kvm_board_pin_t s_m5_isp[] = {
+    PWR("GND"), IO_NOTE(35, "BOOT strap, also Ethernet TXD1"), PWR("RST"),
+    IO_NOTE(38, "console UART RX"), IO_NOTE(37, "console UART TX"), PWR("3V3"),
+};
+_Static_assert(sizeof(s_m5_isp) / sizeof(s_m5_isp[0]) == 6,
+               "s_m5_isp: the row must hold exactly 6 pins");
+static const kvm_board_pin_t s_m5_grove[] = {
+    PWR("GND"), PWR("5V"), IO(53), IO(54),
+};
+_Static_assert(sizeof(s_m5_grove) / sizeof(s_m5_grove[0]) == 4,
+               "s_m5_grove: the port has exactly 4 pins");
+static const kvm_board_header_t s_headers[] = {
+    {.name = "Hat2-Bus", .rows = 8, .numbered = false, .left = s_m5_hat_odd,
+     .right = s_m5_hat_even},
+    {.name = "SDIO-Bus", .rows = 9, .numbered = false, .left = s_m5_sdio, .right = NULL},
+    {.name = "ISP-Bus", .rows = 6, .numbered = false, .left = s_m5_isp, .right = NULL},
+    {.name = "Grove", .rows = 4, .numbered = false, .left = s_m5_grove, .right = NULL},
+};
+#define BOARD_HAS_HEADERS 1
+/* Two products, two names and two ids: the P4X is the rev 3.x one. */
+#if CONFIG_ESP32P4_REV_MIN_300
+#define BOARD_NAME "M5Stack Unit PoE-P4X"
+#define BOARD_ID "m5-poe-p4x"
+#else
+#define BOARD_NAME "M5Stack Unit PoE-P4"
+#define BOARD_ID "m5-poe-p4"
+#endif
+#define BOARD_VERIFIED false
+
 #elif CONFIG_KVM_BOARD_GUITION
 /*
  * One 2x13 header. Two of its pins are an I2C bus of the board's own and four

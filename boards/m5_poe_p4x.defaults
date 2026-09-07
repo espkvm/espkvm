@@ -1,0 +1,29 @@
+# M5Stack Unit PoE-P4X - the rev 3.x silicon product
+#
+# Build it with:
+#   idf.py -B build.m5poex -D SDKCONFIG=build.m5poex/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/m5_poe_p4.defaults;boards/m5_poe_p4x.defaults" build
+#
+# Everything about the board is in m5_poe_p4.defaults; this only moves the
+# silicon revision and the update slug, so the two stay in step when pins change.
+#
+# Here the two products differ, not just the part in the box: M5Stack sell the
+# "Unit PoE-P4" on pre-3.0 silicon and the "Unit PoE-P4X" on rev 3.x. Read the
+# boot log anyway. "Chip rev: v3.x" - this image; anything else - the plain
+# m5-poe-p4 image. This one will not start on older silicon: the bootloader
+# refuses an image that declares a higher minimum revision, and the board waits,
+# unharmed, until the other image is flashed.
+#
+# Worth having: on rev 3.x the capture hands the encoder YUV422 directly, the
+# PPA colour-convert pass goes away, and 1080p H.264 runs at 22-24 fps instead
+# of about 7 - cooler, too.
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# Its own slug, so an update never swaps this device onto the slower build.
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/m5-poe-p4x/manifest.json"
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_M5_POE_P4=y
