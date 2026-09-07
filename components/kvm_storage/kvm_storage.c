@@ -645,6 +645,19 @@ esp_err_t kvm_storage_init(void)
      * retry-thrashes on every multi-block write, collapsing throughput to
      * ~12 KB/s (each 64 KB write stalling seconds on retries). 4 MHz is the
      * ceiling on both boards - do not raise it without new silicon.
+     *
+     * What that costs in practice: an upload through the console lands on the
+     * card at about 66 KB/s, measured on the Function EV. Reading is fine at
+     * ~1.5 MB/s, which is what serving an image to the target needs; writing is
+     * the slow direction, so a large image belongs on the card by other means.
+     *
+     * The card matters as much as the bus. A 256 GB SDXC card mounted here,
+     * reported its size correctly and read without a complaint, yet failed
+     * every write immediately - ESP_ERR_INVALID_CRC with the controller
+     * reporting a transmit FIFO underrun (status 0xe00) - while a 32 GB card
+     * wrote normally on the same board and the same build. Two cards is not a
+     * rule, but a card that reads and will not write is a thing that happens
+     * here, and it looks like a firmware fault until the card is swapped.
      */
     host.max_freq_khz = 4000;
 

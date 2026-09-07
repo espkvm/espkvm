@@ -1408,8 +1408,29 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
 /* Staging buffer for the card write. Filled across as many recv() calls as it
  * takes (a TLS record or an lwIP segment at a time) then written in one go, so
  * the SD sees a single multi-block command per 64 KB rather than one per recv -
- * far less per-write overhead. In PSRAM: the P4 has 32 MB of it and this keeps
- * internal RAM free for the TLS session. Upload only runs on rev >= 3.0
+ * far less per-write overhead. Upload only runs on rev >= 3.0
+ * (kvm_storage_writable), so none of this executes on the Waveshare board.
+ *
+ * In PSRAM, and deliberately, though it looks like the slow choice.
+ *
+ * PSRAM is not DMA-capable, so the SD driver cannot hand this buffer to the
+ * controller: it cuts every write into 8 KB pieces
+ * (unaligned_multi_block_rw_max_chunk_size is 16 blocks) and copies each piece
+ * through a bounce buffer of its own. That is what an upload measured at
+ * 66 KB/s is - three per cent of what a 4 MHz four-line bus could carry - so
+ * the obvious thing is to put the buffer in internal RAM and let the DMA have
+ * it directly. It was tried, on a Function EV, and it does not work:
+ *
+ *   64 KB in one multi-block write - ESP_ERR_TIMEOUT on every transaction, and
+ *   a card left so wedged that its filesystem did not survive.
+ *   8 KB pieces, the size the driver itself uses - ESP_ERR_INVALID_CRC with the
+ *   controller reporting a transmit FIFO underrun (status 0xe00): it could not
+ *   keep the FIFO fed, so what reached the card was corrupt.
+ *
+ * So the copy is not the overhead to remove; it is the thing that makes writes
+ * land at all. The slow path stays until someone finds what actually starves
+ * that FIFO. Keeping the buffer in PSRAM also leaves internal RAM for the TLS
+ * session, which was the original reason. Upload only runs on rev >= 3.0
  * (kvm_storage_writable), so none of this executes on the Waveshare board. */
 #define UPLOAD_CHUNK (64 * 1024)
 
@@ -1450,6 +1471,7 @@ static void upload_worker_task(void *arg)
     ESP_LOGW(TAG, "image upload: %zu bytes -> %s", ctx->content_len, path);
 
     char *chunk = heap_caps_malloc(UPLOAD_CHUNK, MALLOC_CAP_SPIRAM);
+    const int64_t started_us = esp_timer_get_time();
     bool ok = chunk != NULL;
     size_t received = 0;
     int idle = 0;
@@ -1494,7 +1516,12 @@ static void upload_worker_task(void *arg)
         remove(path); /* a half-written image is worse than none */
         send_json_error(req, "500 Internal Server Error", "upload failed; the card may be full");
     } else {
-        ESP_LOGW(TAG, "image '%s' written, %zu bytes", ctx->name, received);
+        /* The rate is the point of the buffer above: it says at a glance
+         * whether the write went through DMA or through bounce buffers. */
+        const int64_t ms = (esp_timer_get_time() - started_us) / 1000;
+        ESP_LOGW(TAG, "image '%s' written, %zu bytes in %lld ms (%llu KB/s)", ctx->name, received,
+                 (long long)ms,
+                 (unsigned long long)(ms > 0 ? (uint64_t)received / (uint64_t)ms : 0));
         char body[128];
         int bn = snprintf(body, sizeof(body),
                           "{\"status\":\"written\",\"name\":\"%s\",\"size\":%zu}", ctx->name,

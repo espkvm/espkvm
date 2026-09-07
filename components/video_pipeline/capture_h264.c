@@ -214,6 +214,29 @@ static uint32_t wanted_bitrate(void)
     return (uint32_t)kbps * 1000u;
 }
 
+/*
+ * How fine the encoder may get, and how coarse it may fall back to.
+ *
+ * qp_min is a quality ceiling, not a bandwidth one: the rate controller already
+ * holds the stream to the configured bitrate, and this only says how good a
+ * frame is allowed to be when there is budget left over. At 25 that left a lot
+ * unspendable - a still 1080p desktop sending 101 kbit/s of the 4000 it had
+ * been given, and no way to use the rest however long it sat there.
+ *
+ * The report that led here was a still screen in visible blocks, but that turned
+ * out to have another cause: the source was losing its link every few seconds,
+ * so the picture restarted from a fresh keyframe before it could settle. With
+ * the link steady it comes out clean at 25 as well. This lower ceiling was not
+ * what fixed that, and is here on its own merit - there is no reason to refuse
+ * quality that the configured bitrate has already paid for.
+ *
+ * The pair is fixed when the encoder is built - the component has setters for
+ * fps, GOP and bitrate, and none for these - so a change here only reaches a
+ * newly built encoder, not one taken back from the parked slot.
+ */
+#define H264_QP_MIN 18
+#define H264_QP_MAX 45
+
 static esp_err_t encoder_open(uint32_t w, uint32_t h)
 {
     int32_t fps = kvm_setting_int("vid_fps_max");
@@ -249,7 +272,7 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
         .gop = s_gop,
         .fps = (uint8_t)fps,
         .res = {.width = (uint16_t)w, .height = (uint16_t)h},
-        .rc = {.bitrate = s_bitrate, .qp_min = 25, .qp_max = 45},
+        .rc = {.bitrate = s_bitrate, .qp_min = H264_QP_MIN, .qp_max = H264_QP_MAX},
     };
     esp_h264_err_t herr = esp_h264_enc_hw_new(&cfg, &s_enc);
     if (herr != ESP_H264_ERR_OK || !s_enc) {
