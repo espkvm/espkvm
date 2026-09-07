@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A question, an idea, or something you built
+    url: https://github.com/espkvm/espkvm/discussions
+    about: Discussions is the better place for those - more people read it.
+  - name: A security problem
+    url: https://github.com/espkvm/espkvm/security/advisories/new
+    about: Please report it privately rather than in a public issue.
+  - name: Support for another board
+    url: https://github.com/espkvm/espkvm/blob/main/docs/PORTING.md
+    about: What a new board needs, and how to send one in.

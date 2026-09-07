@@ -1,0 +1,18 @@
+# The actions in the workflows, and nothing else.
+#
+# ESP-IDF components are pinned in dependencies.lock and Dependabot does not
+# know that ecosystem, so they stay a manual job. GitHub Actions it does know,
+# and an action that goes stale breaks CI on a day nobody chose.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    labels: ["ci"]
+
+# The console's own npm packages are not here: web/ is a submodule, and its
+# lockfile belongs to the console repository, where its own Dependabot config
+# has to live.

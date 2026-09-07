@@ -1,0 +1,64 @@
+name: Something is wrong
+description: The device does something it should not, or stops doing something it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Four answers turn "it rebooted" into something I can chase. The log is
+        the big one: **Diagnostics -> Download the log** in the console, or
+        `https://<device>/api/v1/system/log`. It survives a restart, so it holds
+        the boot that went wrong.
+
+  - type: dropdown
+    id: board
+    attributes:
+      label: Which board
+      options:
+        - Waveshare ESP32-P4-ETH
+        - Espressif ESP32-P4 Function EV
+        - Waveshare ESP32-P4-WIFI6
+        - Waveshare ESP32-P4-WIFI6-POE-ETH
+        - Waveshare ESP32-P4-WIFI6-DEV-KIT
+        - Waveshare ESP32-P4-NANO
+        - Guition ESP32-P4-M3-Dev
+        - M5Stack Unit PoE-P4
+        - Something else (say which below)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: The badge at the top of the console, or Settings -> System.
+      placeholder: "0.42.2"
+    validations:
+      required: true
+
+  - type: input
+    id: revision
+    attributes:
+      label: Chip revision
+      description: >-
+        The boot log prints it in the first lines, as `Chip rev: v1.3` or
+        `v3.2`. It decides which image the board can run, so a wrong guess
+        explains a lot on its own.
+      placeholder: "v1.3"
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: The device log
+      description: >-
+        Paste it or attach the file. It names your network, its addresses and
+        the MAC - have a look before posting if that matters to you.
+      render: text

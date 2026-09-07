@@ -39,6 +39,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: components/kvm_screentext/test/run.sh
       - run: components/video_pipeline/test/run.sh
+      # Two settings on one pin. This one guards what arrives from outside -
+      # a board overlay naming a GPIO something else already holds.
+      - run: components/kvm_config/test/run.sh
 
   # The console's own logic: the fake machine the demo runs on, the settings
   # file, the keyboard tables, the text layer. Node runs the TypeScript as it
@@ -112,6 +115,16 @@ jobs:
           - id: p4-poe
             build_dir: build.poe
             sdkconfig_defaults: sdkconfig.defaults;boards/poe_p4.defaults
+          # M5Stack Unit PoE-P4 and its rev 3.x twin, the PoE-P4X. Capture is
+          # M5Stack's own Display In add-on (an LT6911D), not a C790, so these
+          # images are only half a port until that driver lands. Built and
+          # published so an owner can get the network half working.
+          - id: m5-poe-p4
+            build_dir: build.m5poe
+            sdkconfig_defaults: sdkconfig.defaults;boards/m5_poe_p4.defaults
+          - id: m5-poe-p4x
+            build_dir: build.m5poex
+            sdkconfig_defaults: sdkconfig.defaults;boards/m5_poe_p4.defaults;boards/m5_poe_p4x.defaults
           # Waveshare ESP32-P4-WIFI6-DEV-KIT - both links on one board, Ethernet
           # and a C6, on pins we already use.
           - id: p4-wifi6-devkit
@@ -199,7 +212,10 @@ jobs:
             idf.py -B ${{ matrix.board.build_dir }}
             merge-bin -o espkvm-merged.bin &&
             riscv32-esp-elf-nm -nC ${{ matrix.board.build_dir }}/espkvm.elf
-            > ${{ matrix.board.build_dir }}/espkvm.sym
+            > ${{ matrix.board.build_dir }}/espkvm.sym &&
+            riscv32-esp-elf-objcopy --strip-debug
+            ${{ matrix.board.build_dir }}/espkvm.elf
+            ${{ matrix.board.build_dir }}/espkvm-stripped.elf
 
       - name: Collect what a person or a device might want
         run: |
@@ -230,6 +246,11 @@ jobs:
           # After the sums on purpose: this is not something anyone flashes, and
           # the release job packs every board's into one archive.
           cp "${bdir}/espkvm.sym" "out/${base}.sym"
+          # And the ELF a crash dump is read against. Stripped of debug info it
+          # is 3 MB instead of 18 and still carries every symbol, so a backtrace
+          # comes out with function names - only the line numbers are missing,
+          # and those need the full ELF kept as a build artefact below.
+          cp "${bdir}/espkvm-stripped.elf" "out/${base}.elf"
           ls -l out
 
       - uses: actions/upload-artifact@v4
@@ -237,6 +258,19 @@ jobs:
           name: firmware-${{ matrix.board.id }}
           path: out/
           if-no-files-found: error
+
+      # The unstripped ELF, which is the only thing that turns a crash dump
+      # into file and line. Too big for a release asset at 18 MB a board, and
+      # rarely wanted after a version has been superseded - so it lives here,
+      # for as long as an artefact lives. Tags only: every branch push would
+      # otherwise leave a quarter of a gigabyte behind.
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: elf-${{ matrix.board.id }}
+          path: ${{ matrix.board.build_dir }}/espkvm.elf
+          if-no-files-found: error
+          retention-days: 90
 
   release:
     needs: build
@@ -262,6 +296,8 @@ jobs:
           cd out
           zip -q -j "espkvm-${GITHUB_REF_NAME}-symbols.zip" ./*.sym
           rm ./*.sym
+          zip -q -j "espkvm-${GITHUB_REF_NAME}-elf.zip" ./*.elf
+          rm ./*.elf
           cat sha256sums-*.txt | sed 's| \./| |' | sort -k2 > sha256sums.txt
           rm sha256sums-*.txt
           ls -l
