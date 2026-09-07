@@ -5,6 +5,20 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Added
+- **A panic now leaves a crash dump.** A device that reboots in the night says
+  so in the log and nothing more: the backtrace went out of a serial port nobody
+  has a cable for. The chip writes registers and task stacks to flash instead,
+  and Diagnostics hands the file over - `GET /api/v1/system/coredump`, DELETE to
+  throw it away. Two crashes are open right now with no evidence at all; this is
+  what would have closed them. The partition sits in the 56 KB of free space
+  below the first app slot, so nothing moves: a device adopts it with one cable
+  flash of the table and keeps both slots, its storage and its rescue image. A
+  device updated over the network keeps its old table and simply never has a
+  dump - the panic handler notices and reboots as it did before.
+
 ## [0.42.2] - 2026-09-03
 
 ### Added

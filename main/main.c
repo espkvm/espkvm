@@ -8,6 +8,7 @@
 #include <strings.h>
 
 #include "esp_attr.h"
+#include "esp_core_dump.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -297,6 +298,29 @@ static void log_boot_reason(void)
     }
     ESP_LOGW(TAG, "boot: after %s; running %s (%s)", why, running ? running->label : "?",
              state_name);
+
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    /*
+     * If the crash left a dump, say so here rather than only in an API nobody
+     * calls. The line goes in the log the console can hand over, so a report
+     * that begins "it rebooted overnight" already carries which task died and
+     * where - and says there is a file worth asking for.
+     *
+     * A device updated over the network keeps the partition table it was
+     * flashed with, so one without the partition simply has no dump; that is
+     * not worth a line of its own.
+     */
+    if (esp_core_dump_image_check() == ESP_OK) {
+        size_t addr = 0, size = 0;
+        esp_core_dump_image_get(&addr, &size);
+        char reason[64] = "";
+        if (esp_core_dump_get_panic_reason(reason, sizeof(reason)) != ESP_OK) {
+            snprintf(reason, sizeof(reason), "no reason recorded");
+        }
+        ESP_LOGE(TAG, "crash dump kept, %u bytes: %s", (unsigned)size, reason);
+        ESP_LOGE(TAG, "crash dump: GET /api/v1/system/coredump, or the button in Diagnostics");
+    }
+#endif
 }
 
 /*

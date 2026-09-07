@@ -15,4 +15,5 @@ idf_component_register(
         kvm_display
         app_update
         esp_timer
+        espcoredump
 )

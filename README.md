@@ -544,6 +544,16 @@ can find a free one where the wire actually goes. Some pins are also taken by
 hardware the firmware never touches: on the Function EV, GPIO 45 carries the
 microSD power net whether we use it or not.
 
+**It rebooted on its own.** The log line at the top of every boot says how the
+last run ended - a panic, a watchdog, a brownout or a plain reset are four
+different bugs. If it was a panic, the firmware also wrote a **crash dump** to
+flash before rebooting: registers and task stacks as they were. **Diagnostics ->
+Download the crash dump** hands it over as a file, and attaching it to an issue
+turns "it rebooted overnight" into a backtrace. It carries no settings and no
+keys. A device that was updated over the network keeps the partition table it
+was first flashed with, so the dump needs one cable flash of the table to work;
+without it the device simply never has one.
+
 Flashing problems - the port not appearing, drivers, permissions - are in
 [docs/FLASHING.md](docs/FLASHING.md). Anything else: the device keeps its own log
 across a restart, and **Diagnostics -> Download the log** is the fastest way to
@@ -758,6 +768,7 @@ Everything the console does is available over HTTP.
 | `POST /api/v1/hid/reattach` | present the keyboard and mouse to the target again, as if the cable had been pulled and put back |
 | `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, Ethernet link, ATX power state |
 | `GET /api/v1/system/log` | the device's own log, as a file |
+| `GET /api/v1/system/coredump`, `DELETE` | the crash dump a panic left in flash, as a file, or throw it away |
 | `POST /api/v1/system/update` | firmware image, written to the spare slot |
 | `POST /api/v1/system/boot-slot` | boot the other slot on the next restart |
 | `POST /api/v1/system/restart` | restart, for settings that need one |

@@ -22,6 +22,7 @@ idf_component_register(
         espressif__cjson
         app_update
         esp_app_format
+        espcoredump
         esp_timer
         esp_driver_tsens
         mbedtls

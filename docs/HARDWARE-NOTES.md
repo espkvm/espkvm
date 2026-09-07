@@ -269,6 +269,28 @@ Each of these cost real time. They are recorded so they are not rediscovered.
   whenever the configured GOP length differs from the one in force. Alternating
   between two adjacent lengths is therefore a keyframe request.
 
+## Reading a crash dump
+
+A panic writes a dump into the `coredump` partition and the console hands it
+over (Diagnostics, or `GET /api/v1/system/coredump`). It is the ESP-IDF flash
+image - header, ELF, checksum - so `esp-coredump` reads it raw, against the ELF
+of the *same build*:
+
+```
+esp-coredump info_corefile --core espkvm-0.42.2-p4-eth.dump --core-format raw \
+    --chip esp32p4 build/espkvm.elf
+```
+
+Two things to check before believing a backtrace. The version in the file name
+has to match the ELF, and the summary prints the crashing app's ELF SHA256 - if
+it differs, the dump came from another build and the addresses mean nothing. And
+the partition is 56 KB: a dump that did not fit was never written, and the panic
+log says `Not enough space to save core dump!` instead.
+
+Releases publish symbol maps, not ELFs, so a dump from someone else's device
+needs the ELF rebuilt from that tag - or the maps, which still turn the crash PC
+into a function name.
+
 ## Tools worth knowing about
 
 | | |

@@ -24,6 +24,19 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_32mb.csv"
 # the way to fix it.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
+# Keep a core dump when the firmware panics.
+#
+# Nobody has a serial cable on the machine this is attached to, so a crash
+# reported from the field arrives as "it rebooted" and nothing else. Two of them
+# are open right now with no evidence at all. The dump goes into the 56 KB
+# partition that sits in free space below the first app slot, survives the
+# reboot, and the console hands it over as a file.
+#
+# The whole .bss and the heap are deliberately left out (the default): what is
+# wanted is the registers and the stacks, and 56 KB has to hold them.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=32
+
 # Full-frame capture @ 1080p needs PSRAM (ping-pong buffers + JPEG + HTTP copy).
 # esp_http_server: max_open_sockets + 3 internal fds must be <= CONFIG_LWIP_MAX_SOCKETS.
 # Headroom for concurrent /stream + /video + /ws (and a dev proxy opening several TCPs).

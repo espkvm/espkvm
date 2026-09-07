@@ -18,10 +18,19 @@
 # Adding this partition leaves every offset above unchanged, so a device adopts
 # it with a one-time cable flash of the table and keeps its app slots.
 #
+#
+# The 56 KB between phy_init and the first app slot is free space every ESP-IDF
+# layout leaves behind: app slots start on a 64 KB boundary, and the data
+# partitions above end at 0x12000. A core dump lives there, so adding it moves
+# no offset at all - a device adopts it by flashing the table alone and keeps
+# both app slots, its storage and its rescue image. Without the partition the
+# panic handler says so and reboots as before; nothing is written.
+#
 # Name       Type  SubType   Offset      Size
 nvs,         data, nvs,      0x9000,     0x6000
 otadata,     data, ota,      0xf000,     0x2000
 phy_init,    data, phy,      0x11000,    0x1000
+coredump,    data, coredump, 0x12000,    0xe000
 ota_0,       app,  ota_0,    0x20000,    0x400000
 ota_1,       app,  ota_1,    0x420000,   0x400000
 storage,     data, spiffs,   0x820000,   0x400000

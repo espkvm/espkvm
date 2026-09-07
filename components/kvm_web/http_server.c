@@ -24,6 +24,7 @@
 #include "freertos/task.h"
 
 #include "esp_app_desc.h"
+#include "esp_core_dump.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
@@ -695,6 +696,36 @@ static int ota_slots_json(char *out, size_t cap)
     return p;
 }
 
+/*
+ * Size of the crash dump kept in flash, 0 when there is none.
+ *
+ * Checking one means a CRC over the whole thing, and system info is polled
+ * while the console is open, so the answer is worked out once. It cannot change
+ * on its own: a dump is written by the panic handler, which reboots, and the
+ * only way to lose one without a restart is the erase below.
+ */
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+static unsigned s_dump_bytes;
+static bool s_dump_known;
+#endif
+
+static unsigned crash_dump_bytes(void)
+{
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    if (!s_dump_known) {
+        size_t addr = 0, size = 0;
+        if (esp_core_dump_image_check() == ESP_OK &&
+            esp_core_dump_image_get(&addr, &size) == ESP_OK) {
+            s_dump_bytes = (unsigned)size;
+        }
+        s_dump_known = true;
+    }
+    return s_dump_bytes;
+#else
+    return 0;
+#endif
+}
+
 static esp_err_t api_system_info_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
@@ -761,7 +792,9 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     char ota_json[512];
     ota_slots_json(ota_json, sizeof(ota_json));
 
-    char body[2048];
+    const unsigned dump_bytes = crash_dump_bytes();
+
+    char body[2304];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"boardId\":\"%s\","
@@ -775,7 +808,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"mqtt\":{\"enabled\":%s,\"connected\":%s},"
                      "\"wg\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"publicKey\":\"%s\"},"
                      "\"ts\":{\"enabled\":%s,\"up\":%s,\"address\":\"%s\",\"peers\":%d},"
-                     "\"jiggler\":{\"everyS\":%d,\"nudges\":%u}}",
+                     "\"jiggler\":{\"everyS\":%d,\"nudges\":%u},"
+                     "\"crashDumpBytes\":%u}",
                      app->project_name, app->version, app->date, app->time, kvm_board_id(),
                      app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false", ota_json,
@@ -793,7 +827,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      wg.up ? "true" : "false", wg.address, wg.public_key,
                      ts.enabled ? "true" : "false", ts.up ? "true" : "false", ts.address,
                      ts.peers, (int)kvm_setting_int("jiggle_s"),
-                     (unsigned)usb_hid_jiggler_nudges());
+                     (unsigned)usb_hid_jiggler_nudges(), dump_bytes);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }
@@ -1027,6 +1061,81 @@ static esp_err_t api_system_log_get(httpd_req_t *req)
     free(buf);
     return err;
 }
+
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+/*
+ * The crash dump the panic handler left behind, as a file.
+ *
+ * A device that panics reboots in a second or two and the operator sees a
+ * dropped connection - the evidence lived in the serial log nobody has a cable
+ * for. This hands over what the chip wrote to flash instead: registers and task
+ * stacks as they were, which `esp-coredump` turns back into a backtrace against
+ * the firmware's ELF.
+ *
+ * It is read straight out of the partition in chunks. The whole thing is at
+ * most 56 KB, but it is not worth a buffer of that size when the answer can go
+ * out as it is read.
+ */
+static esp_err_t api_system_coredump_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    size_t addr = 0, size = 0;
+    const esp_partition_t *part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+    if (!part || esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0 ||
+        size > part->size) {
+        return send_json_error(req, "404 Not Found", "no crash dump kept");
+    }
+
+    char name[96];
+    const esp_app_desc_t *app = esp_app_get_description();
+    snprintf(name, sizeof(name), "attachment; filename=\"espkvm-%s-%s.dump\"", app->version,
+             kvm_board_id());
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", name);
+
+    char chunk[1024];
+    for (size_t off = 0; off < size;) {
+        const size_t n = size - off < sizeof(chunk) ? size - off : sizeof(chunk);
+        if (esp_partition_read(part, off, chunk, n) != ESP_OK) {
+            /* Headers are already out, so the only way to say "broken" is to
+             * cut the body short - a truncated chunked body is an error to the
+             * browser, which is exactly what this is. */
+            ESP_LOGE(TAG, "crash dump: read failed at %u", (unsigned)off);
+            return ESP_FAIL;
+        }
+        if (httpd_resp_send_chunk(req, chunk, n) != ESP_OK) {
+            return ESP_FAIL;
+        }
+        off += n;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+/*
+ * Throw the dump away.
+ *
+ * A dump that has been collected is noise from then on: it keeps the warning on
+ * the console and in every boot line until something else crashes over it.
+ */
+static esp_err_t api_system_coredump_delete(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    const esp_err_t err = esp_core_dump_image_erase();
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", "could not erase the dump");
+    }
+    s_dump_bytes = 0;
+    s_dump_known = true;
+    ESP_LOGW(TAG, "crash dump erased");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"status\":\"erased\"}");
+}
+#endif /* CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH */
 
 /*
  * Restart on request.
@@ -3892,6 +4001,12 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = api_wifi_scan_get},
         {.uri = "/api/v1/system/update", .method = HTTP_POST, .handler = api_system_update_post},
         {.uri = "/api/v1/system/log", .method = HTTP_GET, .handler = api_system_log_get},
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+        {.uri = "/api/v1/system/coredump", .method = HTTP_GET, .handler = api_system_coredump_get},
+        {.uri = "/api/v1/system/coredump",
+         .method = HTTP_DELETE,
+         .handler = api_system_coredump_delete},
+#endif
         {.uri = "/api/v1/settings/reset", .method = HTTP_POST, .handler = api_settings_reset_post},
         {.uri = "/api/v1/system/restart", .method = HTTP_POST, .handler = api_system_restart_post},
         {.uri = "/api/v1/system/boot-slot", .method = HTTP_POST, .handler = api_system_boot_slot_post},
