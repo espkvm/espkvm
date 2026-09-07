@@ -15,13 +15,17 @@
   <a href="https://x.com/espkvm"><img src="https://img.shields.io/badge/X-%40espkvm-000000?logo=x&logoColor=white" alt="X: @espkvm"></a>
 </p>
 
-An IP-KVM built from an ESP32-P4 and a Toshiba TC358743 HDMI-to-CSI bridge. It
-captures the target machine's HDMI output, presents itself to that machine as a
-USB keyboard and mouse, and puts both in a browser.
+Like remote desktop, except it does not run on the machine. A small board plugs
+into that machine's HDMI output and a USB port, and serves its screen, keyboard
+and mouse to a browser. So it still works where remote desktop cannot: a BIOS
+screen, a boot menu, a kernel that will not come up, a machine with no operating
+system on it at all.
 
-The point is to reach a machine that has no working operating system - a BIOS
-screen, a boot menu, a kernel that will not come up - from a device that costs a
-fraction of a commercial KVM-over-IP.
+That is an IP-KVM. This one is built from an ESP32-P4 and a Toshiba TC358743
+HDMI-to-CSI bridge, and costs a fraction of a commercial KVM-over-IP.
+
+New to the idea? [What an IP-KVM is, and why you might want one](https://espkvm.io/blog/what-an-ip-kvm-is/)
+&mdash; what remote desktop cannot do, and where people actually use this.
 
 <p align="center">
   <b><a href="https://espkvm.io/flash/">Flash a board from the browser &rarr;</a></b>
@@ -276,6 +280,32 @@ target needs an MX1.25-to-USB-A cable.
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="50%"><img src="docs/board-m5-poe-p4.webp" alt="M5Stack Unit PoE-P4 module"></td>
+<td width="50%" valign="top">
+
+**[M5Stack Unit PoE-P4](https://docs.m5stack.com/en/unit/Unit_PoE-P4)**
+&mdash; *build target only; capture does not work yet*
+
+The smallest of the lot, and the only one where the capture board is not a C790:
+M5Stack's own **[Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d)**
+plugs straight onto its 24-pin FPC and brings a microSD slot with it. Two parts,
+one PoE cable, no ribbon and nothing to solder. 32 MB PSRAM, 16 MB flash, the
+same IP101 Ethernet on the same GPIOs as the P4-ETH, 802.3at PoE.
+
+The add-on's bridge is a **Lontium LT6911D**, not a TC358743, and the driver for
+it is not written yet - so these images give you the network, the console and
+updates, but no picture.
+
+Two products, two images: the **Unit PoE-P4** is pre-3.0 silicon
+(`boards/m5_poe_p4.defaults`) and the **Unit PoE-P4X** is rev 3.x
+(`boards/m5_poe_p4x.defaults`). Check the boot log anyway.
+
+</td>
+</tr>
+</table>
+
 ### Companion boards
 
 <table>
@@ -429,7 +459,8 @@ only to identify the hardware. The case photos are by their authors:
 [Colin Hickey](https://github.com/chickey), CC BY-NC, and
 [Fabrion365](https://makerworld.com/en/@Fabrion365). ESP-KVM is not affiliated with
 [Espressif](https://github.com/espressif), [Waveshare](https://github.com/waveshareteam),
-[Geekworm](https://github.com/geekworm-com) or [Guition](https://github.com/guitionofficial).
+[Geekworm](https://github.com/geekworm-com), [Guition](https://github.com/guitionofficial)
+or [M5Stack](https://github.com/m5stack).
 The pin map is in `components/kvm_board/include/kvm_board.h`.</sub>
 
 ## Quick start
@@ -674,10 +705,25 @@ registry.
 boot from - a rescue system, an installer, a live image. The console lists what
 is there and lets you pick which one the target sees. Images live in two places.
 
-A **microSD card** holds the large ones: format it FAT32, up to 4 GB per file.
+A **microSD card** holds the large ones: format it FAT32, up to 4 GB per file,
+and partition it **MBR, not GPT** - the FAT driver here has no 64-bit LBA and so
+cannot read a GPT card at all. Tools default to GPT above 32 GB, which is why a
+large card can be formatted correctly and still not be seen.
 Below chip revision 3.0 the card is read-only - that SD controller reads
 reliably, but its writes time out - so prepare it in an ordinary card reader. On
-revision 3.x the card is writable and the console can upload to it.
+revision 3.x the card is writable and the console can upload to it - but check
+the card can be written at all before relying on it. A 256 GB SDXC card here
+mounted, read and served images perfectly and refused every single write (a CRC
+error with the controller reporting a transmit FIFO underrun), while a 32 GB
+card on the same board and firmware wrote normally. One card of each, so not a
+law - but if you mean to upload to the card, a smaller SDHC one is the safer
+buy, and a large card is still fine as read-only media prepared in a reader.
+
+Writing, where it works, is slow:
+the bus runs at 4 MHz on every board (raising it collapses throughput - see
+`kvm_storage.c`), which is ~1.5 MB/s to read and about **66 KB/s** to write. An
+installer image is hours that way, so the card reader stays the sensible route
+for anything large; uploading is for the small images.
 
 The **device's own flash** holds one small image, in a 4 MB partition: enough for
 iPXE, memtest or a DOS floppy, with no card at all. Flash writes work on every
