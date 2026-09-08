@@ -716,8 +716,12 @@ the card can be written at all before relying on it. A 256 GB SDXC card here
 mounted, read and served images perfectly and refused every single write (a CRC
 error with the controller reporting a transmit FIFO underrun), while a 32 GB
 card on the same board and firmware wrote normally. One card of each, so not a
-law - but if you mean to upload to the card, a smaller SDHC one is the safer
-buy, and a large card is still fine as read-only media prepared in a reader.
+law - but the shape of it is familiar: Flipper Zero tell their users the same
+thing for their own SD slot, which is to pick a well-tested card from a known
+maker rather than the fastest or largest one, and that no-name cards are where
+the trouble is. So if you mean to upload to the card, a small branded SDHC card
+- 16 to 32 GB is more space than this needs - is the safer buy, and a large
+card is still fine as read-only media prepared in a reader.
 
 Writing, where it works, is slow:
 the bus runs at 4 MHz on every board (raising it collapses throughput - see

@@ -5,7 +5,7 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.43.0] - 2026-09-08
 
 ### Added
 - **A panic now leaves a crash dump.** A device that reboots in the night says
@@ -18,6 +18,32 @@ bumps the patch).
   flash of the table and keeps both slots, its storage and its rescue image. A
   device updated over the network keeps its old table and simply never has a
   dump - the panic handler notices and reboots as it did before.
+- **The M5Stack Unit PoE-P4 is a build target**, and its rev 3.x twin the
+  PoE-P4X. PoE, an ESP32-P4 and an IP101GRI on the same GPIOs as the P4-ETH, in
+  something the size of a matchbox. Capture does not work yet: the add-on that
+  gives it HDMI carries a Lontium LT6911D rather than a TC358743, and that
+  driver is not written - so these images give the network, the console and
+  updates, and no picture. Pins are read off M5Stack's schematics; nothing has
+  been on hardware.
+- **Releases carry an ELF for each board**, stripped of debug info: 3 MB rather
+  than 18, every symbol kept. A crash dump from a device now decodes to function
+  names against the release it came from, instead of needing that exact build
+  rebuilt first. The full ELF, which also has the line numbers, goes up as a
+  build artefact.
+
+### Fixed
+- **The Waveshare ESP32-P4-WIFI6-POE-ETH looked dead at boot.** Its console was
+  pointed at the serial-JTAG, which that board brings out nowhere: the ROM
+  messages arrived and then nothing, which reads exactly like a device stuck in
+  the bootloader. Its Type-C is the UART port, and the console goes there now.
+  Reported in #42, and the first thing anyone has told us about running this
+  board.
+
+### Changed
+- **H.264 may use the bandwidth it has been given.** The encoder was held at a
+  quality ceiling of QP 25 whatever the bitrate allowed, which on a still screen
+  showed as visible blocks while the stream used a fortieth of its budget. 18
+  now.
 
 ## [0.42.2] - 2026-09-03
 

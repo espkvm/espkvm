@@ -21,6 +21,12 @@
 #   BOOT button: GPIO 35, which is also Ethernet TXD1 - the same sharing that
 #   makes the password reset read the pin once at start-up and hand it back.
 #
+# Every pin above was checked a second time against Espressif's own board file
+# for this board, arduino-esp32 variants/waveshare_p4_poe_eth/pins_arduino.h:
+# same Ethernet pins, the same card-slot power gate on 45 at active low, the
+# RMII clock as an input on 50, I2C on 7/8, UART on 37/38, BOOT on 35. Two
+# sources that were written from the same board and agree.
+#
 # NOT YET VERIFIED ON HARDWARE. Configured from the schematic and published as a
 # build so owners can try it, the same way the NANO and Guition targets started.
 
@@ -65,8 +71,12 @@ CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 CONFIG_KVM_SD_PWR_GPIO=45
 
 # --- console ----------------------------------------------------------------
-# USB-C carries UART for flashing, and the serial-JTAG is the console.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Left at the default, which is UART, because that is the only console this
+# board brings out: its Type-C is the UART port (power, flashing, debugging)
+# and its Type-A is USB OTG. An earlier version of this file sent the console
+# to the serial-JTAG, which the board exposes nowhere - the ROM messages came
+# out, and then silence from the bootloader on, which reads exactly like a
+# device stuck at boot (#42).
 
 # Which board this is: names it in the console and picks the expansion header
 # the Pins tab draws.
