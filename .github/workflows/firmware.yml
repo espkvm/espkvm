@@ -280,7 +280,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           path: out
@@ -359,7 +359,7 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7   # for boards/boards.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           path: out
