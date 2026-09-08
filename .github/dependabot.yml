@@ -12,6 +12,12 @@ updates:
     commit-message:
       prefix: "ci"
     labels: ["ci"]
+    # One pull request for all of them. The first run opened five at once -
+    # five reviews of the same kind of change, every month. Grouped, the
+    # question is asked once, and the workflow either still runs or does not.
+    groups:
+      actions:
+        patterns: ["*"]
 
 # The console's own npm packages are not here: web/ is a submodule, and its
 # lockfile belongs to the console repository, where its own Dependabot config
