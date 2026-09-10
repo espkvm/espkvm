@@ -158,6 +158,19 @@ for a deeper capture ring and lifts 1080p to a little over 20 fps.
 Any other ESP32-P4 board with Ethernet and the same CSI connector can run it too
 &mdash; the pins are set in [menuconfig](docs/PORTING.md), not in the code.
 
+**What rules a board out.** Being an ESP32-P4 board is not enough. It needs
+**32 MB of PSRAM** (the frame buffers are allocated once for the largest mode:
+12.5 MB at 1080p on rev 3.x, 11.9 MB on rev <3.0, before the H.264 encoder asks
+for its reference frame - 8 MB cannot hold them), **16 MB of flash** (two OTA
+slots and the rescue image), a **camera connector the bridge can reach** (two
+CSI-2 lanes, plus 3.3 V and I2C on it or somewhere to wire them from - some
+boards bring only 1.8/2.8 V sensor rails and shift the I2C down with them),
+**USB OTG-HS on a port or a header** rather than only on an edge connector, and
+**a way onto the network** - an Ethernet PHY or an onboard ESP32-C6. The
+[LILYGO T-Halow P4](https://lilygo.cc/en-us/products/t-halow-p4) is the worked
+example of a board that looks right and misses four of the five: 8 MB PSRAM,
+RMII and USB OTG only on its M.2 edge, and no 3.3 V on its camera FPC.
+
 **The chip revision matters.** Below revision 3.0 several peripherals behave
 differently and rev <3.0 and >=3.0 are mutually exclusive build targets. On rev
 <3.0 the colour conversion the H.264 encoder needs goes through the PPA; on rev

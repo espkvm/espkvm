@@ -21,6 +21,28 @@ Board (chip rev v3.2, 16 MB flash) is set up this way in
 > the hardware JPEG/H.264 encoders, which the P4 has and the S3 and friends do
 > not. There is no path to another chip family.
 
+## Before you start: what rules a board out
+
+Being an ESP32-P4 board is not enough, and none of these is a pin map away:
+
+- **32 MB of PSRAM.** Frame buffers are allocated once for the largest mode the
+  bridge can deliver - 12.5 MB at 1080p on rev 3.x (three 1920x1088 YUV422
+  buffers), 11.9 MB on rev <3.0 (two 1920x1080 RGB888) - before the H.264
+  encoder asks for its reference frame. On 8 MB the capture allocation fails and
+  video reports itself unavailable.
+- **16 MB of flash.** Two OTA slots plus the rescue image.
+- **A camera connector the bridge can reach.** Two CSI-2 data lanes, and 3.3 V
+  and I2C either on that connector or somewhere to wire them from. A board that
+  brings only 1.5/1.8/2.8 V sensor rails to the FPC and level-shifts the I2C
+  down with them needs more than a ribbon.
+- **USB OTG-HS on a port or a header**, not only on an edge connector - that is
+  the keyboard and mouse.
+- **A network**: an Ethernet PHY, or an onboard ESP32-C6 (esp-hosted).
+
+The LILYGO T-Halow P4 is the worked example of a board that looks right and is
+not: 8 MB PSRAM, RMII and USB OTG D+/D- only on the M.2 edge, and a 24-pin
+camera FPC with no 3.3 V and a 1.8 V I2C.
+
 ## What to change
 
 Run `idf.py menuconfig` and open **ESP-KVM**:
