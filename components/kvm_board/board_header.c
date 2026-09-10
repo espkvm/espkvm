@@ -19,6 +19,7 @@
  *   ESP32-P4 Function EV     https://docs.espressif.com/projects/esp-dev-kits/
  *                            en/latest/esp32p4/esp32-p4-function-ev-board/
  *   Guition JC-ESP32P4-M3    the vendor's own pinout photograph of J1
+ *   DFRobot FireBeetle 2 P4  its schematic, DFR1172_..._schematics_V1.0.pdf
  */
 #include "kvm_board_header.h"
 
@@ -119,6 +120,39 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Waveshare ESP32-P4-Module-DEV-KIT"
 #define BOARD_ID_BASE "p4-module-devkit"
+#define BOARD_VERIFIED false
+
+#elif CONFIG_KVM_BOARD_FIREBEETLE2_P4
+/*
+ * Not a 2x20: two single rows down the long edges, 18 pins on one side and 14
+ * on the other, as P1 and P2 in the vendor schematic. Read from that netlist,
+ * in connector order - pin 1 of P1 is the RST end of the board. The silkscreen
+ * prints signal names rather than numbers, so the numbers are not shown.
+ */
+static const kvm_board_pin_t s_firebeetle_p1[] = {
+    PWR("RST"), PWR("3V3"), PWR("GND"), PWR("GND"), PWR("GND"),
+    IO(28), IO(29), IO(30), IO(8), IO(7),
+    IO(48), IO(49), IO(50), IO(52), IO(4), IO(5),
+    IO_NOTE(37, "UART0 TX, silk D1"), IO_NOTE(38, "UART0 RX, silk D0"),
+};
+_Static_assert(sizeof(s_firebeetle_p1) / sizeof(s_firebeetle_p1[0]) == 18,
+               "s_firebeetle_p1: the row must hold exactly 18 pins");
+static const kvm_board_pin_t s_firebeetle_p2[] = {
+    IO(31), IO(34), IO_NOTE(35, "BOOT button and strapping pin"),
+    IO_NOTE(36, "strapping pin"), IO(20), IO(21), IO(22), IO(23), IO(51),
+    IO(33), IO(32), PWR("GND"), PWR("3V3"), PWR("5V"),
+};
+_Static_assert(sizeof(s_firebeetle_p2) / sizeof(s_firebeetle_p2[0]) == 14,
+               "s_firebeetle_p2: the row must hold exactly 14 pins");
+static const kvm_board_header_t s_headers[] = {
+    {.name = "P1", .rows = 18, .numbered = false, .left = s_firebeetle_p1,
+     .right = NULL},
+    {.name = "P2", .rows = 14, .numbered = false, .left = s_firebeetle_p2,
+     .right = NULL},
+};
+#define BOARD_HAS_HEADERS 1
+#define BOARD_NAME "DFRobot FireBeetle 2 ESP32-P4"
+#define BOARD_ID_BASE "firebeetle2-p4"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_WAVESHARE_WIFI6

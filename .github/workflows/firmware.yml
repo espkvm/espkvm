@@ -137,6 +137,12 @@ jobs:
           - id: p4-module-devkit
             build_dir: build.moduledevkit
             sdkconfig_defaults: sdkconfig.defaults;boards/moduledevkit_p4.defaults
+          # DFRobot FireBeetle 2 ESP32-P4 - the smallest board that can do the
+          # whole job, and WiFi-only like the WIFI6. Read off its schematic and
+          # Espressif's Arduino variant for it; not run on one yet.
+          - id: firebeetle2-p4
+            build_dir: build.firebeetle
+            sdkconfig_defaults: sdkconfig.defaults;boards/firebeetle2_p4.defaults
           # Waveshare ESP32-P4-WIFI6 - no Ethernet; ESP32-C6 SDIO WiFi and a
           # setup hotspot are the only management link.
           - id: p4-wifi6

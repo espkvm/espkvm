@@ -135,3 +135,32 @@ Two things about it are worth knowing before wiring:
 
 No `-rev3` twin is published yet - see the note in the overlay if a rev 3.x unit
 turns up.
+
+### DFRobot FireBeetle 2 ESP32-P4 / AI Kit (chip rev v1.0, 16 MB flash)
+
+```
+idf.py -B build.firebeetle \
+  -D SDKCONFIG=build.firebeetle/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/firebeetle2_p4.defaults" \
+  build
+
+idf.py -B build.firebeetle -p /dev/ttyACM0 flash
+```
+
+60 x 25 mm, 32 MB PSRAM, 16 MB flash, an ESP32-C6-MINI-1 and no Ethernet at all,
+so it runs like the ESP32-P4-WIFI6: setup hotspot first, then a station. Its
+pins were read from the vendor schematic and checked against Espressif's Arduino
+variant for the board (`variants/dfrobot_firebeetle2_esp32p4`), which agrees:
+C6 SDIO on 18/19/14-17 with reset 54, microSD on the usual six with an active-low
+power gate on 45, I2C on 7/8, BOOT on 35.
+
+Three things that are specific to it:
+
+- **Two USB-C ports, and they are not interchangeable.** The one by the RST
+  button is USB1_P/N - the P4's GPIO 25/24, its USB-serial-JTAG: power, flashing
+  and the log. The other is USB0_P/N, the OTG-HS, and that is the target's.
+- **The console goes over USB-serial-JTAG**, because there is no bridge chip on
+  the board. Set to UART, the log would come out on header pins nobody has
+  wired and the device would look like it hung at boot (#42).
+- **The CSI connector is the 15-pin Raspberry Pi one**, so the C790 ribbon fits;
+  its two camera control lines are pull-ups only, so `TC358743_RST_GPIO=-1`.

@@ -1,0 +1,84 @@
+# DFRobot FireBeetle 2 ESP32-P4 (DFR1172), and the AI Kit (DFR1237), which is
+# the same board with a camera, a screen and a stand in the box
+#
+# Build it with:
+#   idf.py -B build.firebeetle -D SDKCONFIG=build.firebeetle/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/firebeetle2_p4.defaults" build
+#
+# The smallest board here that can do the whole job: 60 x 25 mm, an
+# ESP32-P4NRW32 (32 MB PSRAM), 16 MB flash, an ESP32-C6-MINI-1 for WiFi 6, a
+# 15-pin Raspberry Pi camera connector, a microSD slot and two USB-C ports.
+# No wired network - the C6 is the only link, like the ESP32-P4-WIFI6.
+#
+# Read off the vendor schematic (DFR1172_..._schematics_V1.0.pdf, dfrobot.com),
+# and cross-checked against Espressif's own board file for it,
+# arduino-esp32 variants/dfrobot_firebeetle2_esp32p4/pins_arduino.h. Two sources
+# written from the same board, and they agree:
+#   ESP32-C6 over SDIO: CLK 18, CMD 19, D0-D3 14/15/16/17, slave reset 54 -
+#                       the Function EV numbers, so the same esp-hosted profile.
+#   microSD: CLK 43, CMD 44, D0 39, D1 40, D2 41, D3 42, and SD1_VDD through an
+#            AO3401 P-channel MOSFET off GPIO 45. The net is even called
+#            SD1_PWRN: active low, which is the firmware default.
+#   Capture I2C: SDA 7, SCL 8, with 2.2K pull-ups on the CSI connector.
+#   BOOT button: GPIO 35. (GPIO 36 is the second strapping pin and is on the
+#   header - leave it alone.)
+#   Headers: an 18-pin row and a 14-pin row, not a 2x20 - see board_header.c.
+#
+# The CSI connector is the 15-pin 1.0 mm Raspberry Pi one, in the standard
+# order: 1/4/7/10 ground, 2/3 lane 0, 5/6 lane 1, 8/9 clock, 11/12 the camera
+# control lines, 13/14 I2C SCL and SDA, 15 3.3 V. A Geekworm C790 ribbon plugs
+# straight in. DFRobot's own note is worth repeating: the silver contacts face
+# the connector's contacts and the blue backing faces the black clip.
+#
+# Which USB-C is which matters here, because both are Type-C and they do
+# different jobs:
+#   - the port beside the RST button carries USB1_P/N, which are the P4's
+#     GPIO25/24 - the USB-serial-JTAG. That is power, flashing and the log.
+#   - the other one carries USB0_P/N, the P4's DP/DM: USB 2.0 OTG high-speed.
+#     That is the target's keyboard and mouse.
+# Its VBUS pins tie straight to the board's 5 V rail, so a target that powers
+# its port back-feeds the board, exactly as the reference board does down its
+# MX1.25 lead: pulling that cable at the target's end reboots the KVM.
+#
+# NOT YET VERIFIED ON HARDWARE. Configured from the schematic and published so
+# owners can try it.
+
+# --- flash and partitions ---------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- silicon revision -------------------------------------------------------
+# Left at the base build's pre-3.0 setting: DFRobot's own page says ESP32-P4
+# v1.0, so no rev 3.x twin is published for this board.
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/firebeetle2-p4/manifest.json"
+
+# --- network ----------------------------------------------------------------
+# No Ethernet PHY on this board at all, so the first boot opens the setup
+# hotspot and the console can then join a network as a station.
+CONFIG_KVM_ETH_ENABLE=n
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- microSD ----------------------------------------------------------------
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# --- capture reset ----------------------------------------------------------
+# The CSI connector's two control lines carry a pull-up and nothing else (10K on
+# IO0, IO1 not fitted), so there is no RESETN to drive. The C790 resets itself
+# at power-on.
+CONFIG_KVM_TC358743_RST_GPIO=-1
+
+# --- console ----------------------------------------------------------------
+# Over the USB-serial-JTAG, which is the port used for flashing - so the log is
+# readable without a UART adapter, and GPIO 37/38 stay free header pins. This
+# board has no UART bridge chip: the programming port is the P4's own.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_FIREBEETLE2_P4=y

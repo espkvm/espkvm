@@ -74,7 +74,7 @@ board has its own overlay in `boards/`:
 | Guition ESP32-P4-M3-Dev | supported, community-tested |
 | M5Stack Unit PoE-P4 / PoE-P4X | network half only - its capture add-on is an LT6911D, no driver yet |
 | Waveshare ESP32-P4-NANO-WIFI6-DB | fits on paper: 32 MB PSRAM, CSI, Type-A OTG-HS, RJ45 + PoE. Its radio is an **ESP32-C5**, which esp-hosted lists as a target but nobody here has run |
-| DFRobot FireBeetle 2 ESP32-P4 | fits: 32 MB / 16 MB, C6, Pi-compatible CSI, USB-C OTG-HS. No wired link |
+| DFRobot FireBeetle 2 ESP32-P4 / AI Kit | supported; `boards/firebeetle2_p4.defaults`. WiFi only - no wired link |
 | VIEWE ESP32-P4-Pi | fits on paper, with one thing to check: its USB is a Type-A **host** port, so how the role is switched and what drives VBUS both need reading |
 | MakerGo / Osprey ESP32P4C5 | 15-pin CSI and an ESP32-C5, but RMII only on a header - Ethernet needs your own PHY |
 | M5Stack Tab5 | everything is there, but the CSI is taken by its own camera and the tablet is a lot of board to hide behind a server |

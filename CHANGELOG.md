@@ -18,6 +18,15 @@ bumps the patch).
   things to know: a jumper switches the OTG-HS between one Type-A socket (what
   the KVM wants) and an internal hub, and that socket drives its own 5 V, so the
   lead to the target must be an A-to-A cable with the 5 V wire cut.
+- **A build target for the DFRobot FireBeetle 2 ESP32-P4** (DFR1172, and the AI
+  Kit DFR1237 - the same board with accessories). The smallest board that can do
+  the job: 60 x 25 mm, 32 MB PSRAM, 16 MB flash, an ESP32-C6 for WiFi and a
+  15-pin Raspberry Pi camera connector. No Ethernet, so it starts on the setup
+  hotspot like the ESP32-P4-WIFI6. Pins read from the vendor schematic and
+  confirmed against Espressif's Arduino variant for the board. Its two USB-C
+  ports are not interchangeable: the one by the RST button is the P4's
+  USB-serial-JTAG (power, flashing, log - and this build's console), the other is
+  the OTG-HS that goes to the target.
 - **A list of the P4 boards that have been looked at**, in `docs/PORTING.md`,
   including the ones that do not work and why - most fail on USB, not on memory.
   Plus what to check about a camera connector before buying: 15-pin/1.0 mm takes

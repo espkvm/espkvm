@@ -188,6 +188,8 @@ menu "ESP-KVM"
                 bool "Waveshare ESP32-P4-WIFI6"
             config KVM_BOARD_WAVESHARE_NANO
                 bool "Waveshare ESP32-P4-NANO"
+            config KVM_BOARD_FIREBEETLE2_P4
+                bool "DFRobot FireBeetle 2 ESP32-P4"
             config KVM_BOARD_GUITION
                 bool "Guition ESP32-P4-M3-Dev"
             config KVM_BOARD_FUNCEV

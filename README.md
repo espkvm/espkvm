@@ -347,6 +347,29 @@ target must be an A-to-A cable with the 5 V wire cut.
 
 <table>
 <tr>
+<td width="50%"><img src="docs/board-firebeetle2.webp" alt="DFRobot FireBeetle 2 ESP32-P4 board"></td>
+<td width="50%" valign="top">
+
+**[DFRobot FireBeetle 2 ESP32-P4](https://www.dfrobot.com/product-2915.html)**
+&mdash; *built from the schematic, not yet run on one*
+
+The smallest board that can do the whole job: 60 x 25 mm, 32 MB PSRAM, 16 MB
+flash, an ESP32-C6 for WiFi 6 and a 15-pin Raspberry Pi camera connector, so a
+C790 ribbon plugs straight in. No wired network - WiFi is the only link, as on
+the ESP32-P4-WIFI6. Build overlay: `boards/firebeetle2_p4.defaults`. The AI Kit
+(DFR1237) is the same board with accessories in the box.
+
+Two USB-C ports, and it matters which: the one beside the RST button is the
+P4's USB-serial-JTAG (power, flashing and the log), the other is the USB 2.0
+OTG-HS that goes to the target. Its 5 V ties to the board's rail, so unplugging
+it at the target's end reboots the KVM.
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
 <td width="50%" align="center"><img src="docs/board-add.svg" width="320" alt="A dashed outline with a plus sign, standing in for a board that is not on the list yet"></td>
 <td width="50%" valign="top">
 
