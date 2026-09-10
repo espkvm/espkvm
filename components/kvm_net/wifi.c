@@ -53,6 +53,7 @@ static unsigned s_retries;
 /* True once esp_wifi is up (a WiFi mode is running), so a scan can reuse it
  * instead of borrowing the SD bus to bring the co-processor up. */
 static bool s_wifi_running;
+static bool s_setup_ap; /* the open hotspot for a device with no password and no cable */
 
 /* ---- network scan (async, so the single web-server task never blocks) ---- */
 typedef enum { SCAN_IDLE, SCAN_RUNNING, SCAN_DONE, SCAN_ERROR } scan_state_t;
@@ -245,7 +246,7 @@ static void generate_ap_password(void)
 
 /* Fill an access-point config (name ESP-KVM-<mac>, WPA2 if ap_pass is long
  * enough else open). Shared by AP mode and the APSTA rescue hotspot. */
-static void fill_ap_config(wifi_config_t *ap)
+static void fill_ap_config(wifi_config_t *ap, bool force_open)
 {
     char apssid[33];
     derive_ap_ssid(apssid, sizeof(apssid));
@@ -255,12 +256,12 @@ static void fill_ap_config(wifi_config_t *ap)
     ap->ap.max_connection = 4;
     /* An unset password means "make one", not "let anybody in"; an open hotspot
        is a deliberate choice and has its own setting. */
-    if (!kvm_setting_bool("ap_open") && (!kvm_setting_str("ap_pass") ||
-                                         strlen(kvm_setting_str("ap_pass")) < 8)) {
+    const bool open = force_open || kvm_setting_bool("ap_open");
+    if (!open && (!kvm_setting_str("ap_pass") || strlen(kvm_setting_str("ap_pass")) < 8)) {
         generate_ap_password();
     }
     const char *pass = kvm_setting_str("ap_pass");
-    if (!kvm_setting_bool("ap_open") && pass && strlen(pass) >= 8) {
+    if (!open && pass && strlen(pass) >= 8) {
         strlcpy((char *)ap->ap.password, pass, sizeof(ap->ap.password));
         ap->ap.authmode = WIFI_AUTH_WPA2_PSK;
     } else {
@@ -403,7 +404,7 @@ static esp_err_t wifi_start_sta(void)
          * on-site to fix its settings. */
         s_ap_netif = esp_netif_create_default_wifi_ap();
         wifi_config_t ap = {0};
-        fill_ap_config(&ap);
+        fill_ap_config(&ap, false);
         ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK, ESP_FAIL, TAG, "apsta");
         (void)esp_wifi_set_config(WIFI_IF_AP, &ap);
         (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
@@ -433,7 +434,7 @@ static esp_err_t wifi_start_sta(void)
     return ESP_OK;
 }
 
-static esp_err_t wifi_start_ap(void)
+static esp_err_t wifi_start_ap(bool force_open)
 {
     s_netif = esp_netif_create_default_wifi_ap();
     if (!s_netif) {
@@ -441,7 +442,7 @@ static esp_err_t wifi_start_ap(void)
         return ESP_FAIL;
     }
     wifi_config_t ap = {0};
-    fill_ap_config(&ap);
+    fill_ap_config(&ap, force_open);
     strlcpy(s_ssid, (const char *)ap.ap.ssid, sizeof(s_ssid)); /* the AP name, for status */
 
     ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_AP) == ESP_OK, ESP_FAIL, TAG, "ap mode");
@@ -491,11 +492,12 @@ static void sdio_add_internal_pullups(void)
 #endif
 }
 
-esp_err_t kvm_wifi_init(void)
+/*
+ * Bring the co-processor and the WiFi driver up. Everything below this line
+ * needs the SD bus, so whoever calls it has already given the bus away.
+ */
+static esp_err_t coproc_wifi_up(void)
 {
-    const int32_t m = kvm_setting_int("net_mode");
-    s_mode = (m == KVM_NET_WIFI_AP) ? KVM_NET_WIFI_AP : KVM_NET_WIFI_STA;
-
     /* The co-processor's eager constructor init is disabled (see the note above and
      * the board overlay) so Ethernet mode keeps the SD bus; bring it up now, which is
      * the point a WiFi mode needs it. esp-hosted 3.0 split the bring-up: esp_hosted_init
@@ -509,7 +511,7 @@ esp_err_t kvm_wifi_init(void)
     if (herr != 0) {
         ESP_LOGW(TAG, "esp_hosted bring-up failed (%d) - is the C6 present?", herr);
         kvm_cap_report(KVM_CAP_WIFI, false, "WiFi co-processor did not start");
-        return ESP_OK;
+        return ESP_ERR_NOT_FOUND;
     }
 
     /* esp_netif and the default event loop are not up yet in WiFi mode (Ethernet,
@@ -528,15 +530,67 @@ esp_err_t kvm_wifi_init(void)
                  esp_err_to_name(err));
         kvm_cap_report(KVM_CAP_WIFI, false, "WiFi co-processor not responding (%s)",
                        esp_err_to_name(err));
-        return ESP_OK;
+        return err;
     }
     s_wifi_running = true; /* esp_wifi is up; a scan can reuse it, no bus borrow */
+    return ESP_OK;
+}
 
-    err = (s_mode == KVM_NET_WIFI_AP) ? wifi_start_ap() : wifi_start_sta();
+esp_err_t kvm_wifi_init(void)
+{
+    const int32_t m = kvm_setting_int("net_mode");
+    s_mode = (m == KVM_NET_WIFI_AP) ? KVM_NET_WIFI_AP : KVM_NET_WIFI_STA;
+
+    if (coproc_wifi_up() != ESP_OK) {
+        return ESP_OK; /* WiFi is optional; the warning is already logged */
+    }
+    esp_err_t err = (s_mode == KVM_NET_WIFI_AP) ? wifi_start_ap(false) : wifi_start_sta();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "WiFi %s start failed", s_mode == KVM_NET_WIFI_AP ? "AP" : "station");
     }
     return ESP_OK; /* non-fatal regardless */
+}
+
+/*
+ * The setup hotspot: the way in for a device that has no password yet and no
+ * cable. It is open on purpose - the password it would otherwise invent gets
+ * printed to a serial console and a display, and a board like the PoE one has
+ * neither, so an invented password would lock the only door. What makes that
+ * safe is the session it hands out: until a real password is set, a session may
+ * reach the auth endpoints and nothing else, so the machine behind the KVM
+ * cannot be driven through it (see kvm_auth_check).
+ *
+ * One-way trip: esp_hosted cannot be torn down (esp_hosted_deinit races its own
+ * async transport init and asserts), so the co-processor keeps the shared SD bus
+ * until the next restart, and the microSD stays unmounted. That is the right
+ * trade on a device nobody has claimed yet - there is nothing on the card to
+ * serve while there is no way in.
+ */
+esp_err_t kvm_wifi_setup_ap_start(void)
+{
+    if (s_wifi_running) {
+        return ESP_ERR_INVALID_STATE; /* the radio is already somebody else's */
+    }
+    bool was_mounted = false;
+    (void)kvm_storage_bus_suspend(&was_mounted); /* usually nothing to give up */
+
+    s_mode = KVM_NET_WIFI_AP;
+    esp_err_t err = coproc_wifi_up();
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = wifi_start_ap(true);
+    if (err == ESP_OK) {
+        s_setup_ap = true;
+        ESP_LOGW(TAG, "no password set and no cable - setup hotspot \"%s\" is open; "
+                      "join it and set a password at http://192.168.4.1/", s_ssid);
+    }
+    return err;
+}
+
+bool kvm_wifi_setup_ap_active(void)
+{
+    return s_setup_ap;
 }
 
 void kvm_wifi_status(kvm_wifi_status_t *out)
@@ -693,6 +747,16 @@ void kvm_wifi_announce(void)
 esp_err_t kvm_wifi_scan_start(void)
 {
     return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t kvm_wifi_setup_ap_start(void)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+bool kvm_wifi_setup_ap_active(void)
+{
+    return false;
 }
 
 void kvm_wifi_scan_json(char *buf, size_t len)

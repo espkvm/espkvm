@@ -5,6 +5,35 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [0.44.0] - 2026-09-10
+
+### Added
+- **A device with no password and no cable now puts out a hotspot.** Until now
+  such a device had no way in at all: nothing to reach it at, and no hotspot,
+  because the co-processor only runs once a WiFi mode is picked - in the console
+  you cannot reach. On a board that has one, a new device waits twenty seconds
+  for its network port and then opens ESP-KVM-xxxx with no password; the console
+  is at 192.168.4.1. Open on purpose - the password it would invent goes to a
+  serial console and a display, and the PoE board has neither - and safe because
+  a session with the default password still in force reaches the auth endpoints
+  and nothing else. It stops the moment a password is set, and Settings ->
+  Network turns it off. Found by the first owner of a PoE board (#42), who
+  reasonably expected an SSID.
+
+### Fixed
+- **A sign-in the browser throws away now says so.** If the device takes the
+  password but the session cookie never comes back, the console used to show the
+  same empty form again, which reads as a wrong password.
+- **A build with core dumps turned off works again.** The web server asked for
+  `esp_core_dump.h` whatever the configuration, and ESP-IDF only puts that
+  header on the include path when core dumps are enabled - so anyone rebuilding
+  in a tree with an sdkconfig from before 0.43.0 got "No such file or
+  directory". Thanks to @petrn for the report (#43).
+- **The console no longer knocks on the keyboard socket while nobody is signed
+  in.** It opened with the page, so a device showing a login form refused the
+  handshake every couple of seconds and logged each one. It waits for the
+  session now.
+
 ## [0.43.0] - 2026-09-08
 
 ### Added

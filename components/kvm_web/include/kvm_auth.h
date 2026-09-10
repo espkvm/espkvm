@@ -49,6 +49,12 @@ typedef void (*kvm_auth_reset_ui_cb_t)(int pct, const char *done);
  */
 void kvm_auth_check_reset_button(kvm_auth_reset_ui_cb_t ui);
 
+/**
+ * Whether a real password has ever been set. False on a device nobody has
+ * claimed yet, where the default one still works.
+ */
+bool kvm_auth_password_set(void);
+
 /** Whether a request must carry a valid session to be served at all. */
 bool kvm_auth_required(void);
 

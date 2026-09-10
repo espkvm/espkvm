@@ -469,6 +469,14 @@ static bool cookie_token(httpd_req_t *req, char *out, size_t out_len)
     return found;
 }
 
+bool kvm_auth_password_set(void)
+{
+    lock();
+    const bool set = s_have_password;
+    unlock();
+    return set;
+}
+
 bool kvm_auth_required(void)
 {
     return kvm_setting_bool("sec_auth");
@@ -795,7 +803,8 @@ static void set_session_cookie(httpd_req_t *req, char *buf, size_t len, const ch
      * it. HttpOnly and SameSite apply either way. AP (setup hotspot) mode serves
      * the console plain even when sec_https is on (the captive browser can't clear
      * the self-signed cert), so it must not mark the cookie Secure either. */
-    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP) ||
+                         kvm_wifi_setup_ap_active();
     const bool tls = kvm_setting_bool("sec_https") && !ap_mode;
     snprintf(buf, len, COOKIE_NAME "=%s; Path=/; HttpOnly; SameSite=Strict%s; %s",
              clear ? "" : token, tls ? "; Secure" : "",
@@ -1208,6 +1217,14 @@ static bool self_test(void)
 
 esp_err_t kvm_auth_init(void)
 {
+    /* Called twice on purpose now - once early, to answer "is there a password?"
+     * before the web server exists, and once by the server itself. The self-test
+     * costs a quarter of a second, so the second call just says yes. */
+    static bool s_inited;
+    if (s_inited) {
+        return ESP_OK;
+    }
+
     if (!s_mu) {
         s_mu = xSemaphoreCreateMutex();
         if (!s_mu) {
@@ -1228,6 +1245,7 @@ esp_err_t kvm_auth_init(void)
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "no password set; the default one works until it is changed");
+        s_inited = true;
         return ESP_OK;
     }
     size_t salt_len = sizeof(s_salt);
@@ -1241,5 +1259,6 @@ esp_err_t kvm_auth_init(void)
         ESP_LOGW(TAG, "no password set; the default one works until it is changed");
     }
     nvs_close(nvs);
+    s_inited = true;
     return ESP_OK;
 }

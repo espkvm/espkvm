@@ -8,7 +8,11 @@
 #include <strings.h>
 
 #include "esp_attr.h"
+/* The header only exists on the include path when core dumps are enabled -
+ * everything below that uses it is behind the same guard. */
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 #include "esp_core_dump.h"
+#endif
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -419,6 +423,54 @@ static void boot_guard_check(void)
     }
 }
 
+
+#if CONFIG_KVM_WIFI
+/* How long to give the network port before deciding no cable is coming. A PHY
+ * settles in a couple of seconds; this is generous. */
+#define SETUP_AP_LINK_WAIT_MS 20000
+
+/*
+ * A device nobody has claimed yet, with nothing in its network port, has no way
+ * in at all: no address to reach, and no hotspot, because the co-processor only
+ * runs when a WiFi mode is chosen - which has to be chosen through the console
+ * you cannot reach. On a board with a co-processor, put out an open setup
+ * hotspot instead. Until a password is set a session may reach the auth
+ * endpoints and nothing else, so this hands nobody the machine behind the KVM.
+ *
+ * Decided before the web server starts, and the wait is taken here rather than
+ * in a task of its own: the server has to know, because on the hotspot the
+ * console is served in the clear (a captive sheet cannot get past a self-signed
+ * certificate) and the whole point is to be reachable. Only a device with no
+ * password waits at all, and only until its cable comes up.
+ */
+static void maybe_start_setup_ap(int32_t net_mode)
+{
+    if (net_mode != KVM_NET_ETHERNET || !kvm_setting_bool("setup_ap")) {
+        return;
+    }
+    /* The server calls this too; the second call is free. */
+    if (kvm_auth_init() != ESP_OK || kvm_auth_password_set()) {
+        return;
+    }
+
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(SETUP_AP_LINK_WAIT_MS);
+    bool up = false;
+    while ((int32_t)(deadline - xTaskGetTickCount()) > 0) {
+        kvm_eth_link(&up, NULL);
+        if (up) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    if (up) {
+        ESP_LOGI(TAG, "setup hotspot not needed - the cable is up");
+    } else if (kvm_wifi_setup_ap_start() != ESP_OK) {
+        ESP_LOGW(TAG, "no password, no cable, and no working co-processor - "
+                      "the console can only be reached over the network port");
+    }
+}
+#endif
+
 void app_main(void)
 {
     /* First, so everything below is captured. What the bootloader and the ROM
@@ -534,6 +586,12 @@ void app_main(void)
                  net_mode == KVM_NET_WIFI_AP ? "AP" : "station");
         ESP_ERROR_CHECK(kvm_wifi_init());
     }
+
+#if CONFIG_KVM_WIFI
+    /* Before the web server: whether the setup hotspot is up decides how the
+     * console is served (plain on the hotspot, TLS everywhere else). */
+    maybe_start_setup_ap(net_mode);
+#endif
 
     /* Before the web server, which reads published frames. */
     video_frame_store_init();

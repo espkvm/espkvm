@@ -521,6 +521,17 @@ Sign in as **admin / admin**. The console will not go any further until that
 password is changed: a KVM left on the password it shipped with is a keyboard
 on someone else's machine, offered to whoever finds it.
 
+If there is no cable at hand and the board carries a WiFi co-processor, a new
+device puts out a hotspot of its own instead. It waits twenty seconds for the
+network port, and if nothing turns up it opens **ESP-KVM-xxxx** with no
+password - join it and the console is at `http://192.168.4.1/`. It is open
+because the password it would otherwise invent is printed to a serial console
+and a display, and some of these boards have neither. Nothing is handed over
+with it: until a real password is set, the only thing that answers is the page
+that sets one. It stops happening as soon as one exists, and there is a switch
+in **Settings -> Network** to turn it off. Note that the co-processor and the
+card slot share one bus, so while that hotspot is up the microSD is not.
+
 After that the cable is only needed if something goes badly wrong - updates are
 installed from the console itself.
 

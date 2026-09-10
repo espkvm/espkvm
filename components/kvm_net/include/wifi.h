@@ -36,6 +36,16 @@ esp_err_t kvm_wifi_init(void);
  */
 void kvm_wifi_announce(void);
 
+/**
+ * Start the open setup hotspot: the way in for a device with no password and no
+ * cable. Takes the shared SD bus for the co-processor and keeps it until the
+ * next restart. Only the auth endpoints answer until a password is set.
+ */
+esp_err_t kvm_wifi_setup_ap_start(void);
+
+/** Is the open setup hotspot up? The console is served in the clear while it is. */
+bool kvm_wifi_setup_ap_active(void);
+
 
 /** Live WiFi state for the console's network indicator. */
 typedef struct {

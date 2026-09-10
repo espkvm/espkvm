@@ -446,6 +446,17 @@ static const kvm_setting_t s_settings[] = {
         .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
 
+    {
+        .key = "setup_ap", .section = "network", .type = KVM_VT_BOOL,
+        .title = "Setup hotspot on an unclaimed device",
+        .help = "While no password has been set and no network cable is plugged "
+                "in, put out an open hotspot (ESP-KVM-xxxx) so the device can be "
+                "reached and given one. It stops happening the moment a password "
+                "exists. Until then a visitor can only set that password - video, "
+                "keyboard and every other endpoint stay shut.",
+        .def = 1, .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
+    },
+
     /* ---- vpn / wireguard ------------------------------------------------- */
     {
         .key = "wg_enable", .section = "vpn", .type = KVM_VT_BOOL,

@@ -4,6 +4,8 @@
  */
 #include "http_server.h"
 
+#include "sdkconfig.h" /* the CONFIG_ guards below are read before any of them */
+
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -24,11 +26,17 @@
 #include "freertos/task.h"
 
 #include "esp_app_desc.h"
-#include "esp_core_dump.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+
+/* espcoredump only puts its header on the include path when core dumps are
+ * enabled, so a build with them off must not ask for it. Everything that uses
+ * it is behind the same guard. */
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
+#endif
 
 #include "esp_https_server.h"
 #include "esp_netif.h"
@@ -3648,7 +3656,8 @@ static esp_err_t captive_landing(httpd_req_t *req)
     /* In AP mode the console is plain HTTP on this port (below); otherwise it is
      * only reachable over TLS and the button must use https + the cert-matching
      * hostname. */
-    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP) ||
+                         kvm_wifi_setup_ap_active();
     const bool plain = ap_mode || !kvm_setting_bool("sec_https");
     char console_url[64];
     if (plain) {
@@ -3907,7 +3916,8 @@ httpd_handle_t http_server_start(void)
      * makes. H.264 (which needs a secure context) is unavailable over the hotspot;
      * MJPEG and all of settings still work, which is what a rescue/setup link is for.
      */
-    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
+    const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP) ||
+                         kvm_wifi_setup_ap_active();
     /*
      * TLS is the default because this device is a way into another machine, and
      * because the console needs a secure page for WebCodecs - without it the

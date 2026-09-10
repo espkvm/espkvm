@@ -195,7 +195,9 @@ static void gather(kvm_display_status_t *st)
         snprintf(st->ssid, sizeof(st->ssid), "%s", w.ssid);
     }
     if (st->ap_mode && w.ssid[0]) {
-        const char *pass = kvm_setting_str("ap_pass");
+        /* The setup hotspot is open on purpose, whatever ap_pass holds - so the
+         * QR must say "no password" or the phone joins with one and fails. */
+        const char *pass = kvm_wifi_setup_ap_active() ? NULL : kvm_setting_str("ap_pass");
         build_join_qr(st->join_qr, sizeof(st->join_qr), w.ssid, pass);
         /* Matches wifi.c and the QR: below WPA2's minimum the hotspot comes up
          * open, and there is no passphrase to show. */
