@@ -319,6 +319,50 @@ Two products, two images: the **Unit PoE-P4** is pre-3.0 silicon
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="50%"><img src="docs/board-module-devkit.webp" alt="Waveshare ESP32-P4-Module-DEV-KIT board"></td>
+<td width="50%" valign="top">
+
+**[Waveshare ESP32-P4-Module-DEV-KIT](https://www.waveshare.com/esp32-p4-module-dev-kit.htm)**
+&mdash; *built from the schematic, not yet run on one*
+
+The WIFI6-DEV-KIT's arrangement packed into a module: the P4, an ESP32-C6 and
+16 MB of flash under one shield, on a carrier with 100M Ethernet (PoE through an
+add-on), a microSD slot, a 2x20 header and four USB-A sockets. 32 MB PSRAM.
+Every pin the KVM touches is the one the boards above use - Ethernet as on the
+P4-ETH, the C6 on GPIO 14-19, the card slot's power gate on GPIO 45, capture I2C
+on 7/8 - and the CSI connector is the 15-pin Raspberry Pi one, so a C790 ribbon
+plugs straight in. Build overlay: `boards/moduledevkit_p4.defaults`. The
+-A / -B / -C kits are the same board with a different DSI screen in the box.
+
+Two things to get right. The OTG-HS is switched **by a jumper** between one
+Type-A socket and an internal hub: the KVM wants the socket, the hub position
+gives host ports instead. And that socket drives its own 5 V, so the lead to the
+target must be an A-to-A cable with the 5 V wire cut.
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%" align="center"><img src="docs/board-add.svg" width="320" alt="A dashed outline with a plus sign, standing in for a board that is not on the list yet"></td>
+<td width="50%" valign="top">
+
+**Your board is not here?**
+[Open an issue](https://github.com/espkvm/espkvm/issues/new) with a link to its
+schematic. If it clears the five points under
+[What rules a board out](#the-device--pick-one-esp32-p4-board), adding it is an
+overlay and a build - the pins live in [menuconfig](docs/PORTING.md), not in the
+code - and it can land in the next release. That is how most of the targets here
+arrived. If it does not clear them, the answer says which point it fails on,
+which is worth having before the board does.
+
+</td>
+</tr>
+</table>
+
 ### Companion boards
 
 <table>

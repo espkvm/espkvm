@@ -130,6 +130,13 @@ jobs:
           - id: p4-wifi6-devkit
             build_dir: build.wifi6devkit
             sdkconfig_defaults: sdkconfig.defaults;boards/wifi6devkit_p4.defaults
+          # Waveshare ESP32-P4-Module-DEV-KIT - the WIFI6-DEV-KIT's arrangement
+          # on a module: P4, C6 and 16 MB of flash under one shield, Ethernet
+          # with a PoE header, and the OTG-HS switched to a Type-A socket by a
+          # jumper. Read off its schematic; nobody has run it on one yet.
+          - id: p4-module-devkit
+            build_dir: build.moduledevkit
+            sdkconfig_defaults: sdkconfig.defaults;boards/moduledevkit_p4.defaults
           # Waveshare ESP32-P4-WIFI6 - no Ethernet; ESP32-C6 SDIO WiFi and a
           # setup hotspot are the only management link.
           - id: p4-wifi6

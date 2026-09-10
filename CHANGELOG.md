@@ -7,6 +7,22 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Added
+- **A build target for the Waveshare ESP32-P4-Module-DEV-KIT** (and the -A/-B/-C
+  kits, which only differ by the screen in the box). It is the WIFI6-DEV-KIT on
+  a module - P4, ESP32-C6 and 16 MB flash under one shield, 32 MB PSRAM - so
+  every pin the KVM touches is one already in use: Ethernet as on the P4-ETH, the
+  C6 on GPIO 14-19, the card slot's power gate on 45, capture I2C on 7/8. Its CSI
+  connector is the 15-pin Raspberry Pi one, so a C790 ribbon fits as it comes.
+  Read off the vendor schematic; nobody has run it on the hardware yet. Two
+  things to know: a jumper switches the OTG-HS between one Type-A socket (what
+  the KVM wants) and an internal hub, and that socket drives its own 5 V, so the
+  lead to the target must be an A-to-A cable with the 5 V wire cut.
+- **A list of the P4 boards that have been looked at**, in `docs/PORTING.md`,
+  including the ones that do not work and why - most fail on USB, not on memory.
+  Plus what to check about a camera connector before buying: 15-pin/1.0 mm takes
+  a C790 ribbon directly, 22-pin/0.5 mm needs an adapter.
+
 ### Changed
 - Built with **ESP-IDF 6.1**, the release, rather than 6.1-rc1. The difference
   between the two tags is documentation and a version string.

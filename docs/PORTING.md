@@ -43,6 +43,50 @@ The LILYGO T-Halow P4 is the worked example of a board that looks right and is
 not: 8 MB PSRAM, RMII and USB OTG D+/D- only on the M.2 edge, and a 24-pin
 camera FPC with no 3.3 V and a 1.8 V I2C.
 
+### The camera connector, in detail
+
+This one is worth checking with a ruler and the schematic rather than a product
+photo, because two different connectors are called "MIPI-CSI" on P4 boards:
+
+- **15-pin, 1.0 mm pitch** - the Raspberry Pi camera connector. Pins 2/3 are
+  data lane 0, 5/6 lane 1, 8/9 the clock, 11/12 the two camera control lines,
+  13/14 I2C SCL and SDA, 15 is 3.3 V and 1/4/7/10 are ground. This is what the
+  Geekworm C790 ships a ribbon for, and it plugs in with nothing in between.
+- **22-pin, 0.5 mm pitch** - the Pi Zero / CM connector. The same signals, a
+  different connector: it needs a 15-to-22-pin adapter ribbon, and those are
+  sold for Pi cameras.
+
+So "has a CSI connector" is not the question. The questions are: how many pins
+and what pitch, is 3.3 V on it (some boards only bring a 1.8 or 2.8 V sensor
+rail), and is the I2C on it the same 3.3 V bus the bridge's registers live on.
+A board that answers 15-pin / 1.0 mm / 3.3 V / 3.3 V I2C takes the C790 ribbon
+as it comes.
+
+### Boards that have been looked at
+
+Read from schematics and vendor documentation, not from hardware, unless the
+board has its own overlay in `boards/`:
+
+| Board | Verdict |
+|---|---|
+| Waveshare P4-ETH, WIFI6, WIFI6-DEV-KIT, WIFI6-POE-ETH, Module-DEV-KIT, NANO | supported; overlays in `boards/` |
+| Espressif ESP32-P4 Function EV | supported; the rev 3.x reference |
+| Guition ESP32-P4-M3-Dev | supported, community-tested |
+| M5Stack Unit PoE-P4 / PoE-P4X | network half only - its capture add-on is an LT6911D, no driver yet |
+| Waveshare ESP32-P4-NANO-WIFI6-DB | fits on paper: 32 MB PSRAM, CSI, Type-A OTG-HS, RJ45 + PoE. Its radio is an **ESP32-C5**, which esp-hosted lists as a target but nobody here has run |
+| DFRobot FireBeetle 2 ESP32-P4 | fits: 32 MB / 16 MB, C6, Pi-compatible CSI, USB-C OTG-HS. No wired link |
+| VIEWE ESP32-P4-Pi | fits on paper, with one thing to check: its USB is a Type-A **host** port, so how the role is switched and what drives VBUS both need reading |
+| MakerGo / Osprey ESP32P4C5 | 15-pin CSI and an ESP32-C5, but RMII only on a header - Ethernet needs your own PHY |
+| M5Stack Tab5 | everything is there, but the CSI is taken by its own camera and the tablet is a lot of board to hide behind a server |
+| Olimex ESP32-P4-PC | **no**: 32 MB / 16 MB, IP101 Ethernet and a 15-pin CSI, all correct - and then an FE1.1s hub sits on the OTG-HS, so the port is permanently a host and can never present a keyboard |
+| Olimex ESP32-P4-DevKit | **no**: same memory, same PHY, same connector, but D+/D- from the OTG-HS are not brought out anywhere; the Type-C is the serial/JTAG bridge |
+| Waveshare ESP32-P4-Pico, ESP32-P4-Core-DEV-KIT | **no**: no network at all - no PHY and no co-processor. (The Core kit's CSI is also the 22-pin one.) |
+| Espressif ESP32-P4-EYE | **no**: a camera kit; the CSI is occupied by its own sensor |
+| Waveshare ESP32-P4-86-Panel-ETH-2RO | **no**: the CSI connector is not fitted on that variant |
+| LILYGO T-Halow P4 | **no**: see above |
+
+If a board is not here, open an issue with a link to its schematic.
+
 ## What to change
 
 Run `idf.py menuconfig` and open **ESP-KVM**:

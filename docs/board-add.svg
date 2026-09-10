@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" width="680" height="340" role="img"
+     aria-label="A dashed outline with a plus sign: a board that is not on the list yet">
+  <rect x="8" y="8" width="664" height="324" rx="18" fill="none" stroke="#8a8f98" stroke-width="3"
+        stroke-dasharray="14 12"/>
+  <g stroke="#8a8f98" stroke-width="14" stroke-linecap="round">
+    <line x1="340" y1="112" x2="340" y2="228"/>
+    <line x1="282" y1="170" x2="398" y2="170"/>
+  </g>
+</svg>

@@ -1,0 +1,85 @@
+# Waveshare ESP32-P4-Module-DEV-KIT (and the -A / -B / -C kits, SKU 30560/30772/
+# 30843/30844 - the letters only change which DSI screen is in the box)
+#
+# Build it with:
+#   idf.py -B build.moduledevkit -D SDKCONFIG=build.moduledevkit/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/moduledevkit_p4.defaults" build
+#
+# Everything on this board that the KVM touches is an ESP32-P4-Module: a P4NRW32
+# (32 MB PSRAM in package), an ESP32-C6 and 16 MB of flash under one shield. The
+# carrier adds the RJ45, the card slot, the USB, the codec and a 2x20 header.
+#
+# Read off the published schematic (ESP32-P4-Module-DEV-KIT.pdf, files.waveshare.com),
+# and it is the same layout as the boards already here:
+#   Ethernet (IP101GRI): TX_EN 49, TXD0 34, TXD1 35, CRS_DV 28, RXD0 29, RXD1 30,
+#                        MDC 31, MDIO 52, REF_CLK 50, PHY reset 51. PHY address 1
+#                        (PHY_AD0 pulled up through 5.1K, PHY_AD3 down) - the
+#                        firmware default.
+#   microSD: CLK 43, CMD 44, D0 39, D1 40, D2 41, D3 42, and SD1_VDD through an
+#            AO3401 P-channel MOSFET off GPIO 45, so active low.
+#   ESP32-C6: inside the module. GPIO 14-19 are the only numbers the module does
+#             not bring out to a pad, which is the SDIO link - the same six pins
+#             as the Function EV board, so the same esp-hosted profile.
+#   Capture I2C: SDA 7, SCL 8, with 2.2K pull-ups on the CSI connector.
+#   BOOT button: GPIO 35, which is also Ethernet TXD1 - the sharing the password
+#   reset already handles by reading the pin once at start-up.
+#   Console: a CH343P on the Type-C, so UART on 37/38.
+#
+# The CSI connector is the 15-pin 1.0 mm one, wired to the Raspberry Pi camera
+# standard: 2/3 D0-, 5/6 D1-, 8/9 CLK, 11/12 the two camera control lines, 13/14
+# I2C SCL/SDA, 15 3V3, 1/4/7/10 ground. That is the pinout a Geekworm C790
+# ribbon expects, so the flat cable in the C790 box plugs straight in.
+#
+# The USB is worth reading twice. The module's OTG-HS goes into an FSUSB42UMX
+# mux: with the jumper on the "device" side (H3 2-3, which is also where the 47K
+# pull-up leaves it) the P4 reaches ONE of the Type-A sockets directly, and that
+# is the KVM's keyboard and mouse. The other position sends it into a CH334F hub
+# and gives three host ports instead, which is not what this firmware wants.
+# The socket is a Type-A FEMALE and its VBUS is driven by the board, so the lead
+# to the target must be an A-to-A cable with the 5 V wire cut or absent -
+# otherwise the board's 5 V rail and the target's meet.
+#
+# NOT YET VERIFIED ON HARDWARE. Configured from the schematic and published so
+# owners can try it, the same way the NANO and Guition targets started.
+
+# --- flash and partitions ---------------------------------------------------
+# 16 MB on the module, not the 32 MB of the P4-ETH, so the shared 16 MB table.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- silicon revision -------------------------------------------------------
+# Left at the base build's pre-3.0 setting, which is what every Waveshare P4
+# board seen so far has carried (rev 1.3). No rev 3.x twin is published yet:
+# nobody has reported a rev 3.x unit of this board, and each twin is another
+# image to build and keep in step. If one turns up - the boot log says
+# "Chip rev: v3.x" and this image will not start on it at all - the twin is the
+# two lines the other boards' *_rev3.defaults carry:
+# CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+# CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-module-devkit/manifest.json"
+
+# --- WiFi co-processor ------------------------------------------------------
+# The C6 is inside the module on the Function EV board's SDIO pins, so the same
+# esp-hosted configuration applies - including the guard against its eager
+# constructor init, which otherwise races the microSD for the one SD host.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- microSD ----------------------------------------------------------------
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# --- capture reset ----------------------------------------------------------
+# The base default drives GPIO 23 as the TC358743's RESETN, which is how the
+# ESP32-P4-ETH is wired. Here the CSI connector's two camera control lines go
+# nowhere but a pull-up (a 10K on CSI_IO0, CSI_IO1 not fitted), and 23 is an
+# ordinary header pin. The C790 has its own power-on reset, so leave it alone.
+CONFIG_KVM_TC358743_RST_GPIO=-1
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_MODULE_DEVKIT=y

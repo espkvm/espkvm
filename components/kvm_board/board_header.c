@@ -14,6 +14,8 @@
  *   Waveshare ESP32-P4-WIFI6 https://docs.waveshare.com/ESP32-P4-WIFI6
  *   Waveshare PoE            https://www.waveshare.com/wiki/ESP32-P4-WIFI6-POE-ETH
  *   Waveshare ESP32-P4-NANO  https://www.waveshare.com/esp32-p4-nano.htm
+ *   Waveshare Module DEV KIT https://files.waveshare.com/wiki/
+ *                            ESP32-P4-Module-DEV-KIT/ESP32-P4-Module-DEV-KIT.pdf
  *   ESP32-P4 Function EV     https://docs.espressif.com/projects/esp-dev-kits/
  *                            en/latest/esp32p4/esp32-p4-function-ev-board/
  *   Guition JC-ESP32P4-M3    the vendor's own pinout photograph of J1
@@ -87,6 +89,36 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_HAS_HEADERS 0
 #define BOARD_NAME "Waveshare ESP32-P4-WIFI6-DEV-KIT"
 #define BOARD_ID_BASE "p4-wifi6-devkit"
+#define BOARD_VERIFIED false
+
+#elif CONFIG_KVM_BOARD_WAVESHARE_MODULE_DEVKIT
+/*
+ * Pin for pin the PoE board's 40-pin header, which is a useful thing to find:
+ * these arrays were read out of this board's own schematic netlist (P6 in
+ * ESP32-P4-Module-DEV-KIT.pdf) and came out identical to the PoE pinout
+ * transcribed from Waveshare's diagram. Two boards, two sources, same header.
+ */
+static const kvm_board_pin_t s_moddev_odd[] = {
+    PWR("3V3"), IO(7),  IO(8),  IO(23), PWR("GND"), IO(21), IO(20),
+    IO(6),      PWR("3V3"), IO(3), IO(2), IO(0),    PWR("GND"), IO(24),
+    IO(33),     IO(26), IO(48), IO(53), IO(47),     PWR("GND"),
+};
+_Static_assert(sizeof(s_moddev_odd) / sizeof(s_moddev_odd[0]) == 20,
+               "s_moddev_odd: the column must hold exactly 20 pins");
+static const kvm_board_pin_t s_moddev_even[] = {
+    PWR("5V"), PWR("5V"), PWR("GND"), IO(37), IO(38),     IO(22), PWR("GND"),
+    IO(5),     IO(4),     PWR("GND"), IO(1),  IO(36),     IO(32), IO(25),
+    PWR("GND"), IO(54),   PWR("GND"), IO(46), IO(27),     IO(45),
+};
+_Static_assert(sizeof(s_moddev_even) / sizeof(s_moddev_even[0]) == 20,
+               "s_moddev_even: the column must hold exactly 20 pins");
+static const kvm_board_header_t s_headers[] = {
+    {.name = "GPIO", .rows = 20, .numbered = true, .left = s_moddev_odd,
+     .right = s_moddev_even},
+};
+#define BOARD_HAS_HEADERS 1
+#define BOARD_NAME "Waveshare ESP32-P4-Module-DEV-KIT"
+#define BOARD_ID_BASE "p4-module-devkit"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_WAVESHARE_WIFI6

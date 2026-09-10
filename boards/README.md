@@ -103,3 +103,35 @@ A display board - the MIPI-DSI touch panel is unused by the KVM. It has two USB-
 ports; the target must be on the OTG-HS one. Being Guition's own design (not a
 Waveshare layout), its undocumented data pins are less certain than the NANO's;
 see `boards/guition_p4.defaults`.
+
+### Waveshare ESP32-P4-Module-DEV-KIT (chip rev unconfirmed, 16 MB flash)
+
+```
+idf.py -B build.moduledevkit \
+  -D SDKCONFIG=build.moduledevkit/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/moduledevkit_p4.defaults" \
+  build
+
+idf.py -B build.moduledevkit -p /dev/ttyACM0 flash
+```
+
+The WIFI6-DEV-KIT's arrangement on a module: P4, ESP32-C6 and 16 MB of flash
+under one shield, 32 MB PSRAM in the package, on a carrier with 100M Ethernet
+(IP101GRI, PoE through an add-on), a microSD slot, four USB-A sockets and a 2x20
+header. Read off the vendor schematic; the only delta that is not inherited is
+the 16 MB flash table. The -A / -B / -C kits are the same board with a different
+DSI screen in the box.
+
+Two things about it are worth knowing before wiring:
+
+- **The CSI connector is the 15-pin Raspberry Pi one** - two lanes, 3.3 V, I2C
+  and the two camera control lines in the standard order - so the ribbon that
+  comes with a C790 fits without an adapter. The control lines go nowhere but a
+  pull-up, hence `CONFIG_KVM_TC358743_RST_GPIO=-1`.
+- **The USB OTG-HS runs through a mux.** A jumper sends it either straight to
+  one Type-A socket (what the KVM needs) or into a CH334F hub for three host
+  ports. That socket drives its own VBUS, so the lead to the target has to be an
+  A-to-A cable with the 5 V wire cut.
+
+No `-rev3` twin is published yet - see the note in the overlay if a rev 3.x unit
+turns up.
