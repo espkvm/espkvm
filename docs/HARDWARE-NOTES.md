@@ -18,7 +18,7 @@ repository.
 | USB | one USB-C: the CH343 flashing/console bridge (`/dev/ttyACM0`). The USB 2.0 OTG HS that presents the keyboard/mouse to the target is on the **MX1.25 connector**, not a USB port |
 | OTG power | the target's 5 V comes back down that OTG lead, so **pulling it at the target's end reboots the device**. Worth knowing before telling somebody to re-plug the cable to fix a keyboard: it takes the KVM with it |
 | Network | NetworkManager profile `espkvm-link` shares `enp0s31f6`; device lands on **10.42.0.151** |
-| Toolchain | ESP-IDF 6.1-rc1 in `~/esp/esp-idf`; cmake and ninja live in the IDF python env, not the distro |
+| Toolchain | ESP-IDF 6.1 in `~/esp/esp-idf`; cmake and ninja live in the IDF python env, not the distro |
 
 Build: `. tools/env.sh && idf.py -p /dev/ttyACM0 -b 921600 flash`
 

@@ -5,6 +5,14 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Changed
+- Built with **ESP-IDF 6.1**, the release, rather than 6.1-rc1. The difference
+  between the two tags is documentation and a version string.
+- The co-processor component (`espressif/esp_hosted`) moves 3.0.6 -> 3.0.7,
+  which fixes a leak of the GPIO interrupt handlers it allocates.
+
 ## [0.44.0] - 2026-09-10
 
 ### Added

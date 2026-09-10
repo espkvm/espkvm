@@ -48,7 +48,7 @@ dependencies:
     - esp32p4
     version: 1.3.6
   espressif/esp_hosted:
-    component_hash: 1b1c2aa8f82e0826950ec92ff16fd8f327abd2de6c8a3899301ad8cfb4747879
+    component_hash: 29069693948fba65d3b45012778d49a36a751fc2d2d7760f82e39f685fc0dbcb
     dependencies:
     - name: idf
       require: private
@@ -67,8 +67,9 @@ dependencies:
     - esp32c61
     - esp32h2
     - esp32h4
+    - esp32h21
     - esp32p4
-    version: 3.0.6
+    version: 3.0.7
   espressif/esp_lcd_gc9a01:
     component_hash: e60bc2b5649c7679bd010797a875ae64b2a57cf9cdbd6a2bf7a0ade66913edc0
     dependencies:
@@ -173,7 +174,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.2.0
+    version: 6.1.0
 direct_dependencies:
 - espressif/cjson
 - espressif/esp_h264
