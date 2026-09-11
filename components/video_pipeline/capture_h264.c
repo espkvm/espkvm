@@ -118,6 +118,57 @@ static uint32_t s_enc_h;
  */
 static bool s_enc_broken;
 
+/*
+ * The rate controller can settle at its coarsest quantiser and stay there.
+ *
+ * Seen on a device left running: the target sat on a still screen, the stream
+ * fell to 11 kbit/s of the 4000 it was allowed, and the picture went to visible
+ * blocks for minutes at a time - keyframes of 6.7 KB at QP 40 where the same
+ * screen had been 148 KB at QP 13 a minute earlier. It swings back on its own,
+ * then wedges again. Nothing that can be set on a running encoder moves it:
+ * writing the bitrate (even a much larger one), lengthening the GOP, asking for
+ * keyframes, parking it across a codec switch. What does clear it is building a
+ * new encoder - proved by changing the source's resolution, which is the one
+ * thing that makes this file do that.
+ *
+ * So watch the keyframes. A screen that has not changed produces keyframes of
+ * about the same size; one that collapses by this much, this many times in a
+ * row, is the controller stuck rather than the picture getting simpler.
+ * REF_MIN keeps a genuinely plain screen - a black one, a text console - out of
+ * it: those never reach the reference size in the first place. After a rebuild
+ * the reference starts again from the new encoder's own output, so a screen
+ * that really is that cheap settles at its own size and never trips this twice.
+ */
+#define WEDGE_RATIO 8u              /* keyframe this many times below the best */
+#define WEDGE_REF_MIN (64u * 1024u) /* ... of a reference at least this big */
+#define WEDGE_IDRS 3u               /* consecutive starved keyframes */
+#define WEDGE_COOLDOWN_US (120 * 1000 * 1000)
+
+static uint32_t s_idr_best;
+static uint32_t s_idr_starved;
+static bool s_wedged;
+static int64_t s_rebuild_after_us;
+
+/** Called for every frame the encoder returns; only keyframes carry the signal. */
+static void wedge_watch(bool is_idr, uint32_t len)
+{
+    if (!is_idr || len == 0) {
+        return;
+    }
+    if (len >= s_idr_best) {
+        s_idr_best = len;
+        s_idr_starved = 0;
+        return;
+    }
+    if (s_idr_best >= WEDGE_REF_MIN && (uint64_t)len * WEDGE_RATIO < s_idr_best) {
+        if (++s_idr_starved >= WEDGE_IDRS) {
+            s_wedged = true;
+        }
+    } else {
+        s_idr_starved = 0;
+    }
+}
+
 bool capture_h264_encoder_failed(void)
 {
     return s_enc_broken;
@@ -160,6 +211,10 @@ static void encoder_release(void)
     s_param = NULL;
     s_enc_w = 0;
     s_enc_h = 0;
+    /* The keyframe reference belongs to the instance that produced it. */
+    s_idr_best = 0;
+    s_idr_starved = 0;
+    s_wedged = false;
 }
 
 /*
@@ -219,23 +274,31 @@ static uint32_t wanted_bitrate(void)
  *
  * qp_min is a quality ceiling, not a bandwidth one: the rate controller already
  * holds the stream to the configured bitrate, and this only says how good a
- * frame is allowed to be when there is budget left over. At 25 that left a lot
- * unspendable - a still 1080p desktop sending 101 kbit/s of the 4000 it had
- * been given, and no way to use the rest however long it sat there.
+ * frame is allowed to be when there is budget left over.
  *
- * The report that led here was a still screen in visible blocks, but that turned
- * out to have another cause: the source was losing its link every few seconds,
- * so the picture restarted from a fresh keyframe before it could settle. With
- * the link steady it comes out clean at 25 as well. This lower ceiling was not
- * what fixed that, and is here on its own merit - there is no reason to refuse
- * quality that the configured bitrate has already paid for.
+ * qp_max is the one that decides what a still screen looks like, and 45 was far
+ * too coarse. Measured on a device left overnight: the target showed a dark
+ * screensaver, the stream sat at 11 kbit/s of the 4000 it was allowed, and the
+ * picture was in visible blocks - for as long as nothing moved. The rate
+ * controller had no reason to spend more: the frames were "cheap" and it parked
+ * at the coarsest quantisation it was permitted. Raising the budget to 12 Mbit/s
+ * changed neither the bitrate nor the picture, which is what proved it was the
+ * ceiling and not the bandwidth. Once nothing moves, nothing refines it either:
+ * the P-frames say "no change", so the blocks stay until the screen does
+ * something.
+ *
+ * 32 is coarse enough to leave the controller room on a busy screen and fine
+ * enough that a still one does not break into squares. An earlier report of the
+ * same symptom was put down to the source losing its HDMI link every few
+ * seconds; that was a different fault, and this was the rest of it.
  *
  * The pair is fixed when the encoder is built - the component has setters for
  * fps, GOP and bitrate, and none for these - so a change here only reaches a
- * newly built encoder, not one taken back from the parked slot.
+ * newly built encoder, not one taken back from the parked slot. In practice
+ * that means a restart.
  */
 #define H264_QP_MIN 18
-#define H264_QP_MAX 45
+#define H264_QP_MAX 32
 
 static esp_err_t encoder_open(uint32_t w, uint32_t h)
 {
@@ -312,6 +375,46 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
     ESP_LOGI(CAPTURE_LOG_TAG, "h264 encoder %" PRIu32 "x%" PRIu32 " @%" PRId32 " fps, %" PRIu32
              " kbit/s, gop %u", w, h, fps, s_bitrate / 1000u, s_gop);
     return ESP_OK;
+}
+
+/**
+ * Build a new encoder when the old one has wedged, at most once every two
+ * minutes. Runs where encoder_open() is already legal - the top of an encode,
+ * before a frame is handed over.
+ *
+ * @return true when the caller should give up on this frame (the rebuild
+ *         failed, and s_enc_broken now sends the stream to MJPEG).
+ */
+static bool wedge_rebuild_if_needed(uint32_t w, uint32_t h)
+{
+    if (!s_wedged) {
+        return false;
+    }
+    /* A settings switch, because this judges a picture by its size and could in
+     * principle read some screen wrong. Off means the blocks stay. */
+    if (!kvm_setting_bool("h264_guard")) {
+        s_wedged = false;
+        s_idr_starved = 0;
+        return false;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (now < s_rebuild_after_us) {
+        return false;
+    }
+    ESP_LOGW(CAPTURE_LOG_TAG,
+             "keyframes fell to %" PRIu32 " bytes from %" PRIu32 " - rebuilding the encoder",
+             s_idr_best / WEDGE_RATIO, s_idr_best);
+    s_wedged = false;
+    s_idr_starved = 0;
+    s_idr_best = 0;
+    s_rebuild_after_us = now + WEDGE_COOLDOWN_US;
+    encoder_release();
+    if (encoder_open(w, h) != ESP_OK) {
+        s_enc_broken = true;
+        return true;
+    }
+    (void)video_frame_take_keyframe_request(); /* a fresh encoder starts on an IDR */
+    return false;
 }
 
 static void h264_free_buffers(void)
@@ -520,6 +623,8 @@ static void h264_encode_job(const h264_job_t *job)
         }
         /* A fresh encoder starts on an IDR, so nothing else to ask for. */
         (void)video_frame_take_keyframe_request();
+    } else if (wedge_rebuild_if_needed(job->hres, job->vres)) {
+        return;
     } else if (video_frame_take_keyframe_request()) {
         force_idr();
     }
@@ -559,7 +664,9 @@ static void h264_encode_job(const h264_job_t *job)
      * a decoder that stops receiving has no way to tell a still picture from a
      * dead link.
      */
-    video_frame_publish(slot, out.length, out.frame_type == ESP_H264_FRAME_TYPE_IDR);
+    const bool is_idr = out.frame_type == ESP_H264_FRAME_TYPE_IDR;
+    wedge_watch(is_idr, out.length);
+    video_frame_publish(slot, out.length, is_idr);
     capture_status_add_frame(out.length);
 }
 
@@ -611,6 +718,8 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
             return oerr;
         }
         (void)video_frame_take_keyframe_request();
+    } else if (wedge_rebuild_if_needed(c->hres, c->vres)) {
+        return ESP_FAIL;
     } else if (video_frame_take_keyframe_request()) {
         force_idr();
     }
@@ -640,7 +749,9 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
         }
         return ESP_FAIL;
     }
-    video_frame_publish(wslot, out.length, out.frame_type == ESP_H264_FRAME_TYPE_IDR);
+    const bool is_idr = out.frame_type == ESP_H264_FRAME_TYPE_IDR;
+    wedge_watch(is_idr, out.length);
+    video_frame_publish(wslot, out.length, is_idr);
     capture_status_add_frame(out.length);
     return ESP_OK;
 #else

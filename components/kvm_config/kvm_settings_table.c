@@ -113,6 +113,18 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = KVM_CAP_VIDEO,
     },
     {
+        .key = "h264_guard", .section = "video", .type = KVM_VT_BOOL,
+        .title = "Rebuild a stuck H.264 encoder",
+        .help = "The encoder's rate controller can settle at its coarsest setting and "
+                "stay there: the picture goes to visible blocks on a screen that is not "
+                "moving, and nothing short of building a new encoder brings it back. "
+                "With this on, keyframes that collapse to a fraction of their usual size "
+                "are taken as that fault and the encoder is rebuilt - a lost frame, once "
+                "every two minutes at most. Turn it off if a screen of yours is being "
+                "rebuilt for no reason; the log says when it happens.",
+        .def = 1, .requires_cap = KVM_CAP_H264,
+    },
+    {
         .key = "edid_prof", .section = "video", .type = KVM_VT_ENUM,
         .title = "EDID profile",
         .help = "What this device claims to be, as a monitor - the target picks its "

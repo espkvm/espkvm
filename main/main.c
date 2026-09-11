@@ -54,7 +54,22 @@ static void apply_log_level(void)
                                              ESP_LOG_DEBUG};
     const int32_t choice = kvm_setting_int("log_level");
     const size_t n = sizeof(levels) / sizeof(levels[0]);
-    esp_log_level_set("*", levels[(choice >= 0 && (size_t)choice < n) ? (size_t)choice : 2]);
+    const esp_log_level_t level = levels[(choice >= 0 && (size_t)choice < n) ? (size_t)choice : 2];
+    esp_log_level_set("*", level);
+
+    /*
+     * One tag is held below that, because it writes a line per TLS connection
+     * ("performing session handshake") and the console opens several. In an
+     * eight-hour log pulled off a device to chase a video fault, 45 of the 203
+     * lines were that one message and the video events had been pushed out of
+     * the ring. Its warnings and errors still come through.
+     *
+     * Only when the setting is at INFO: asking for DEBUG means asking for
+     * everything, and this is exactly the tag someone debugging TLS wants.
+     */
+    if (level == ESP_LOG_INFO) {
+        esp_log_level_set("esp_https_server", ESP_LOG_WARN);
+    }
 }
 
 static void apply_media_selection(void);

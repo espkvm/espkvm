@@ -18,6 +18,34 @@ bumps the patch).
   esp-hosted profile to the one whose SDIO pins are CLK 18 / CMD 19 / D0-D3
   14-17. Not run on hardware yet.
 
+### Fixed
+- **A still screen that broke into blocks, for minutes, with nothing wrong
+  anywhere.** The encoder's rate controller can settle at its coarsest quantiser
+  and stay there: measured on a device left running, the same unchanged screen
+  encoded to 6.7 KB keyframes at QP 40 where a minute earlier it had been 148 KB
+  at QP 13. The stream sat at 11 kbit/s of the 4000 it was allowed, so it was
+  not short of bandwidth - raising the budget to 12 Mbit/s changed neither the
+  bitrate nor the picture. Nothing that can be set on a running encoder moved
+  it: not the bitrate, not a longer GOP, not a flood of keyframe requests, not
+  parking it across a codec switch. What does clear it is building a new
+  encoder, which until now happened only when the source changed resolution.
+  The device watches its own keyframes now: three in a row at a fraction of
+  their usual size mean the controller is stuck, and the encoder is rebuilt - a
+  lost frame, at most once every two minutes. There is a switch for it in
+  Settings -> Video, and the log says when it fires. The coarsest quantiser the
+  encoder may use is also capped lower (45 -> 32), which bounds how ugly the
+  picture can get before the rebuild.
+- **A picture that comes back in blocks after the tab has been in the
+  background.** Chrome throttles a hidden tab, the H.264 decoder falls behind,
+  and the console was dropping delta frames into it to keep latency down. A
+  dropped delta breaks the reference chain, so everything after it decodes into
+  blocks - and the device cannot see it happen, because it sent those frames.
+  The console stops decoding entirely while the tab is hidden, asks for a
+  keyframe when it comes back, and does the same whenever it has to drop a
+  delta. On the device, a second message from a viewer that is already watching
+  is that request; an older console sends its subscribe byte again and gets the
+  same repair.
+
 ## [0.45.0] - 2026-09-10
 
 ### Added
