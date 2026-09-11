@@ -5,7 +5,7 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.46.0] - 2026-09-11
 
 ### Added
 - **A build target for the VIEWE ESP32-P4-Pi.** A Raspberry-Pi-shaped carrier for
@@ -27,6 +27,12 @@ bumps the patch).
   image with no pre-3.0 twin; and the co-processor being a C5 changes the
   esp-hosted profile to the one whose SDIO pins are CLK 18 / CMD 19 / D0-D3
   14-17. Not run on hardware yet.
+
+### Changed
+- **The log ring is readable again at INFO.** Every TLS connection wrote a
+  "performing session handshake" line, and a few minutes of a browser sitting on
+  the console pushed everything else out of the 200 lines Diagnostics keeps. The
+  HTTPS server is held at WARN now unless the log level is set to DEBUG.
 
 ### Fixed
 - **A still screen that broke into blocks, for minutes, with nothing wrong
