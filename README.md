@@ -347,6 +347,30 @@ target must be an A-to-A cable with the 5 V wire cut.
 
 <table>
 <tr>
+<td width="50%"><img src="docs/board-nano-wifi6-db.webp" alt="Waveshare ESP32-P4-NANO-WIFI6-DB board"></td>
+<td width="50%" valign="top">
+
+**[Waveshare ESP32-P4-NANO-WIFI6-DB](https://www.waveshare.com/esp32-p4-nano-wifi6-db.htm)**
+&mdash; *built from the vendor's pin table, not yet run on one*
+
+The NANO with a dual-band **ESP32-C5** in place of the C6, so it can join a
+5 GHz network - the first supported board that can. 32 MB PSRAM, 16 MB flash,
+100M Ethernet with a PoE header, a Type-A port for the target, and the 15-pin
+Raspberry Pi camera connector, so a C790 ribbon fits. Build overlay:
+`boards/nano_wifi6_db_p4.defaults`.
+
+It carries an ESP32-P4NRW32**X**, which is rev 3.x silicon, so unlike every
+other board here it has **one image and no pre-3.0 twin** - and it gets the
+faster capture path for free. Its right-hand header also brings out the
+high-speed USB pair, so the target can be wired there instead of the Type-A
+socket.
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
 <td width="50%"><img src="docs/board-firebeetle2.webp" alt="DFRobot FireBeetle 2 ESP32-P4 board"></td>
 <td width="50%" valign="top">
 

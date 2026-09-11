@@ -5,6 +5,19 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Added
+- **A build target for the Waveshare ESP32-P4-NANO-WIFI6-DB.** The NANO with a
+  dual-band ESP32-C5 in place of the C6, so it can sit on a 5 GHz network - the
+  first board here that can. Its pins come from Waveshare's own published table
+  and are the ones already in use; the CSI connector is the 15-pin Raspberry Pi
+  one, so a C790 ribbon fits. Two things are specific to it: the board carries
+  an ESP32-P4NRW32**X**, which is rev 3.x silicon, so this image is a rev 3.x
+  image with no pre-3.0 twin; and the co-processor being a C5 changes the
+  esp-hosted profile to the one whose SDIO pins are CLK 18 / CMD 19 / D0-D3
+  14-17. Not run on hardware yet.
+
 ## [0.45.0] - 2026-09-10
 
 ### Added

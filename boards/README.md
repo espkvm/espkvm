@@ -164,3 +164,41 @@ Three things that are specific to it:
   wired and the device would look like it hung at boot (#42).
 - **The CSI connector is the 15-pin Raspberry Pi one**, so the C790 ribbon fits;
   its two camera control lines are pull-ups only, so `TC358743_RST_GPIO=-1`.
+
+### Waveshare ESP32-P4-NANO-WIFI6-DB (chip rev 3.x, 16 MB flash)
+
+```
+idf.py -B build.nanodb \
+  -D SDKCONFIG=build.nanodb/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/nano_wifi6_db_p4.defaults" \
+  build
+
+idf.py -B build.nanodb -p /dev/ttyACM0 flash
+```
+
+The NANO with a dual-band **ESP32-C5** where the C6 used to be, on an external
+antenna. Everything the KVM touches is the family layout, and Waveshare publish
+the whole pin map on the board's documentation page, so this overlay is read off
+a table rather than a netlist. The CSI connector is the 15-pin Raspberry Pi one,
+so a C790 ribbon fits.
+
+Two things make it different from every other target here:
+
+- **It is rev 3.x silicon and only that.** The board carries an
+  ESP32-P4NRW32**X**, and the X parts are what Espressif's rev 3.x guide lists.
+  So there is no pre-3.0 twin: this image declares min rev 3.0, and the older
+  family's image would be refused by the bootloader.
+- **The co-processor is a C5,** so the esp-hosted profile is
+  `ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD` - the one whose pins are CLK 18,
+  CMD 19, D0-D3 14-17 and reset 54, which is what this board wires. The plain
+  Function-EV preset moves CLK and CMD elsewhere when the co-processor is a C5.
+  Dual-band means this is the first board here that can sit on a 5 GHz network,
+  and none of it has been powered up yet.
+
+Two `CONFIRM` items, both in the overlay: whether the Type-C reaches UART0
+through a bridge (as on the NANO) or is the P4's own USB-serial-JTAG, and the
+C5's own firmware version. Waveshare has not published a schematic for this SKU.
+Its two 2x13 headers are drawn from Waveshare's pinout picture. The left one is
+the NANO's pin for pin; the right one differs only where the NANO has its C6 -
+three pins are the C5's serial and boot lines, and two are USBD_P and USBD_N,
+the P4's high-speed USB. So the target can be wired from the header.

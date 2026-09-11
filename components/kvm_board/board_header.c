@@ -20,6 +20,7 @@
  *                            en/latest/esp32p4/esp32-p4-function-ev-board/
  *   Guition JC-ESP32P4-M3    the vendor's own pinout photograph of J1
  *   DFRobot FireBeetle 2 P4  its schematic, DFR1172_..._schematics_V1.0.pdf
+ *   Waveshare NANO-WIFI6-DB  https://docs.waveshare.com/ESP32-P4-NANO-WIFI6-DB
  */
 #include "kvm_board_header.h"
 
@@ -322,6 +323,53 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_NAME "M5Stack Unit PoE-P4"
 #define BOARD_ID "m5-poe-p4"
 #endif
+#define BOARD_VERIFIED false
+
+#elif CONFIG_KVM_BOARD_WAVESHARE_NANO_WIFI6_DB
+/*
+ * Two 2x13 headers, numbered 1..26 each, from Waveshare's pinout drawing for
+ * this board. The left one is the NANO's, pin for pin. The right one differs in
+ * five places, all of them where the NANO has its C6: three pins now carry the
+ * C5's own serial and boot lines, and two carry USBD_P and USBD_N - the P4's
+ * high-speed USB, the pair that goes to the target. That is worth knowing
+ * before reaching for the Type-A socket: the same signals are on the header.
+ */
+static const kvm_board_pin_t s_nanodb_a_odd[] = {
+    PWR("3V3"), IO(7),  IO(8),  IO(23), PWR("GND"), IO(5), IO(20),
+    IO(21),     PWR("3V3"), IO(25), IO(26), IO(32), PWR("GND"),
+};
+_Static_assert(sizeof(s_nanodb_a_odd) / sizeof(s_nanodb_a_odd[0]) == 13,
+               "s_nanodb_a_odd: the column must hold exactly 13 pins");
+static const kvm_board_pin_t s_nanodb_a_even[] = {
+    PWR("5V"), PWR("5V"), PWR("GND"), IO(37), IO(38), IO(4), PWR("GND"),
+    IO(22),    IO(24),    PWR("GND"), IO(27), IO(33), IO(36),
+};
+_Static_assert(sizeof(s_nanodb_a_even) / sizeof(s_nanodb_a_even[0]) == 13,
+               "s_nanodb_a_even: the column must hold exactly 13 pins");
+static const kvm_board_pin_t s_nanodb_b_odd[] = {
+    PWR("5V"), PWR("GND"), PWR("3V3"), PWR("GND"), IO(3), IO(2),
+    IO_NOTE(54, "C5 enable"), IO(47), IO(46), IO_NOTE(45, "microSD power"),
+    PWR("USB HS D+"), PWR("USB HS D-"), PWR("GND"),
+};
+_Static_assert(sizeof(s_nanodb_b_odd) / sizeof(s_nanodb_b_odd[0]) == 13,
+               "s_nanodb_b_odd: the column must hold exactly 13 pins");
+static const kvm_board_pin_t s_nanodb_b_even[] = {
+    PWR("ESP_LDO_VO4"), PWR("GND"), IO_NOTE(0, "32 kHz crystal"),
+    IO_NOTE(1, "32 kHz crystal"), PWR("GND"), IO(6), IO(53),
+    IO(48), PWR("GND"), PWR("C5 U0RXD"), PWR("C5 U0TXD"), PWR("C5 BOOT"),
+    PWR("GND"),
+};
+_Static_assert(sizeof(s_nanodb_b_even) / sizeof(s_nanodb_b_even[0]) == 13,
+               "s_nanodb_b_even: the column must hold exactly 13 pins");
+static const kvm_board_header_t s_headers[] = {
+    {.name = "left", .rows = 13, .numbered = true, .left = s_nanodb_a_odd,
+     .right = s_nanodb_a_even},
+    {.name = "right", .rows = 13, .numbered = true, .left = s_nanodb_b_odd,
+     .right = s_nanodb_b_even},
+};
+#define BOARD_HAS_HEADERS 1
+#define BOARD_NAME "Waveshare ESP32-P4-NANO-WIFI6-DB"
+#define BOARD_ID_BASE "p4-nano-wifi6-db"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_GUITION

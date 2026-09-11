@@ -73,7 +73,7 @@ board has its own overlay in `boards/`:
 | Espressif ESP32-P4 Function EV | supported; the rev 3.x reference |
 | Guition ESP32-P4-M3-Dev | supported, community-tested |
 | M5Stack Unit PoE-P4 / PoE-P4X | network half only - its capture add-on is an LT6911D, no driver yet |
-| Waveshare ESP32-P4-NANO-WIFI6-DB | fits on paper: 32 MB PSRAM, CSI, Type-A OTG-HS, RJ45 + PoE. Its radio is an **ESP32-C5**, which esp-hosted lists as a target but nobody here has run |
+| Waveshare ESP32-P4-NANO-WIFI6-DB | supported; `boards/nano_wifi6_db_p4.defaults`. Rev 3.x silicon only, and the first board here whose radio is an **ESP32-C5** |
 | DFRobot FireBeetle 2 ESP32-P4 / AI Kit | supported; `boards/firebeetle2_p4.defaults`. WiFi only - no wired link |
 | VIEWE ESP32-P4-Pi | fits on paper, with one thing to check: its USB is a Type-A **host** port, so how the role is switched and what drives VBUS both need reading |
 | MakerGo / Osprey ESP32P4C5 | 15-pin CSI and an ESP32-C5, but RMII only on a header - Ethernet needs your own PHY |

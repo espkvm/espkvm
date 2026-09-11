@@ -6,6 +6,7 @@
   { "id": "p4-module-devkit", "label": "Waveshare ESP32-P4-Module-DEV-KIT", "image": "docs/board-module-devkit.webp", "untested": true },
   { "id": "p4-wifi6",   "label": "Waveshare ESP32-P4-WIFI6",           "image": "docs/board-wifi6.webp" },
   { "id": "p4-nano",    "label": "Waveshare ESP32-P4-NANO",            "image": "docs/board-nano.jpg" },
+  { "id": "p4-nano-wifi6-db", "label": "Waveshare ESP32-P4-NANO-WIFI6-DB", "image": "docs/board-nano-wifi6-db.webp", "untested": true },
   { "id": "p4-guition", "label": "Guition ESP32-P4-M3-Dev",            "image": "docs/board-guition.webp" },
   { "id": "firebeetle2-p4", "label": "DFRobot FireBeetle 2 ESP32-P4", "image": "docs/board-firebeetle2.webp", "untested": true },
   { "id": "m5-poe-p4",  "label": "M5Stack Unit PoE-P4",                "image": "docs/board-m5-poe-p4.webp", "untested": true },

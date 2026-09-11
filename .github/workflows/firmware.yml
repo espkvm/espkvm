@@ -143,6 +143,12 @@ jobs:
           - id: firebeetle2-p4
             build_dir: build.firebeetle
             sdkconfig_defaults: sdkconfig.defaults;boards/firebeetle2_p4.defaults
+          # Waveshare ESP32-P4-NANO-WIFI6-DB - the NANO with a dual-band
+          # ESP32-C5 in place of the C6, and rev 3.x silicon, so this one is a
+          # rev3 image with no pre-3.0 twin. Read off the vendor's pin table.
+          - id: p4-nano-wifi6-db
+            build_dir: build.nanodb
+            sdkconfig_defaults: sdkconfig.defaults;boards/nano_wifi6_db_p4.defaults
           # Waveshare ESP32-P4-WIFI6 - no Ethernet; ESP32-C6 SDIO WiFi and a
           # setup hotspot are the only management link.
           - id: p4-wifi6

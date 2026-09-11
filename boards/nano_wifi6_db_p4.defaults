@@ -1,0 +1,90 @@
+# Waveshare ESP32-P4-NANO-WIFI6-DB (SKU 35554, and the KIT-A..D bundles)
+#
+# Build it with:
+#   idf.py -B build.nanodb -D SDKCONFIG=build.nanodb/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/nano_wifi6_db_p4.defaults" build
+#
+# The NANO rebuilt around a dual-band radio: an ESP32-C5-MINI-1U instead of the
+# C6, on an external antenna. Everything else is the family layout, and
+# Waveshare publish the whole pin map on the board's documentation page, which
+# is where all of this comes from:
+#   Ethernet (IP101GRI): CRS_DV 28, RXD0 29, RXD1 30, MDC 31, TXD0 34, TXD1 35,
+#                        TX_EN 49, REF_CLK 50 (input from the PHY), RESET 51,
+#                        MDIO 52, PHY address 1 - the firmware defaults.
+#   microSD: CLK 43, CMD 44, D0 39, D1 40, D2 41, D3 42, and SD_VDD_EN on 45,
+#            "low to enable" in their own words, so active low as we default.
+#   Capture I2C: SDA 7, SCL 8. That bus is busy here - the codec, the touch
+#            controller, the backlight and the camera SCCB all sit on it - but
+#            addresses do not collide with the bridge's.
+#   BOOT button: GPIO 35, which is also Ethernet TXD1, the sharing the password
+#            reset already handles.
+#   Console: UART0 on 37/38, as on the NANO, whose Type-C reaches them through a
+#            USB-to-UART bridge. CONFIRM on hardware: the DB's page says "power,
+#            flashing and serial debugging" without naming the bridge, and a
+#            console pointed at a port the board does not have looks exactly
+#            like a device stuck at boot (#42).
+#   Camera: "XCLK / RESET not connected", so there is no RESETN to drive.
+#
+# The CSI connector is the 15-pin, 1.0 mm Raspberry Pi one - measured off the
+# board photograph against the 2.54 mm header next to it (1.09 mm pitch, ~15
+# contacts), and consistent with the kit, which pairs an RPi Camera (B) with a
+# plain 15-pin FFC cable. So a Geekworm C790 ribbon plugs straight in. The
+# 15-to-22-pin cable in the kit is for a Pi 5 camera, not for this socket.
+#
+# Both 2x13 headers are drawn in board_header.c from Waveshare's own pinout
+# picture. One thing on them is worth knowing here: the right-hand header brings
+# out USBD_P and USBD_N, the P4's high-speed USB, so the target can be wired
+# from the header instead of the Type-A socket.
+#
+# NOT YET VERIFIED ON HARDWARE. Configured from the vendor's pin table and
+# published so owners can try it. Waveshare has not put a schematic out for this
+# SKU yet, so the console CONFIRM above is the one to check first.
+
+# --- flash and partitions ---------------------------------------------------
+# 16 MB Nor flash, 32 MB PSRAM in the chip's package.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- silicon revision -------------------------------------------------------
+# This one is not a choice. The board carries an ESP32-P4NRW32X - the marking is
+# legible in Waveshare's own photograph - and the X part is the rev 3.x silicon:
+# Espressif's "ESP32-P4 Chip Revision v3.x" guide names ESP32-P4NRW16X and
+# ESP32-P4NRW32X as its products, and the older NRW32 is end of life.
+#
+# So this board gets the rev 3.x image and only that: a pre-3.0 build declares
+# max chip rev 1.99 and the bootloader would refuse it. The same switch also
+# compiles in the faster capture path, which is the consolation prize.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/p4-nano-wifi6-db/manifest.json"
+
+# --- WiFi co-processor ------------------------------------------------------
+# An ESP32-C5, not the C6 every other board here uses, so the esp-hosted profile
+# changes with it. The pins are the ones we already know - CLK 18, CMD 19,
+# D0-D3 14/15/16/17, C5_CHIP_PU on 54 - which is exactly what esp-hosted's
+# "ESP32-P4X-Function-EV-Board with on-board C5" preset declares, so that preset
+# is the one to pick. (The plain Function-EV preset moves CLK and CMD to 33 and
+# 4 when the co-processor is a C5, which is a different board's wiring.)
+#
+# The C5 is dual-band, so this is the first board here that can join a 5 GHz
+# network. Untested: the co-processor's own firmware has to be an esp-hosted
+# build that matches this component, and nobody has powered one up yet.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C5=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C5=y
+# As everywhere else: esp-hosted must not bring the link up from its boot
+# constructor, or it races the microSD for the one SD host controller.
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- microSD ----------------------------------------------------------------
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# --- capture reset ----------------------------------------------------------
+CONFIG_KVM_TC358743_RST_GPIO=-1
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_WAVESHARE_NANO_WIFI6_DB=y
