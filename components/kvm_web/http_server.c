@@ -2987,6 +2987,24 @@ static bool s_text_need_full[VIDEO_MAX_CLIENTS];
    api_video_status_get (declared once, above). */
 static SemaphoreHandle_t s_video_mu;
 
+/* Whether this socket is already subscribed, and to the picture rather than to
+ * the text reading. A second message from such a client is a resync request. */
+static bool video_client_watches_picture(int fd)
+{
+    bool found = false;
+    if (!s_video_mu || xSemaphoreTake(s_video_mu, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+    for (int i = 0; i < VIDEO_MAX_CLIENTS; i++) {
+        if (s_video_fds[i] == fd) {
+            found = !s_text_mode[i];
+            break;
+        }
+    }
+    xSemaphoreGive(s_video_mu);
+    return found;
+}
+
 static void video_add_client(int fd, bool text)
 {
     /*
@@ -3561,7 +3579,24 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
         pkt.payload = hello;
         (void)httpd_ws_recv_frame(req, &pkt, sizeof(hello));
     }
-    video_add_client(httpd_req_to_sockfd(req), hello[0] == WS_SUBSCRIBE_TEXT);
+    const int fd = httpd_req_to_sockfd(req);
+    /*
+     * A second message from a client that is already watching asks for a
+     * keyframe. The console needs that when its own decoder has lost the
+     * reference chain - a tab that Chrome throttled in the background drops
+     * frames on the way into the decoder, and the device cannot see that
+     * happen: it sent them. Without this the picture stays in blocks until the
+     * next scheduled IDR repairs it, and a decoder that is still behind drops
+     * that one too.
+     *
+     * Deliberately not a new opcode: an older console sends its subscribe byte
+     * again and gets the same repair.
+     */
+    if (video_client_watches_picture(fd)) {
+        video_frame_request_keyframe();
+        return ESP_OK;
+    }
+    video_add_client(fd, hello[0] == WS_SUBSCRIBE_TEXT);
     return ESP_OK;
 }
 
