@@ -8,6 +8,16 @@ bumps the patch).
 ## [Unreleased]
 
 ### Added
+- **A build target for the VIEWE ESP32-P4-Pi.** A Raspberry-Pi-shaped carrier for
+  VIEWE's own P4 module: 32 MB PSRAM, 16 MB flash, an ESP32-C6, IP101 Ethernet,
+  microSD and the 15-pin Raspberry Pi camera connector, so a C790 ribbon fits.
+  VIEWE publish both schematics, carrier and module, so this is the first board
+  here whose C6 SDIO pins were read rather than inferred - and every pin it uses
+  turns out to be a firmware default. Three USB ports: one Type-C for power,
+  flashing and the log, the other Type-C is the OTG-HS that goes to the target,
+  and the Type-A socket is a host port the KVM does not use. Its 40-pin header
+  is the Waveshare PoE one pin for pin, which is now three boards with the same
+  layout. Not run on hardware yet.
 - **A build target for the Waveshare ESP32-P4-NANO-WIFI6-DB.** The NANO with a
   dual-band ESP32-C5 in place of the C6, so it can sit on a 5 GHz network - the
   first board here that can. Its pins come from Waveshare's own published table

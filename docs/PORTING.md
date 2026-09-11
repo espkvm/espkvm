@@ -75,7 +75,7 @@ board has its own overlay in `boards/`:
 | M5Stack Unit PoE-P4 / PoE-P4X | network half only - its capture add-on is an LT6911D, no driver yet |
 | Waveshare ESP32-P4-NANO-WIFI6-DB | supported; `boards/nano_wifi6_db_p4.defaults`. Rev 3.x silicon only, and the first board here whose radio is an **ESP32-C5** |
 | DFRobot FireBeetle 2 ESP32-P4 / AI Kit | supported; `boards/firebeetle2_p4.defaults`. WiFi only - no wired link |
-| VIEWE ESP32-P4-Pi | fits on paper, with one thing to check: its USB is a Type-A **host** port, so how the role is switched and what drives VBUS both need reading |
+| VIEWE ESP32-P4-Pi | supported; `boards/viewe_p4_pi.defaults`. Three USB ports - the Type-A one is a host, and the OTG-HS has a Type-C of its own |
 | MakerGo / Osprey ESP32P4C5 | 15-pin CSI and an ESP32-C5, but RMII only on a header - Ethernet needs your own PHY |
 | M5Stack Tab5 | everything is there, but the CSI is taken by its own camera and the tablet is a lot of board to hide behind a server |
 | Olimex ESP32-P4-PC | **no**: 32 MB / 16 MB, IP101 Ethernet and a 15-pin CSI, all correct - and then an FE1.1s hub sits on the OTG-HS, so the port is permanently a host and can never present a keyboard |

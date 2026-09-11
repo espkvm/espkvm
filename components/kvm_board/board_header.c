@@ -21,6 +21,8 @@
  *   Guition JC-ESP32P4-M3    the vendor's own pinout photograph of J1
  *   DFRobot FireBeetle 2 P4  its schematic, DFR1172_..._schematics_V1.0.pdf
  *   Waveshare NANO-WIFI6-DB  https://docs.waveshare.com/ESP32-P4-NANO-WIFI6-DB
+ *   VIEWE ESP32-P4-Pi        its pinout picture, image/pin_definition.png in
+ *                            github.com/VIEWESMART/ESP32-P4-Pi
  */
 #include "kvm_board_header.h"
 
@@ -370,6 +372,38 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_HAS_HEADERS 1
 #define BOARD_NAME "Waveshare ESP32-P4-NANO-WIFI6-DB"
 #define BOARD_ID_BASE "p4-nano-wifi6-db"
+#define BOARD_VERIFIED false
+
+#elif CONFIG_KVM_BOARD_VIEWE_P4_PI
+/*
+ * The same 40-pin header as the Waveshare PoE and Module-DEV-KIT boards, pin
+ * for pin - a third board, a third source, one layout. Taken from VIEWE's own
+ * pinout picture, which matches the board photograph's silkscreen; their
+ * schematic numbers the connector the other way round (pin 1 on the 5 V side),
+ * and it is the odd one out, so the picture wins.
+ */
+static const kvm_board_pin_t s_viewe_odd[] = {
+    PWR("3V3"), IO(7),  IO(8),  IO(23), PWR("GND"), IO(21), IO(20),
+    IO_NOTE(6, "tied to the C6's IO2 inside the module"), PWR("3V3"), IO(3),
+    IO(2),      IO(0),  PWR("GND"), IO(24),
+    IO(33),     IO(26), IO(48), IO(53), IO(47),     PWR("GND"),
+};
+_Static_assert(sizeof(s_viewe_odd) / sizeof(s_viewe_odd[0]) == 20,
+               "s_viewe_odd: the column must hold exactly 20 pins");
+static const kvm_board_pin_t s_viewe_even[] = {
+    PWR("5V"), PWR("5V"), PWR("GND"), IO(37), IO(38),     IO(22), PWR("GND"),
+    IO(5),     IO(4),     PWR("GND"), IO(1),  IO(36),     IO(32), IO(25),
+    PWR("GND"), IO(54),   PWR("GND"), IO(46), IO(27),     IO(45),
+};
+_Static_assert(sizeof(s_viewe_even) / sizeof(s_viewe_even[0]) == 20,
+               "s_viewe_even: the column must hold exactly 20 pins");
+static const kvm_board_header_t s_headers[] = {
+    {.name = "GPIO", .rows = 20, .numbered = true, .left = s_viewe_odd,
+     .right = s_viewe_even},
+};
+#define BOARD_HAS_HEADERS 1
+#define BOARD_NAME "VIEWE ESP32-P4-Pi"
+#define BOARD_ID_BASE "viewe-p4-pi"
 #define BOARD_VERIFIED false
 
 #elif CONFIG_KVM_BOARD_GUITION

@@ -1,0 +1,96 @@
+# VIEWE ESP32-P4-Pi (ESP32-P4-Pi-VIEWE-V1.1)
+#
+# Build it with:
+#   idf.py -B build.viewe -D SDKCONFIG=build.viewe/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/viewe_p4_pi.defaults" build
+#
+# A Raspberry-Pi-shaped board built around VIEWE's own ESP32-P4-Core module: an
+# ESP32P4NRW32 (32 MB PSRAM), an ESP32-C6FH4 and a 16 MB W25Q128 under one can.
+# On the carrier: 100M Ethernet on an IP101GRI, a microSD slot, three USB ports,
+# a 15-pin camera FPC, a 15-pin display FPC, audio, an IMU and a 40-pin header.
+#
+# Read out of the two schematics VIEWE publish at
+# github.com/VIEWESMART/ESP32-P4-Pi - SCH_ESP32-ESP32-P4-Pi-VIEWE-V1.1 for the
+# carrier and SCH_ESP32-P4-Core for the module - plus their pinout picture:
+#   Ethernet (IP101GRI): CRS_DV 28, RXD0 29, RXD1 30, MDC 31, TXD0 34, TXD1 35,
+#            TX_EN 49, REF_CLK 50 (input), RESET 51, MDIO 52. PHY address 1:
+#            PHY_AD0 is pulled up through 5.1K and PHY_AD3 down through 5.1K.
+#            All of it is the firmware's default, pin for pin.
+#   microSD: CLK 43, CMD 44, D0 39, D1 40, D2 41, D3 42 - which are the module's
+#            own dedicated SD pins - and the slot's 3.3 V through an AO3401
+#            P-channel MOSFET off GPIO 45, gate pulled up, so low enables it.
+#   Capture I2C: SDA 7, SCL 8, shared with the audio codecs (0x18, 0x41) and the
+#            IMU (0x6a). None of those collide with the bridge.
+#   BOOT button: GPIO 35, which is also Ethernet TXD1 - the sharing the password
+#            reset already handles on the other boards.
+#   Console: UART0 on 37/38, out to the Type-C marked UART through a CH340C.
+#   WiFi: the C6 is inside the module on SDIO CLK 18, CMD 19, D0-D3 14-17, with
+#            its enable on GPIO 54. Those are the Function EV numbers, so the
+#            same esp-hosted profile applies - and this time they are read off
+#            the module schematic, not inferred.
+#
+# The camera FPC (FPC2, a 1.0 mm 15-pin) is wired in the Raspberry Pi order:
+# 1/4/7/10 ground, 2/3 lane 0, 5/6 lane 1, 8/9 clock, 11/12 the camera control
+# lines, 13 SCL, 14 SDA, 15 3.3 V. A Geekworm C790 ribbon plugs straight in.
+#
+# Three USB ports, and only one of them is the target's:
+#   - USB1, Type-C marked UART: the CH340C. Power, flashing and the log.
+#   - USB2, Type-C marked "High speed" in the schematic: the P4's OTG-HS. This
+#     is the one the target goes on, so the lead is C-to-A. Both Type-C ports
+#     carry 4.7K CC pull-downs, so both present as devices.
+#   - USB3, Type-A: the full-speed port (GPIO 24/25) as a host, with its 5 V
+#     switched by a TPS2051C. Not used by the KVM.
+# The two Type-C VBUS pins meet at one rail behind an AO3401, so whichever is
+# plugged feeds the board - a target that powers its port back-feeds the KVM,
+# and pulling that cable reboots it. The RJ45's centre taps come out on a 4-pin
+# header for an external PoE module; the module's 5 V has to go back in through
+# the expansion header, there is no return pin on that connector.
+#
+# Two things on the 40-pin header are worth knowing. It is pin for pin the
+# Waveshare PoE and Module-DEV-KIT header - three boards, three sources, one
+# layout - and VIEWE's schematic numbers it mirrored (their pin 1 is the 5 V
+# one), while their own pinout picture and the silkscreen agree with everyone
+# else, so board_header.c follows the picture. And GPIO 6, on pin 16, is tied
+# inside the module to the C6's IO2, so leave that pin alone.
+#
+# NOT YET VERIFIED ON HARDWARE. Configured from the schematics and published so
+# owners can try it.
+
+# --- flash and partitions ---------------------------------------------------
+# 16 MB on the module, so the shared 16 MB table.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- silicon revision -------------------------------------------------------
+# Left at the base build's pre-3.0 setting. The module's lid is printed
+# ESP32P4NRW32 in VIEWE's own board photograph - no X, so not the rev 3.x part.
+# If a rev 3.x unit turns up (the boot log says "Chip rev: v3.x" and this image
+# will not start on it at all), the twin is two lines:
+# CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+# CONFIG_ESP32P4_REV_MIN_300=y
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://espkvm.github.io/espkvm/firmware/viewe-p4-pi/manifest.json"
+
+# --- WiFi co-processor ------------------------------------------------------
+# The C6 sits inside the module on the Function EV board's SDIO pins, so the
+# same esp-hosted configuration applies - including the guard against its eager
+# constructor init, which otherwise races the microSD for the one SD host.
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- microSD ----------------------------------------------------------------
+CONFIG_KVM_SD_PWR_GPIO=45
+
+# --- capture reset ----------------------------------------------------------
+# The camera connector's two control lines go nowhere but a pull-up (10K on
+# CSI_IO0, CSI_IO1 not fitted), so there is no RESETN to drive. The C790 has its
+# own power-on reset.
+CONFIG_KVM_TC358743_RST_GPIO=-1
+
+# Which board this is: names it in the console and picks the expansion header
+# the Pins tab draws.
+CONFIG_KVM_BOARD_VIEWE_P4_PI=y

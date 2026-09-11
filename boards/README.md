@@ -202,3 +202,40 @@ Its two 2x13 headers are drawn from Waveshare's pinout picture. The left one is
 the NANO's pin for pin; the right one differs only where the NANO has its C6 -
 three pins are the C5's serial and boot lines, and two are USBD_P and USBD_N,
 the P4's high-speed USB. So the target can be wired from the header.
+
+### VIEWE ESP32-P4-Pi (chip rev 1.3, 16 MB flash)
+
+```
+idf.py -B build.viewe \
+  -D SDKCONFIG=build.viewe/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/viewe_p4_pi.defaults" \
+  build
+
+idf.py -B build.viewe -p /dev/ttyACM0 flash
+```
+
+A Raspberry-Pi-shaped carrier for VIEWE's own ESP32-P4-Core module (P4, C6 and
+16 MB flash under one shield). IP101GRI Ethernet, microSD, a 15-pin camera FPC,
+a 40-pin header, and audio and an IMU the KVM does not use. Both schematics are
+published, carrier and module, so every pin here is read off a netlist - down to
+the C6's SDIO wiring, which on the other module boards had to be inferred. All
+of it lands on the firmware defaults: Ethernet on 28-31/34/35/49-52 with PHY
+address 1, microSD on 43/44/39-42 with an active-low gate on 45, I2C on 7/8,
+BOOT on 35, C6 SDIO on 18/19/14-17 with enable on 54.
+
+Three things specific to it:
+
+- **Three USB ports.** Two Type-C: the one marked UART is a CH340C for power,
+  flashing and the log; the other is the OTG-HS and that is the target's, so the
+  lead is C-to-A. The Type-A socket is the full-speed port as a host and the KVM
+  does not use it.
+- **PoE is half wired.** The RJ45's centre taps come out on a 4-pin header for
+  an external module, but there is no pin to feed the board's 5 V back in - that
+  has to go to the expansion header.
+- **The 40-pin header is the Waveshare PoE header, pin for pin**, which is now
+  three boards with the same layout. VIEWE's schematic numbers the connector
+  mirrored; their pinout picture and the silkscreen agree with everyone else.
+  One pin to avoid: GPIO 6, on pin 16, is tied to the C6's IO2 inside the
+  module.
+
+No `-rev3` twin: the module's lid reads ESP32P4NRW32, without the X.

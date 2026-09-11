@@ -149,6 +149,12 @@ jobs:
           - id: p4-nano-wifi6-db
             build_dir: build.nanodb
             sdkconfig_defaults: sdkconfig.defaults;boards/nano_wifi6_db_p4.defaults
+          # VIEWE ESP32-P4-Pi - a Pi-shaped carrier for VIEWE's own P4+C6
+          # module: Ethernet, a 15-pin camera FPC, and the OTG-HS on its own
+          # Type-C. Read off both of their schematics; not run on one yet.
+          - id: viewe-p4-pi
+            build_dir: build.viewe
+            sdkconfig_defaults: sdkconfig.defaults;boards/viewe_p4_pi.defaults
           # Waveshare ESP32-P4-WIFI6 - no Ethernet; ESP32-C6 SDIO WiFi and a
           # setup hotspot are the only management link.
           - id: p4-wifi6
