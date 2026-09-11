@@ -181,13 +181,12 @@ overlay (see [boards/](boards/README.md)). What was measured on the boards in
 front of us, including the documented claims that turned out to be false, is
 written down in [docs/HARDWARE-NOTES.md](docs/HARDWARE-NOTES.md).
 
-### More boards
+### More boards, run on real hardware
 
-These carry an ESP32-P4, a MIPI-CSI connector, USB OTG-HS, IP101 Ethernet and an
-onboard ESP32-C6, and a contributor has confirmed capture, USB and Ethernet on both.
-The units tested were pre-3.0 silicon, so the overlays build for that by default (a
-rev-3.x unit can flip one config for the faster H.264 path). WiFi and the finer
-details aren't exhaustively tested yet - reports welcome.
+Each of these has had this firmware on it, on someone's bench. All three carry
+an ESP32-P4, a MIPI-CSI connector, USB OTG-HS and an onboard ESP32-C6; the units
+tested were pre-3.0 silicon, so the overlays build for that by default and a rev
+3.x unit takes the `-rev3` image instead.
 
 <table>
 <tr>
@@ -197,65 +196,91 @@ details aren't exhaustively tested yet - reports welcome.
 <tr>
 <td valign="top">
 
-**[Waveshare ESP32-P4-NANO](https://www.waveshare.com/esp32-p4-nano.htm)** &mdash; *community-tested*
+**[Waveshare ESP32-P4-NANO](https://www.waveshare.com/esp32-p4-nano.htm)**
 
 Same IP101 Ethernet and onboard ESP32-C6 as the boards above; 32 MB PSRAM, 16 MB
-flash. Build overlay: `boards/nano_p4.defaults`. Ships as either silicon revision
-under one product code, so a rev 3.x unit takes the `-rev3` image instead
-(`boards/nano_p4_rev3.defaults`).
+flash. A contributor confirmed capture, USB and Ethernet. Build overlay:
+`boards/nano_p4.defaults`, or `boards/nano_p4_rev3.defaults` on rev 3.x silicon -
+it ships as either revision under one product code.
 
 </td>
 <td valign="top">
 
-**Guition ESP32-P4-M3-Dev (JC-ESP32P4-M3)** &mdash; *community-tested*
+**Guition ESP32-P4-M3-Dev (JC-ESP32P4-M3)**
 
 A display board (4.3&Prime; MIPI-DSI touch, unused by the KVM) that also carries
-Ethernet and an ESP32-C6; 32 MB PSRAM, 16 MB flash. It has two USB-C ports - the
-target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`, or
-`boards/guition_p4_rev3.defaults` on rev 3.x silicon.
+Ethernet and an ESP32-C6; 32 MB PSRAM, 16 MB flash. Confirmed by a contributor.
+Two USB-C ports - the target goes on the OTG-HS one. Build overlay:
+`boards/guition_p4.defaults`, or `boards/guition_p4_rev3.defaults`.
 
 </td>
 </tr>
 </table>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/board-wifi6.webp" alt="Waveshare ESP32-P4-WIFI6 board"></td>
+</tr>
+<tr>
+<td valign="top">
+
+**[Waveshare ESP32-P4-WIFI6](https://www.waveshare.com/esp32-p4-wifi6.htm)**
+
+The PoE board without its wired half, contributed by
+[@nwomn](https://github.com/nwomn), who has one: capture through the C790 and the
+USB keyboard and mouse both work, and the header is checked against the board.
+32 MB PSRAM, 32 MB flash. Build overlay: `boards/waveshare_p4_wifi6.defaults`.
+
+WiFi is the only link it has, and it used to stall: the board pulls its SDIO
+lines up through 51k where Espressif ask for 10k, which lost the co-processor's
+data-ready interrupt. Since 0.41.1 the chip's own pull-ups are on for this board
+and it holds. That is one board and one tester -
+[issue #27](https://github.com/espkvm/espkvm/issues/27) if yours differs. USB
+OTG-HS is on an **MX1.25 4-pin header**, so the target needs an MX1.25-to-USB-A
+cable.
+
+</td>
+</tr>
+</table>
+
+### Boards built from a schematic, never run
+
+:warning: **Nobody has run this firmware on any of these.** Their pins were read
+off the vendor's schematic or published pin table, the images build and CI
+publishes them, and that is the whole claim. Flashing one cannot damage it: the
+worst case is an image that does not start, and a reflash undoes that. If you
+have one, please say how it went - that is what moves a board into the list
+above.
 
 <table>
 <tr>
 <td width="50%"><img src="docs/board-poe.jpg" alt="Waveshare ESP32-P4-WIFI6-POE-ETH board"></td>
-<td width="50%" valign="top">
+<td width="50%"><img src="docs/board-wifi6-devkit.webp" alt="Waveshare ESP32-P4-WIFI6-DEV-KIT board"></td>
+</tr>
+<tr>
+<td valign="top">
 
 **[Waveshare ESP32-P4-WIFI6-POE-ETH](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm)**
-&mdash; :warning: **not tested on hardware**
 
 The first supported board that takes **PoE**, so a KVM in a rack needs one cable
 instead of two. Same IP101 Ethernet, same microSD wiring and the same ESP32-C6
-over SDIO as the boards above, on the same pins; 32 MB PSRAM, 32 MB flash, and a
-full-size USB-A port for the target. Build overlay: `boards/poe_p4.defaults`.
+over SDIO as the boards above; 32 MB PSRAM, 32 MB flash, and a full-size USB-A
+port for the target. Build overlay: `boards/poe_p4.defaults`.
 
-It ships built for pre-3.0 silicon, which is most likely what is in the box:
-Waveshare confirmed (August 2026) that these boards ship rev 1.3 today, with rev
-3.x still ramping up at Espressif. **Check the boot log before flashing** - it
-prints `Chip rev:`. The two revisions need different images and neither runs on
-the other's silicon, so a rev 3.x board wants the `-rev3` build instead. A
-product code does not tell you which chip is inside; ask the seller.
+Waveshare confirmed (August 2026) that these ship rev 1.3 today, so the pre-3.0
+image is the likely one. **Check the boot log before flashing** - it prints
+`Chip rev:`, and a rev 3.x board wants the `-rev3` build.
 
 </td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="50%"><img src="docs/board-wifi6-devkit.webp" alt="Waveshare ESP32-P4-WIFI6-DEV-KIT board"></td>
-<td width="50%" valign="top">
+<td valign="top">
 
 **[Waveshare ESP32-P4-WIFI6-DEV-KIT](https://www.waveshare.com/esp32-p4-wifi6-dev-kit.htm)**
-&mdash; :warning: **not tested on hardware**
 
-Both links on one board: 100M Ethernet on a PoE-capable magjack, and an
-ESP32-C6 for WiFi 6. Every pin that matters is the same as the boards above -
-Ethernet as on the P4-ETH, the C6 on GPIO 14-19, the card slot with its power
-gate on GPIO 45; 32 MB PSRAM, 32 MB flash. Build overlay:
-`boards/wifi6devkit_p4.defaults`, or `boards/wifi6devkit_p4_rev3.defaults` on
-rev 3.x silicon.
+Both links on one board: 100M Ethernet on a PoE-capable magjack, and an ESP32-C6
+for WiFi 6. Every pin that matters is the same as the boards above - Ethernet as
+on the P4-ETH, the C6 on GPIO 14-19, the card slot's power gate on GPIO 45;
+32 MB PSRAM, 32 MB flash. Build overlay: `boards/wifi6devkit_p4.defaults`, or
+`boards/wifi6devkit_p4_rev3.defaults`.
 
 One thing to check before wiring: the USB OTG port is switched between HOST and
 DEVICE **by a jumper**, and the KVM needs DEVICE.
@@ -266,104 +291,39 @@ DEVICE **by a jumper**, and the KVM needs DEVICE.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/board-wifi6.webp" alt="Waveshare ESP32-P4-WIFI6 board"></td>
-<td width="50%" valign="top">
-
-**[Waveshare ESP32-P4-WIFI6](https://www.waveshare.com/esp32-p4-wifi6.htm)**
-&mdash; *confirmed on hardware; WiFi tested on one board only*
-
-The PoE board without its wired half, contributed by
-[@nwomn](https://github.com/nwomn), who has one: capture through the C790 and
-the USB keyboard and mouse both work, and the header and pin reservations are
-checked against the board. 32 MB PSRAM, 32 MB flash. Build overlay:
-`boards/waveshare_p4_wifi6.defaults`, or `boards/waveshare_p4_wifi6_rev3.defaults`
-on rev 3.x silicon.
-
-**About the WiFi.** The board pulls its SDIO lines up through 51k where
-Espressif ask for 10k, which was enough to lose the co-processor's data-ready
-interrupt and stall the link. Since 0.41.1 the chip's own pull-ups are switched
-on for this board and the stall is gone: resets, reassociations and a hundred
-requests in a row, at the full 40 MHz. That is one board and one client, so if
-yours behaves differently, say so in
-[issue #27](https://github.com/espkvm/espkvm/issues/27). WiFi is the only link
-this board has. USB OTG-HS is on an **MX1.25 4-pin header**, so the
-target needs an MX1.25-to-USB-A cable.
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="50%"><img src="docs/board-m5-poe-p4.webp" alt="M5Stack Unit PoE-P4 module"></td>
-<td width="50%" valign="top">
-
-**[M5Stack Unit PoE-P4](https://docs.m5stack.com/en/unit/Unit_PoE-P4)**
-&mdash; *build target only; capture does not work yet*
-
-The smallest of the lot, and the only one where the capture board is not a C790:
-M5Stack's own **[Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d)**
-plugs straight onto its 24-pin FPC and brings a microSD slot with it. Two parts,
-one PoE cable, no ribbon and nothing to solder. 32 MB PSRAM, 16 MB flash, the
-same IP101 Ethernet on the same GPIOs as the P4-ETH, 802.3at PoE.
-
-The add-on's bridge is a **Lontium LT6911D**, not a TC358743, and the driver for
-it is not written yet - so these images give you the network, the console and
-updates, but no picture.
-
-Two products, two images: the **Unit PoE-P4** is pre-3.0 silicon
-(`boards/m5_poe_p4.defaults`) and the **Unit PoE-P4X** is rev 3.x
-(`boards/m5_poe_p4x.defaults`). Check the boot log anyway.
-
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
 <td width="50%"><img src="docs/board-module-devkit.webp" alt="Waveshare ESP32-P4-Module-DEV-KIT board"></td>
-<td width="50%" valign="top">
+<td width="50%"><img src="docs/board-nano-wifi6-db.webp" alt="Waveshare ESP32-P4-NANO-WIFI6-DB board"></td>
+</tr>
+<tr>
+<td valign="top">
 
 **[Waveshare ESP32-P4-Module-DEV-KIT](https://www.waveshare.com/esp32-p4-module-dev-kit.htm)**
-&mdash; :warning: **not tested on hardware**
 
-The WIFI6-DEV-KIT's arrangement packed into a module: the P4, an ESP32-C6 and
-16 MB of flash under one shield, on a carrier with 100M Ethernet (PoE through an
-add-on), a microSD slot, a 2x20 header and four USB-A sockets. 32 MB PSRAM.
-Every pin the KVM touches is the one the boards above use - Ethernet as on the
-P4-ETH, the C6 on GPIO 14-19, the card slot's power gate on GPIO 45, capture I2C
-on 7/8 - and the CSI connector is the 15-pin Raspberry Pi one, so a C790 ribbon
-plugs straight in. Build overlay: `boards/moduledevkit_p4.defaults`. The
--A / -B / -C kits are the same board with a different DSI screen in the box.
+The WIFI6-DEV-KIT on a module: the P4, an ESP32-C6 and 16 MB of flash under one
+shield, 32 MB PSRAM, on a carrier with Ethernet, a card slot, a 2x20 header and
+four USB-A sockets. Every pin the KVM touches is one already in use, and the CSI
+connector is the 15-pin Raspberry Pi one, so a C790 ribbon fits. Build overlay:
+`boards/moduledevkit_p4.defaults`. The -A / -B / -C kits are the same board with
+a different screen in the box.
 
-Two things to get right. The OTG-HS is switched **by a jumper** between one
-Type-A socket and an internal hub: the KVM wants the socket, the hub position
-gives host ports instead. And that socket drives its own 5 V, so the lead to the
-target must be an A-to-A cable with the 5 V wire cut.
+Its OTG-HS is switched **by a jumper** between one Type-A socket and an internal
+hub - the KVM wants the socket - and that socket drives its own 5 V, so the lead
+to the target must be an A-to-A cable with the 5 V wire cut.
 
 </td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="50%"><img src="docs/board-nano-wifi6-db.webp" alt="Waveshare ESP32-P4-NANO-WIFI6-DB board"></td>
-<td width="50%" valign="top">
+<td valign="top">
 
 **[Waveshare ESP32-P4-NANO-WIFI6-DB](https://www.waveshare.com/esp32-p4-nano-wifi6-db.htm)**
-&mdash; :warning: **not tested on hardware**
 
-The NANO with a dual-band **ESP32-C5** in place of the C6, so it can join a
-5 GHz network - the first supported board that can. 32 MB PSRAM, 16 MB flash,
-100M Ethernet with a PoE header, a Type-A port for the target, and the 15-pin
-Raspberry Pi camera connector, so a C790 ribbon fits. Build overlay:
-`boards/nano_wifi6_db_p4.defaults`.
+The NANO with a dual-band **ESP32-C5** in place of the C6, so it can join a 5 GHz
+network - the first supported board that can. 32 MB PSRAM, 16 MB flash, 100M
+Ethernet with a PoE header, a Type-A port for the target, and the 15-pin
+Raspberry Pi camera connector. Build overlay: `boards/nano_wifi6_db_p4.defaults`.
 
-It carries an ESP32-P4NRW32**X**, which is rev 3.x silicon, so unlike every
-other board here it has **one image and no pre-3.0 twin** - and it gets the
-faster capture path for free. Its right-hand header also brings out the
-high-speed USB pair, so the target can be wired there instead of the Type-A
-socket.
+It carries an ESP32-P4NRW32**X**, which is rev 3.x silicon, so unlike every other
+board here it has **one image and no pre-3.0 twin**. Its right-hand header also
+brings out the high-speed USB pair, so the target can be wired there instead of
+the Type-A socket.
 
 </td>
 </tr>
@@ -372,21 +332,40 @@ socket.
 <table>
 <tr>
 <td width="50%"><img src="docs/board-firebeetle2.webp" alt="DFRobot FireBeetle 2 ESP32-P4 board"></td>
-<td width="50%" valign="top">
+<td width="50%"><img src="docs/board-m5-poe-p4.webp" alt="M5Stack Unit PoE-P4 module"></td>
+</tr>
+<tr>
+<td valign="top">
 
 **[DFRobot FireBeetle 2 ESP32-P4](https://www.dfrobot.com/product-2915.html)**
-&mdash; :warning: **not tested on hardware**
 
 The smallest board that can do the whole job: 60 x 25 mm, 32 MB PSRAM, 16 MB
-flash, an ESP32-C6 for WiFi 6 and a 15-pin Raspberry Pi camera connector, so a
-C790 ribbon plugs straight in. No wired network - WiFi is the only link, as on
-the ESP32-P4-WIFI6. Build overlay: `boards/firebeetle2_p4.defaults`. The AI Kit
+flash, an ESP32-C6 for WiFi and a 15-pin Raspberry Pi camera connector, so a C790
+ribbon plugs straight in. No wired network - WiFi is the only link, as on the
+ESP32-P4-WIFI6. Build overlay: `boards/firebeetle2_p4.defaults`. The AI Kit
 (DFR1237) is the same board with accessories in the box.
 
-Two USB-C ports, and it matters which: the one beside the RST button is the
-P4's USB-serial-JTAG (power, flashing and the log), the other is the USB 2.0
-OTG-HS that goes to the target. Its 5 V ties to the board's rail, so unplugging
-it at the target's end reboots the KVM.
+Two USB-C ports, and it matters which: the one beside the RST button is the P4's
+USB-serial-JTAG (power, flashing and the log), the other is the USB 2.0 OTG-HS
+that goes to the target. Its 5 V ties to the board's rail, so unplugging it at
+the target's end reboots the KVM.
+
+</td>
+<td valign="top">
+
+**[M5Stack Unit PoE-P4](https://docs.m5stack.com/en/unit/Unit_PoE-P4)** &mdash;
+*and no picture yet*
+
+The smallest of the lot, and the only one where the capture board is not a C790:
+M5Stack's own **[Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d)**
+plugs onto its 24-pin FPC and brings a microSD slot with it. 32 MB PSRAM, 16 MB
+flash, the same IP101 Ethernet on the same GPIOs as the P4-ETH, 802.3at PoE.
+
+The add-on's bridge is a **Lontium LT6911D**, not a TC358743, and that driver is
+not written - so these images give you the network, the console and updates, and
+no picture. Two products, two images: the **Unit PoE-P4** is pre-3.0
+(`boards/m5_poe_p4.defaults`), the **Unit PoE-P4X** is rev 3.x
+(`boards/m5_poe_p4x.defaults`).
 
 </td>
 </tr>
@@ -394,8 +373,35 @@ it at the target's end reboots the KVM.
 
 <table>
 <tr>
-<td width="50%" align="center"><img src="docs/board-add.svg" width="320" alt="A dashed outline with a plus sign, standing in for a board that is not on the list yet"></td>
-<td width="50%" valign="top">
+<td width="50%"><img src="docs/board-viewe-p4-pi.webp" alt="VIEWE ESP32-P4-Pi board"></td>
+</tr>
+<tr>
+<td valign="top">
+
+**[VIEWE ESP32-P4-Pi](https://github.com/VIEWESMART/ESP32-P4-Pi)**
+
+A Raspberry-Pi-shaped carrier for VIEWE's own P4 module: 32 MB PSRAM, 16 MB
+flash, an ESP32-C6, IP101 Ethernet, microSD and the 15-pin camera connector, so
+the C790 ribbon fits. Both schematics are published - carrier and module - so
+this is the first board here where even the C6's SDIO pins were read rather than
+inferred, and every one of them lands on the firmware's defaults.
+
+Three USB ports: the Type-C marked UART is power, flashing and the log; the
+other Type-C is the OTG-HS that goes to the target, so that lead is C-to-A; the
+Type-A socket is a host port the KVM does not use. PoE is only half wired - the
+magjack's centre taps reach a 4-pin header, but the module's 5 V has to go back
+in through the expansion header. Build overlay: `boards/viewe_p4_pi.defaults`.
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/board-add.svg" width="320" alt="A dashed outline with a plus sign, standing in for a board that is not on the list yet"></td>
+</tr>
+<tr>
+<td valign="top">
 
 **Your board is not here?**
 [Open an issue](https://github.com/espkvm/espkvm/issues/new) with a link to its
