@@ -224,7 +224,7 @@ target goes on the OTG-HS one. Build overlay: `boards/guition_p4.defaults`, or
 <td width="50%" valign="top">
 
 **[Waveshare ESP32-P4-WIFI6-POE-ETH](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm)**
-&mdash; *built from the schematic, not yet run on one*
+&mdash; :warning: **not tested on hardware**
 
 The first supported board that takes **PoE**, so a KVM in a rack needs one cable
 instead of two. Same IP101 Ethernet, same microSD wiring and the same ESP32-C6
@@ -248,7 +248,7 @@ product code does not tell you which chip is inside; ask the seller.
 <td width="50%" valign="top">
 
 **[Waveshare ESP32-P4-WIFI6-DEV-KIT](https://www.waveshare.com/esp32-p4-wifi6-dev-kit.htm)**
-&mdash; *built from the schematic, not yet run on one*
+&mdash; :warning: **not tested on hardware**
 
 Both links on one board: 100M Ethernet on a PoE-capable magjack, and an
 ESP32-C6 for WiFi 6. Every pin that matters is the same as the boards above -
@@ -325,7 +325,7 @@ Two products, two images: the **Unit PoE-P4** is pre-3.0 silicon
 <td width="50%" valign="top">
 
 **[Waveshare ESP32-P4-Module-DEV-KIT](https://www.waveshare.com/esp32-p4-module-dev-kit.htm)**
-&mdash; *built from the schematic, not yet run on one*
+&mdash; :warning: **not tested on hardware**
 
 The WIFI6-DEV-KIT's arrangement packed into a module: the P4, an ESP32-C6 and
 16 MB of flash under one shield, on a carrier with 100M Ethernet (PoE through an
@@ -351,7 +351,7 @@ target must be an A-to-A cable with the 5 V wire cut.
 <td width="50%" valign="top">
 
 **[Waveshare ESP32-P4-NANO-WIFI6-DB](https://www.waveshare.com/esp32-p4-nano-wifi6-db.htm)**
-&mdash; *built from the vendor's pin table, not yet run on one*
+&mdash; :warning: **not tested on hardware**
 
 The NANO with a dual-band **ESP32-C5** in place of the C6, so it can join a
 5 GHz network - the first supported board that can. 32 MB PSRAM, 16 MB flash,
@@ -375,7 +375,7 @@ socket.
 <td width="50%" valign="top">
 
 **[DFRobot FireBeetle 2 ESP32-P4](https://www.dfrobot.com/product-2915.html)**
-&mdash; *built from the schematic, not yet run on one*
+&mdash; :warning: **not tested on hardware**
 
 The smallest board that can do the whole job: 60 x 25 mm, 32 MB PSRAM, 16 MB
 flash, an ESP32-C6 for WiFi 6 and a 15-pin Raspberry Pi camera connector, so a
