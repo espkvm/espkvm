@@ -5,7 +5,7 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
-## [Unreleased]
+## [0.46.1] - 2026-09-12
 
 ### Fixed
 - **The blocky picture on a still screen, at the source.** It was never our
