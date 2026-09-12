@@ -263,6 +263,8 @@ typedef enum {
 
 typedef struct {
     q_type_t type;
+    /* Keep this report whole: see usb_hid_mouse_nudge(). */
+    bool solo;
     union {
         abs_mouse_report_t abs;
         struct {
@@ -886,6 +888,12 @@ static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
     if (acc->type != add->type) {
         return false;
     }
+    /* A nudge is two moves that cancel out. Folded together they become a
+     * report with no motion in it, which is exactly the activity the target was
+     * meant to see, so neither half may be merged. */
+    if (acc->solo || add->solo) {
+        return false;
+    }
     /*
      * Coalesce motion, never a button edge. A click is a press report followed
      * by a release report; if both are waiting in the queue and get folded into
@@ -1114,6 +1122,16 @@ void usb_hid_mouse_rel(uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, in
     const q_msg_t m = {
         .type = Q_MOUSE_REL,
         .u.rel = {.buttons = buttons, .dx = dx, .dy = dy, .wheel = wheel, .pan = pan},
+    };
+    enqueue(&m);
+}
+
+void usb_hid_mouse_nudge(int16_t dx, int16_t dy)
+{
+    const q_msg_t m = {
+        .type = Q_MOUSE_REL,
+        .solo = true,
+        .u.rel = {.buttons = 0, .dx = dx, .dy = dy, .wheel = 0, .pan = 0},
     };
     enqueue(&m);
 }

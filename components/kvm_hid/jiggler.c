@@ -107,8 +107,14 @@ static void tick(void *arg)
         return;
     }
 
-    usb_hid_mouse_rel(0, 1, 0, 0, 0);
-    usb_hid_mouse_rel(0, -1, 0, 0, 0);
+    /*
+     * Two reports, not one folded into nothing. The queue coalesces motion, and
+     * these two cancel: sent the ordinary way the target received a report with
+     * dx=0, which its input layer drops, so the jiggler counted 1245 nudges
+     * while the screen it was meant to keep awake went dark anyway.
+     */
+    usb_hid_mouse_nudge(1, 0);
+    usb_hid_mouse_nudge(-1, 0);
     s_seen = usb_hid_last_input_us();
     s_next_us = now + every_us;
     s_nudges++;

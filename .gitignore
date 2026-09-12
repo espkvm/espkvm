@@ -106,3 +106,7 @@ version.txt
 
 # Local Claude Code settings (per-machine permissions, not project config)
 .claude/settings.local.json
+
+# Scratch space for whatever a session needs on the side: device logs pulled off
+# a board, capture dumps, one-off measuring scripts. None of it is source.
+ignore/

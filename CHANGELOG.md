@@ -5,6 +5,35 @@ All notable changes to ESP-KVM are recorded here. The format follows
 semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix
 bumps the patch).
 
+## [Unreleased]
+
+### Fixed
+- **The blocky picture on a still screen, at the source.** It was never our
+  encoder settings and never a shortage of memory: the H.264 component's rate
+  controller kept its running bit error in an int32 that nothing bounded. A
+  still screen encodes far under its budget - 700 bits a frame against the
+  133,000 it was allowed - so the counter marched toward INT32_MIN, reached it
+  in about twelve minutes at 1080p and 4 Mbit/s, and wrapped. The controller
+  then read an enormous overspend and raised the quantiser one step a frame to
+  its ceiling; twelve minutes later it wrapped back and the picture healed
+  itself. That is the whole fault, including why raising the bitrate made it
+  come sooner rather than help. Espressif fixed it in esp_h264 1.4.0 (the
+  counter is 64-bit and saturates at one second of budget), so this release
+  requires that version.
+- **The mouse jiggler did nothing at all.** It nudges one pixel and straight
+  back, and the HID queue coalesces motion that is waiting to go out - so the
+  two halves added up to zero and the target received a report with no movement
+  in it, which its input layer drops. The counter went up, the screen it was
+  meant to keep awake went dark anyway: 1245 nudges on a device here, and the
+  target's HDMI asleep for half the night. The nudge now refuses to be folded
+  into its neighbours and goes out as two real moves.
+- **A console tab left open could erase the device's log.** Its session expires,
+  the tab keeps reconnecting every 30 seconds as it is meant to, and every
+  refused socket wrote two warnings. Overnight that was 875 refusals, enough to
+  flush the 200-line ring in under an hour - so the log kept for a fault no
+  longer had the fault in it. The refusal is logged once, then at most once a
+  minute with a count of what it skipped.
+
 ## [0.46.0] - 2026-09-11
 
 ### Added

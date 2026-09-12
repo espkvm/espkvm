@@ -1,5 +1,14 @@
 dependencies:
   # Hardware H.264 encoder. Availability is probed at boot rather than assumed:
   # the encoder is tied to the chip revision, and this board carries a v1.3.
+  #
+  # 1.4.0 or newer, and that floor is not cosmetic. Up to 1.3.x the rate
+  # controller kept its running bit error in an int32 that was never bounded:
+  # a still screen encodes far under its budget, so the counter marched toward
+  # INT32_MIN - about twelve minutes at 1080p and 4 Mbit/s - wrapped, and the
+  # controller then read a huge overspend and drove QP to its ceiling until it
+  # wrapped back. That is the picture that breaks into blocks on an idle target
+  # and heals itself twenty minutes later. 1.4.0 widens the counter to int64
+  # and saturates it.
   espressif/esp_h264:
-    version: "^1.3.0"
+    version: "^1.4.0"

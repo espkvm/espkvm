@@ -58,17 +58,23 @@ static void apply_log_level(void)
     esp_log_level_set("*", level);
 
     /*
-     * One tag is held below that, because it writes a line per TLS connection
-     * ("performing session handshake") and the console opens several. In an
-     * eight-hour log pulled off a device to chase a video fault, 45 of the 203
-     * lines were that one message and the video events had been pushed out of
-     * the ring. Its warnings and errors still come through.
+     * Two tags are held below that, because each writes a line per connection
+     * and a browser makes a lot of connections. In an eight-hour log pulled off
+     * a device to chase a video fault, 45 of the 203 lines were
+     * esp_https_server's "performing session handshake" and the video events
+     * had been pushed out of the ring. httpd_uri is the same story from the
+     * other side: a console tab whose session has expired retries every 30 s
+     * for as long as it is open, and each refusal costs a "ws_pre_handshake_cb
+     * failed". Seven hours of that is 875 refusals. Their errors still come
+     * through.
      *
      * Only when the setting is at INFO: asking for DEBUG means asking for
-     * everything, and this is exactly the tag someone debugging TLS wants.
+     * everything, and these are exactly the tags someone debugging TLS or a
+     * refused socket wants.
      */
     if (level == ESP_LOG_INFO) {
         esp_log_level_set("esp_https_server", ESP_LOG_WARN);
+        esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
     }
 }
 

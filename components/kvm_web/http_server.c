@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3528,6 +3529,33 @@ static void video_pump_task(void *arg)
  * malformed frame. This callback is the one place where the request still has
  * its headers and the answer can still be "no".
  */
+/*
+ * A console tab left open after its session expired retries every 30 seconds
+ * for as long as the browser is running, and every attempt is refused here.
+ * Logged plainly that is two lines a refusal, which flushed the 200-line ring
+ * in under an hour on a device watched overnight - 875 refusals, and the fault
+ * the log was kept for was long gone from it. So: say it, then say it again at
+ * most once a minute, with a count of what was skipped.
+ */
+static void log_refusal(const char *why)
+{
+    static int64_t last_us;
+    static uint32_t skipped;
+    const int64_t now = esp_timer_get_time();
+
+    if (last_us != 0 && now - last_us < 60 * 1000 * 1000) {
+        skipped++;
+        return;
+    }
+    if (skipped) {
+        ESP_LOGW(TAG, "websocket refused: %s (and %" PRIu32 " more)", why, skipped);
+    } else {
+        ESP_LOGW(TAG, "websocket refused: %s", why);
+    }
+    skipped = 0;
+    last_us = now;
+}
+
 static esp_err_t ws_pre_handshake(httpd_req_t *req)
 {
     /*
@@ -3537,11 +3565,11 @@ static esp_err_t ws_pre_handshake(httpd_req_t *req)
      * this device is refused before the session is even looked at.
      */
     if (!kvm_auth_origin_ok(req)) {
-        ESP_LOGW(TAG, "websocket refused: another site opened it");
+        log_refusal("another site opened it");
         return ESP_FAIL;
     }
     if (!kvm_auth_check(req)) {
-        ESP_LOGW(TAG, "websocket refused: no session");
+        log_refusal("no session");
         return ESP_FAIL;
     }
     /* Frames carry no headers, so the socket itself is the credential from

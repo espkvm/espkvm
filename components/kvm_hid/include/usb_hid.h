@@ -65,6 +65,16 @@ void usb_hid_mouse_abs(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel, in
 void usb_hid_mouse_rel(uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, int8_t pan);
 
 /**
+ * One relative move that must reach the target as its own report.
+ *
+ * Queued motion is coalesced, which is right for a hand on a mouse and wrong
+ * for a nudge there and back: the two halves add up to nothing and the target
+ * gets a report with no movement in it, which is no activity at all. This one
+ * refuses to be folded into its neighbours.
+ */
+void usb_hid_mouse_nudge(int16_t dx, int16_t dy);
+
+/**
  * When something was last sent to the target, on the esp_timer clock.
  *
  * The jiggler uses it to keep out of the way: a nudge while the operator is

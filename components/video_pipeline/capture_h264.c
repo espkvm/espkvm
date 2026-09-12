@@ -198,6 +198,10 @@ const char *h264_err_name(esp_h264_err_t err)
     }
 }
 
+/* What a working encoder took from internal RAM, measured on the open that
+ * succeeded. A rebuild checks the longest free run against it. */
+static size_t s_enc_internal_bytes;
+
 static void encoder_release(void)
 {
     if (s_enc) {
@@ -337,6 +341,7 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
         .res = {.width = (uint16_t)w, .height = (uint16_t)h},
         .rc = {.bitrate = s_bitrate, .qp_min = H264_QP_MIN, .qp_max = H264_QP_MAX},
     };
+    const size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     esp_h264_err_t herr = esp_h264_enc_hw_new(&cfg, &s_enc);
     if (herr != ESP_H264_ERR_OK || !s_enc) {
         /*
@@ -372,8 +377,17 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
     s_enc_w = w;
     s_enc_h = h;
     s_enc_broken = false;
+    /*
+     * What it cost in internal RAM, so a later rebuild can refuse to start when
+     * that much is not there to be had. The reference frame alone is one
+     * contiguous internal block - about 135 KB at 1920 wide - and the component
+     * has no PSRAM fallback for it.
+     */
+    const size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    s_enc_internal_bytes = internal_before > internal_after ? internal_before - internal_after : 0;
     ESP_LOGI(CAPTURE_LOG_TAG, "h264 encoder %" PRIu32 "x%" PRIu32 " @%" PRId32 " fps, %" PRIu32
-             " kbit/s, gop %u", w, h, fps, s_bitrate / 1000u, s_gop);
+             " kbit/s, gop %u, %u KB internal", w, h, fps, s_bitrate / 1000u, s_gop,
+             (unsigned)(s_enc_internal_bytes / 1024));
     return ESP_OK;
 }
 
@@ -399,6 +413,26 @@ static bool wedge_rebuild_if_needed(uint32_t w, uint32_t h)
     }
     const int64_t now = esp_timer_get_time();
     if (now < s_rebuild_after_us) {
+        return false;
+    }
+    /*
+     * Only rebuild when the room for a new encoder is already free, without
+     * counting on the old one giving its block back. It does not always: the
+     * reference frame wants one contiguous internal run, and releasing a 135 KB
+     * block does not reliably leave a 135 KB hole. A rebuild that fails here
+     * costs the whole codec - the caller drops to MJPEG until the next restart -
+     * so a picture in blocks is the better of the two. Seen on the bench with
+     * 314 KB free and the longest run 132 KB.
+     */
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if (s_enc_internal_bytes && largest < s_enc_internal_bytes) {
+        ESP_LOGW(CAPTURE_LOG_TAG,
+                 "keyframes fell, but a new encoder needs %u KB of internal RAM in one piece and "
+                 "the longest free run is %u KB - leaving it alone",
+                 (unsigned)(s_enc_internal_bytes / 1024), (unsigned)(largest / 1024));
+        s_wedged = false;
+        s_idr_starved = 0;
+        s_rebuild_after_us = now + WEDGE_COOLDOWN_US;
         return false;
     }
     ESP_LOGW(CAPTURE_LOG_TAG,
