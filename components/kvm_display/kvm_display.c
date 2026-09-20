@@ -261,14 +261,19 @@ static void display_task(void *arg)
        failure - a user reported exactly that against a display he had not
        switched on. */
     bool told_off = false;
+    bool rotate_180 = kvm_setting_bool("disp_rotate_180");
 
     for (;;) {
         const bool want = kvm_setting_bool("disp_enable");
         const kvm_panel_t *sel = kvm_panel_selected();
+        const bool new_rotate_180 = kvm_setting_bool("disp_rotate_180");
+        const bool rotation_changed = new_rotate_180 != rotate_180;
+        rotate_180 = new_rotate_180;
 
-        /* Drop the panel if switched off or another one was picked. Compare
-           panels, not drivers: a new size needs re-initialising too. */
-        if (ctx && (!want || sel != panel)) {
+        /* Drop the panel if switched off, another one was picked, or the
+           orientation changed. Compare panels, not drivers: a new size
+           needs re-initialising too. */
+        if (ctx && (!want || sel != panel || rotation_changed)) {
             drv->detach(ctx);
             ctx = NULL;
         }

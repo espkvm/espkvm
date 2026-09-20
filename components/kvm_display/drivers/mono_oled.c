@@ -17,6 +17,7 @@
 #include "font5x7.h"
 #include "icons.h"
 #include "kvm_panels.h"
+#include "kvm_settings.h"
 #include "qrcode.h"
 #include "logo.h"
 
@@ -579,6 +580,11 @@ esp_err_t mono_oled_attach(mono_oled_t **out, const uint8_t *init_cmds, size_t i
         return err;
     }
     err = send_cmds(m->dev, init_cmds, init_len);
+    if (err == ESP_OK && kvm_setting_bool("disp_rotate_180")) {
+        /* Reverse both controller axes for a 180-degree panel rotation. */
+        const uint8_t rotate_180[] = {0xA0, 0xC0};
+        err = send_cmds(m->dev, rotate_180, sizeof(rotate_180));
+    }
     if (err == ESP_OK) {
         /*
          * The three commands that depend on the glass rather than the
@@ -694,4 +700,3 @@ void mono_oled_detach(mono_oled_t *m)
     i2c_master_bus_rm_device(m->dev);
     free(m);
 }
-

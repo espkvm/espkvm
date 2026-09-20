@@ -1004,6 +1004,12 @@ static const kvm_setting_t s_settings[] = {
                 "status lines.",
         .min = 0, .max = ENUM_MAX(s_display_choices), .def = 0, .choices = s_display_choices, .requires_cap = -1,
     },
+    {
+        .key = "disp_rotate_180", .section = "display", .type = KVM_VT_BOOL,
+        .title = "Rotate display 180°",
+        .help = "Rotate the status display by 180 degrees. Useful when the panel must be mounted upside down because of its connector, PCB or enclosure orientation.",
+        .def = 0, .requires_cap = -1,
+    },
     /* GC9A01 SPI pins (the I2C OLEDs need none - they share the capture bus).
      * Pins, so the console offers only free GPIOs; a restart re-attaches on the
      * new wiring. Defaults are a sane free set on the P4; set them to your board. */

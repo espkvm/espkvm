@@ -509,7 +509,8 @@ static esp_err_t attach(void **ctx)
     esp_lcd_panel_reset(g->panel);
     esp_lcd_panel_init(g->panel);
     esp_lcd_panel_invert_color(g->panel, true); /* GC9A01 panels want inversion on */
-    esp_lcd_panel_mirror(g->panel, true, false); /* the module's default is X-mirrored */
+    const bool rotate_180 = kvm_setting_bool("disp_rotate_180");
+    esp_lcd_panel_mirror(g->panel, !rotate_180, rotate_180); /* preserve the module orientation, optionally rotated 180 degrees */
     esp_lcd_panel_disp_on_off(g->panel, true);
 
     if (bl >= 0) {
