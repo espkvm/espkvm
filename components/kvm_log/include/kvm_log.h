@@ -24,6 +24,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,6 +48,22 @@ void kvm_log_init(void);
  * @return     bytes written, not counting the terminator
  */
 size_t kvm_log_read(char *out, size_t cap);
+
+/**
+ * Start the live copy: a 64 KB ring in PSRAM, numbered from boot, that a task
+ * fills from the RTC ring every 100 ms. Call once the heap is up.
+ */
+void kvm_log_start_tail(void);
+
+/**
+ * Copy what was logged from @p *pos on, up to @p cap bytes, and move @p *pos
+ * past it; a position older than the copy jumps to its oldest byte. @p head, if
+ * not NULL, gets the total so far. Returns the bytes copied (no terminator).
+ */
+size_t kvm_log_tail(uint64_t *pos, char *out, size_t cap, uint64_t *head);
+
+/** Size of the live copy. */
+size_t kvm_log_tail_capacity(void);
 
 /** Bytes currently held. */
 size_t kvm_log_size(void);

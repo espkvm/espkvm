@@ -14,6 +14,8 @@ idf_component_register(
         kvm_config
         kvm_log
         kvm_atx
+        kvm_serial
+        kvm_netlog
         kvm_mqtt
         nvs_flash
         kvm_storage

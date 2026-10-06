@@ -48,6 +48,8 @@ typedef enum {
     KVM_CAP_SCHED,      /**< scheduler: cron lines that fire actions on the device */
     KVM_CAP_NOTIFY,     /**< push notifications to Telegram / a webhook */
     KVM_CAP_CEC,        /**< HDMI-CEC: the bridge has a controller and the line answers */
+    KVM_CAP_SERIAL,     /**< the target's serial console: a UART on pins picked in settings */
+    KVM_CAP_NETLOG,     /**< netconsole / syslog receiver: the target's log over UDP */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

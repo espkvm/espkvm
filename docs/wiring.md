@@ -135,3 +135,38 @@ Set the pins and turn `atx_enable` on; the power button at the bottom of the
 console's side rail lights up.
 If the target reacts to the wrong button, or the reported power state is
 inverted, flip the matching polarity setting - no reflash.
+
+# Serial console
+
+For a target whose console is a serial port: a NAS with no video output, a
+router, a server, a Raspberry Pi, or a PC that redirects its BIOS to COM1.
+Three wires - the target's TX to the device's RX, the target's RX to the
+device's TX, and ground to ground. TX always goes to RX.
+
+## Which voltage
+
+- **3.3 V logic** (a Raspberry Pi's GPIO 14/15, a router's 4-pin header, most
+  single-board computers): straight in.
+- **RS-232** (the 9-pin COM port of a PC or a server, often an internal 10-pin
+  header too): +-12 V, which destroys a 3.3 V pin. Put a MAX3232 module in
+  between - its TTL side to the device, its RS-232 side to the target.
+- **5 V TTL**: a level shifter, or at least a divider on the device's RX.
+
+## On the ESP32-P4
+
+Any two free GPIOs; the settings refuse one that is already taken. Avoid GPIO
+37 and 38: they are the P4's UART0, and many boards wire a USB-to-serial
+bridge to them. On the Function EV board GPIO 5 (J1 pin 16) and GPIO 4 (J1
+pin 18) are free, with ground on pin 14.
+
+To try it with nothing attached, bridge the two pins (TX to RX): whatever you
+type in the terminal comes straight back.
+
+## Settings
+
+Settings -> Power -> Serial console: turn it on, set the TX and RX pins and
+the speed. Linux and most boards run at 115200; a PC BIOS at 115200 or 9600.
+The format is always 8N1. It applies at once, no restart.
+
+On a Raspberry Pi, add `enable_uart=1` to `config.txt`: its console then comes
+out on GPIO 14 (pin 8, TX) and GPIO 15 (pin 10, RX) at 115200.

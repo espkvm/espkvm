@@ -115,6 +115,9 @@ CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=6144
 # Resumption: a full handshake costs this chip ~330 ms and the console opens
 # several connections at once.
 CONFIG_ESP_TLS_SERVER_SESSION_TICKETS=y
+# Downloads hand the HTTP client their own TLS transport, to pick ChaCha20
+# over the hardware AES (kvm_web_chacha_transport).
+CONFIG_ESP_HTTP_CLIENT_ENABLE_CUSTOM_TRANSPORT=y
 
 # The websocket handler is not called for the upgrade (esp_http_server returns
 # right after the handshake), so the session cookie can only be checked here.

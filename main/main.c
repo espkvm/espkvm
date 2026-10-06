@@ -28,6 +28,8 @@
 #include "wifi.h"
 #include "http_server.h"
 #include "kvm_atx.h"
+#include "kvm_serial.h"
+#include "kvm_netlog.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_ipv6.h"
@@ -120,6 +122,12 @@ static void on_setting_changed(const char *key, void *user)
     }
     if (strncmp(key, "atx_", 4) == 0 || strcmp(key, "*") == 0) {
         kvm_atx_apply();
+    }
+    if (strncmp(key, "ser_", 4) == 0 || strcmp(key, "*") == 0) {
+        kvm_serial_apply();
+    }
+    if (strncmp(key, "nc_", 3) == 0 || strcmp(key, "*") == 0) {
+        kvm_netlog_apply();
     }
     if (strncmp(key, "mqtt_", 5) == 0 || strcmp(key, "*") == 0) {
         kvm_mqtt_apply();
@@ -261,6 +269,8 @@ static void report_pending_capabilities(void)
 {
     apply_media_selection();
     kvm_atx_apply();
+    kvm_serial_apply();
+    kvm_netlog_apply(); /* the socket opens on its own task, once the network is up */
     /* Wake-on-LAN needs only the network, which is up by the time anything can
      * ask for it. */
     kvm_cap_report(KVM_CAP_WOL, true, NULL);
@@ -568,6 +578,7 @@ void app_main(void)
     /* First, so everything below is captured. What the bootloader and the ROM
      * printed before this is already gone - it exists only on the wire. */
     kvm_log_init();
+    kvm_log_start_tail(); /* the live view's copy, in PSRAM */
     log_boot_reason();
     boot_guard_check();
 
@@ -591,6 +602,14 @@ void app_main(void)
      * runs kvm_atx_apply(); this only builds the worker task and queue, so it
      * is ready before the web server can accept a power command. */
     ESP_ERROR_CHECK(kvm_atx_init());
+    /* The serial console's ring and reader; the UART opens with the other
+     * pins in report_pending_capabilities(). Not fatal: it is an extra. */
+    if (kvm_serial_init() != ESP_OK) {
+        ESP_LOGW(TAG, "serial console: no memory for its buffer");
+    }
+    if (kvm_netlog_init() != ESP_OK) {
+        ESP_LOGW(TAG, "netconsole receiver: no memory for its buffer");
+    }
 
     /*
      * Before anything reads the network settings: the button shares its pin

@@ -7,6 +7,44 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-10-06
+
+### Added
+- **The target's serial console.** For a box with no screen at all - a NAS,
+  a router, a headless server - or a BIOS that talks over serial. Turn it on
+  in Settings &rarr; Power &rarr; Serial console and pick two pins: a 3.3 V
+  console wires straight in, a real RS-232 port goes through a MAX3232
+  module. The console gets a terminal button: a VT100 screen with colours,
+  keys sent as a terminal sends them, and everything since boot replayed when
+  you open it (the device keeps the last 64 KB). Scripts can read
+  `GET /api/v1/serial/log` and type with `POST /api/v1/serial/send`. Asked
+  for in #69. With no HDMI signal, the "No signal" screen offers a button
+  that opens it.
+- **The target's log over the network.** Turn on Settings &rarr; Network
+  &rarr; Netconsole and point the target's netconsole (or any plain syslog
+  over UDP) at the device: `modprobe netconsole
+  netconsole=@/,6666@<device IP>/`. It keeps the last 64 KB, shows it live
+  behind a new button, and sends a notification when a line says "Kernel
+  panic", "Oops" or another phrase you pick - at most one every 30 s. No
+  wiring, and it still works when the target's disk is gone. The lines are
+  unauthenticated UDP, so they only ever notify, never run anything; set
+  "Accept from" to the target's address. An idea from Reddit.
+- **The device's own log, live.** Diagnostics &rarr; Live log shows it as it
+  is written, with errors and warnings in colour, levels you can hide and a
+  search. The device now keeps 64 KB of it, five times as much as before; the
+  part that survives a restart is the same 12 KB as ever.
+- **Download an image from a link.** The Media panel puts netboot.xyz into
+  the rescue slot with one click, and downloads any http/https link onto the
+  card. The device fetches it itself, so nothing goes through the browser.
+  Promised in #70.
+
+### Fixed
+- **HTTPS downloads dying part-way.** With video running, the hardware AES
+  could not get internal RAM for a record and the connection broke ("invalid
+  MAC"). Downloads from the device - the link download above and installing
+  a release from GitHub - now ask for ChaCha20 first, and only fall back to
+  the usual ciphers when the server has no ChaCha20.
+
 ## [0.59.0] - 2026-10-04
 
 ### Added

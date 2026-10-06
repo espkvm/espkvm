@@ -1192,10 +1192,42 @@ static esp_err_t api_system_update_post_body(httpd_req_t *req)
  * The copy is taken in PSRAM: 12 KB out of internal memory is 12 KB the video
  * encoder may want, and this endpoint is not worth that.
  */
+/*
+ * GET the device's log. With ?since=N, only what was logged after position N,
+ * for the console's live view: the reply carries X-Log-Pos, the position to ask
+ * from next time. Without it, the whole of the live copy (64 KB) as a file, or
+ * the RTC ring if the copy never started.
+ */
 static esp_err_t api_system_log_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
+    }
+    char q[48] = {0};
+    char v[24] = {0};
+    const bool has_q = httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK;
+    const bool live = has_q && httpd_query_key_value(q, "since", v, sizeof(v)) == ESP_OK;
+    const size_t tail_cap = kvm_log_tail_capacity();
+    char *tail = heap_caps_malloc(tail_cap, MALLOC_CAP_SPIRAM);
+    if (tail) {
+        uint64_t pos = live ? strtoull(v, NULL, 10) : 0;
+        uint64_t head = 0;
+        const size_t n = kvm_log_tail(&pos, tail, tail_cap, &head);
+        if (head > 0 || live) {
+            char hdr[24];
+            snprintf(hdr, sizeof(hdr), "%llu", (unsigned long long)pos);
+            httpd_resp_set_type(req, "text/plain; charset=utf-8");
+            httpd_resp_set_hdr(req, "X-Log-Pos", hdr);
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            if (!live) {
+                httpd_resp_set_hdr(req, "Content-Disposition",
+                                   "attachment; filename=\"espkvm-log.txt\"");
+            }
+            const esp_err_t err = httpd_resp_send(req, tail, (ssize_t)n);
+            free(tail);
+            return err;
+        }
+        free(tail);
     }
     const size_t cap = kvm_log_capacity() + 1;
     char *buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
@@ -2183,6 +2215,11 @@ static bool agent_allowed(httpd_req_t *req, esp_err_t *out)
     return true;
 }
 
+bool kvm_web_agent_allowed(httpd_req_t *req, esp_err_t *out)
+{
+    return agent_allowed(req, out);
+}
+
 /* GET a single JPEG still. Needs the MJPEG codec (an H.264 frame is not a
  * standalone image); counts as a viewer briefly so the encoder produces a fresh
  * frame even when nobody is streaming. */
@@ -2829,6 +2866,17 @@ static void ws_send_binary(int fd, const uint8_t *data, size_t len)
     (void)ws_send_frame(s_httpd, fd, &frame);
 }
 
+esp_err_t kvm_web_ws_send_binary(int fd, const uint8_t *data, size_t len)
+{
+    httpd_ws_frame_t frame = {
+        .final = true,
+        .type = HTTPD_WS_TYPE_BINARY,
+        .payload = (uint8_t *)data,
+        .len = len,
+    };
+    return ws_send_frame(s_httpd, fd, &frame);
+}
+
 static void ws_send_pong(int fd)
 {
     const uint8_t pong[] = {WS_D2C_PONG};
@@ -3020,6 +3068,7 @@ static void http_sess_close_cb(httpd_handle_t hd, int sockfd)
         usb_hid_release_all();
     }
     video_remove_client(sockfd);
+    serial_api_drop(sockfd);
     kvm_auth_forget_socket(sockfd);
 }
 
@@ -4201,6 +4250,11 @@ static esp_err_t ws_pre_handshake(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t kvm_web_ws_pre_handshake(httpd_req_t *req)
+{
+    return ws_pre_handshake(req);
+}
+
 static esp_err_t video_ws_handler(httpd_req_t *req)
 {
     /* Only frames reach here; the handshake was answered, and authenticated,
@@ -4584,7 +4638,7 @@ httpd_handle_t http_server_start(void)
      * The check below now logs a failed registration rather than swallowing it, so
      * the next person gets a line instead of a mystery - but keep headroom anyway.
      */
-    cfg.max_uri_handlers = 96;
+    cfg.max_uri_handlers = 112;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -4785,6 +4839,21 @@ httpd_handle_t http_server_start(void)
     const httpd_uri_t *cec_uris = cec_api_routes(&n_cec);
     for (size_t i = 0; i < n_cec; i++) {
         register_route(h, &cec_uris[i]);
+    }
+    size_t n_fetch = 0;
+    const httpd_uri_t *fetch_uris = url_fetch_routes(&n_fetch);
+    for (size_t i = 0; i < n_fetch; i++) {
+        register_route(h, &fetch_uris[i]);
+    }
+    size_t n_netlog = 0;
+    const httpd_uri_t *netlog_uris = netlog_api_routes(&n_netlog);
+    for (size_t i = 0; i < n_netlog; i++) {
+        register_route(h, &netlog_uris[i]);
+    }
+    size_t n_serial = 0;
+    const httpd_uri_t *serial_uris = serial_api_routes(&n_serial);
+    for (size_t i = 0; i < n_serial; i++) {
+        register_route(h, &serial_uris[i]);
     }
 
     /* Before anything else is registered: a request that arrives while the

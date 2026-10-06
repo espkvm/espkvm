@@ -7,12 +7,16 @@ idf_component_register(
         "record_api.c"
         "totp.c"
         "cec_api.c"
+        "serial_api.c"
+        "netlog_api.c"
+        "url_fetch.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES
         esp_http_server
         esp_https_server
     PRIV_REQUIRES
+        tcp_transport
         video_pipeline
         kvm_screentext
         kvm_hid
@@ -30,6 +34,8 @@ idf_component_register(
         kvm_sched
         kvm_notify
         kvm_cec
+        kvm_serial
+        kvm_netlog
         kvm_rtc
         app_update
         esp_app_format

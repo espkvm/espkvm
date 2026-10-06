@@ -24,6 +24,7 @@
 #include "kvm_board_header.h"
 #include "kvm_display.h"
 #include "kvm_settings.h"
+#include "web_priv.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -128,6 +129,17 @@ static bool version_ok(const char *v)
     return true;
 }
 
+/* The install's ChaCha20 transport; freed after the client that used it. */
+static esp_transport_handle_t s_tls;
+
+static void drop_tls(void)
+{
+    if (s_tls) {
+        esp_transport_destroy(s_tls);
+        s_tls = NULL;
+    }
+}
+
 static void fail(esp_http_client_handle_t http, esp_ota_handle_t ota, const char *why)
 {
     if (ota) {
@@ -137,6 +149,7 @@ static void fail(esp_http_client_handle_t http, esp_ota_handle_t ota, const char
         esp_http_client_close(http);
         esp_http_client_cleanup(http);
     }
+    drop_tls();
     ESP_LOGE(TAG, "%s", why);
     kvm_display_notice("ROLLBACK", "failed", -1, 10000);
     set_state(FW_INSTALL_FAILED, -1, why);
@@ -179,6 +192,8 @@ static void install_task(void *arg)
          * only reaches esp_http_client_perform(), which this path does not use. */
         .disable_auto_redirect = true,
         .keep_alive_enable = false,
+        /* ChaCha20, not the hardware AES (see kvm_web_chacha_transport). */
+        .transport = (s_tls = kvm_web_chacha_transport()),
     };
     esp_http_client_handle_t http = esp_http_client_init(&cfg);
     if (!http) {
@@ -202,6 +217,21 @@ static void install_task(void *arg)
     int status = 0;
     for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
         err = esp_http_client_open(http, 0);
+        if (err != ESP_OK && cfg.transport) {
+            /* A host without ChaCha20: start over with the default suites. */
+            ESP_LOGI(TAG, "no ChaCha20 there; trying the default cipher suites");
+            esp_http_client_cleanup(http);
+            drop_tls();
+            cfg.transport = NULL;
+            http = esp_http_client_init(&cfg);
+            if (!http) {
+                fail(NULL, 0, "could not start an HTTPS client");
+                vTaskDelete(NULL);
+                return;
+            }
+            hop = -1;
+            continue;
+        }
         if (err != ESP_OK) {
             fail(http, 0, "could not reach GitHub - is the device online?");
             vTaskDelete(NULL);
@@ -318,6 +348,7 @@ static void install_task(void *arg)
     free(chunk);
     esp_http_client_close(http);
     esp_http_client_cleanup(http);
+    drop_tls();
 
     set_state(FW_INSTALL_RUNNING, 100, "checking the image");
     kvm_display_notice("ROLLBACK", "verifying", 100, 30000);

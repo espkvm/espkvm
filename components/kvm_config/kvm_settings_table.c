@@ -78,6 +78,9 @@ static const char *const s_display_choices[] = {
 };
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
+/* Must match k_bauds in kvm_serial.c. */
+static const char *const s_baud_choices[] = {"9600",   "19200",  "38400",  "57600",
+                                             "115200", "230400", "460800", "921600"};
 static const char *const s_pad_choices[] = {"off", "switch", "switch_alone", "xinput",
                                             "xinput_alone"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap", "auto"};
@@ -634,6 +637,37 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = -1,
     },
 
+    {
+        .key = "ser_enable", .section = "power", .group = "Serial console", .type = KVM_VT_BOOL,
+        .title = "Serial console",
+        .help = "The target's serial port, for a machine with no screen at all - a NAS, a "
+                "router, a server - or one that shows its BIOS over serial. Wire the target's "
+                "TX to the RX pin below and its RX to the TX pin, plus ground. 3.3 V logic "
+                "(a Raspberry Pi, a router's header) goes straight in; a real RS-232 port "
+                "(9-pin, +-12 V) needs a MAX3232 module in between, or it damages the pin.",
+        .def = 0, .requires_cap = -1,
+    },
+    {
+        .key = "ser_tx", .section = "power", .group = "Serial console", .type = KVM_VT_INT,
+        .title = "TX pin (to the target's RX)",
+        .help = "The GPIO this device sends on. -1 until you pick one.",
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+    },
+    {
+        .key = "ser_rx", .section = "power", .group = "Serial console", .type = KVM_VT_INT,
+        .title = "RX pin (from the target's TX)",
+        .help = "The GPIO this device listens on. -1 until you pick one.",
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+    },
+    {
+        .key = "ser_baud", .section = "power", .group = "Serial console", .type = KVM_VT_ENUM,
+        .title = "Speed (baud)",
+        .help = "What the target's console runs at; 115200 for Linux and most boards, 9600 "
+                "or 115200 for a PC BIOS. Always 8 data bits, no parity, one stop bit.",
+        .min = 0, .max = ENUM_MAX(s_baud_choices), .def = 4, .choices = s_baud_choices,
+        .requires_cap = -1,
+    },
+
     /* ---- audio ---------------------------------------------------------- */
     {
         .key = "aud_enable", .section = "audio", .type = KVM_VT_BOOL,
@@ -644,6 +678,37 @@ static const kvm_setting_t s_settings[] = {
     },
 
     /* ---- network -------------------------------------------------------- */
+    {
+        .key = "nc_enable", .section = "network", .group = "Netconsole", .type = KVM_VT_BOOL,
+        .title = "Receive the target's log",
+        .help = "Listen for the target's kernel messages over the network: Linux netconsole, "
+                "or anything that sends plain syslog over UDP. It keeps working when the "
+                "target's disk is gone, which is when you want it. On the target, for example: "
+                "modprobe netconsole netconsole=@/,6666@<this device's IP>/. What arrives is "
+                "unauthenticated UDP - anyone on the network can read it or send lines - so it "
+                "is kept as text and can only raise a notification, never run anything.",
+        .def = 0, .requires_cap = -1,
+    },
+    {
+        .key = "nc_port", .section = "network", .group = "Netconsole", .type = KVM_VT_INT,
+        .title = "UDP port",
+        .help = "6666 is netconsole's usual port; 514 is syslog's.",
+        .min = 1, .max = 65535, .def = 6666, .requires_cap = -1,
+    },
+    {
+        .key = "nc_from", .section = "network", .group = "Netconsole", .type = KVM_VT_STR,
+        .title = "Accept from",
+        .help = "The target's IP address; several separated by commas. Empty accepts lines "
+                "from anyone on the network.",
+        .def_str = "", .max_len = 95, .requires_cap = -1,
+    },
+    {
+        .key = "nc_match", .section = "network", .group = "Netconsole", .type = KVM_VT_STR,
+        .title = "Alert on",
+        .help = "Comma-separated phrases, matched without regard to case. A line holding one "
+                "sends a notification, at most one every 30 seconds. Empty for none.",
+        .def_str = "Kernel panic,Oops,BUG:,Call Trace", .max_len = 127, .requires_cap = -1,
+    },
     {
         .key = "net_hostname", .section = "network", .group = "Address", .type = KVM_VT_STR,
         .title = "Hostname",

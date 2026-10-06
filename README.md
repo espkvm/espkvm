@@ -107,6 +107,9 @@ Useful for what it does today, and honest about the rest.
 | WiFi - station or its own access point | works; on boards with an ESP32-C6, or an ESP32-C5 for 5 GHz. A rescue hotspot and a captive portal |
 | Ethernet with WiFi as the backup | works on boards with both; Connection &rarr; Auto. When the cable is pulled the device moves to WiFi, and back when it returns, with no restart. It answers on both addresses, and the certificate names both. Tried on the Function EV: the console stayed open over WiFi and MQTT came back in 15 s |
 | ATX power control (power, reset, power LED) | works; wiring in [docs/wiring.md](docs/wiring.md) |
+| The target's serial console | new, not tried on hardware yet; Settings &rarr; Power &rarr; Serial console. A UART on two pins you pick, a VT100 terminal in the console that keeps the boot messages, and a REST tail for scripts. 3.3 V consoles wire straight in, RS-232 through a MAX3232 module; [docs/wiring.md](docs/wiring.md#serial-console) |
+| The target's log over the network (netconsole / syslog) | new, not tried on hardware yet; Settings &rarr; Network &rarr; Netconsole. The device listens on UDP, keeps 64 KB, shows it live and can notify on phrases like "Kernel panic". No wiring, and it works when the target's disk is gone. The lines are unauthenticated, so they only ever raise a notification, never an action |
+| The device's own log, live | new; Diagnostics &rarr; Live log. 64 KB that follows as lines arrive, with levels and search; the download still has the run before a restart |
 | Small status display (IP, link, capture, health) | works; optional. An I2C OLED or a round GC9A01, pins assigned from the console, and the picture can be turned upside down for a panel mounted that way |
 | A viewing token for dashboards | works; off until you make one. Opens the stream and the figures, and nothing that can touch the target |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered. Sensors, buttons, an update entity, a camera holding a still of the screen |
@@ -1155,6 +1158,12 @@ board, so that one uploads from the browser, or over the cable with
 partition table that carries it is a one-time full flash - the browser flasher
 does it - after which the image updates over the network.
 
+The device can also **download an image itself** from a link: netboot.xyz into
+the flash slot with one click in the Media panel, or any http/https URL onto the
+card. The file does not pass through the browser, so a phone works, and a NAS
+link works too. Over HTTPS it asks for ChaCha20 first: the hardware AES needs
+internal RAM on every record, and with video running a download died part-way.
+
 **Reading the screen.** When the target is in a character mode - a BIOS setup, a
 UEFI boot menu, memtest, a Linux console - the device reads the screen back as
 text. The console lets you select it with the mouse, or copy the whole screen.
@@ -1251,6 +1260,7 @@ Everything the console does is available over HTTP.
 | `GET /api/v1/system/usbprobe` | the target's USB enumeration fingerprint and the OS guessed from it |
 | `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active |
 | `POST /api/v1/storage/upload`, `/rescue`, `/delete` | manage the virtual-media images; a file of 4 GB and over goes in parts, each with `&offset=` |
+| `POST /api/v1/storage/fetch`, `GET` the same, `POST .../fetch/cancel` | the device downloads `{"url","dest":"card"\|"rescue","name"}` itself; GET is the progress |
 | `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
 | `GET /api/v1/cec` | HDMI-CEC: the devices on the line (name, vendor, power state) and the last messages |
 | `POST /api/v1/cec/key`, `/power`, `/send`, `/scan` | send a remote key (`{"key":"up"}`), `{"action":"standby"\|"wake"}`, a raw message (`{"hex":"04 8f"}`), or look for devices again; `"la"` picks a device other than the active one |
