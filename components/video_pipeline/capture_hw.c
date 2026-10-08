@@ -47,6 +47,12 @@ static esp_cam_ctlr_handle_t s_cam;
 static isp_proc_handle_t s_isp_bypass;
 
 static capture_ctx_t s_cap;
+/* Frames the CSI finished since boot and when the last one landed, so a client
+ * can tell a picture that is still arriving from a lock with nothing behind it.
+ * Written in the ISR; never reset. Its own lock, ready before capture starts. */
+static portMUX_TYPE s_frames_mu = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_frames_total;
+static int64_t s_last_frame_us;
 static i2c_master_bus_handle_t s_i2c_bus; /* shared with an optional status OLED */
 
 /*
@@ -347,6 +353,10 @@ static bool IRAM_ATTR cam_on_done(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t 
     (void)__sync_add_and_fetch(&c->csi_dma_done_irqs, 1);
     /* A frame written to drop_fb matches no ring slot and is ignored here. */
     if (trans && trans->buffer) {
+        portENTER_CRITICAL_ISR(&s_frames_mu);
+        s_frames_total++;
+        s_last_frame_us = esp_timer_get_time();
+        portEXIT_CRITICAL_ISR(&s_frames_mu);
         int idx = -1;
         for (int k = 0; k < CAPTURE_FB_COUNT; k++) {
             if (trans->buffer == c->fb[k]) {
@@ -859,10 +869,51 @@ esp_err_t capture_reconnect_source(void)
 }
 
 /*
- * Polls the bridge rather than using its interrupt line: the INT pin is not
- * wired on this adapter, and 200 ms is fast enough that a mode switch is
- * invisible next to the source's own retraining time.
+ * Polls the bridge every 200 ms, which is fast enough that a mode switch is
+ * invisible next to the source's own retraining time. Where the bridge's
+ * mode-change line is wired (CONFIG_KVM_BRIDGE_INT_GPIO - the M5Stack add-on's
+ * INTIO on G38), its pulse wakes the poll at once instead.
  */
+static TaskHandle_t s_monitor_task;
+
+#if CONFIG_KVM_BRIDGE_INT_GPIO >= 0
+static void IRAM_ATTR bridge_int_isr(void *arg)
+{
+    (void)arg;
+    BaseType_t woken = pdFALSE;
+    if (s_monitor_task) {
+        vTaskNotifyGiveFromISR(s_monitor_task, &woken);
+    }
+    portYIELD_FROM_ISR(woken);
+}
+
+static void bridge_int_init(void)
+{
+    const gpio_config_t io = {
+        .pin_bit_mask = 1ULL << CONFIG_KVM_BRIDGE_INT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_POSEDGE,
+    };
+    esp_err_t err = gpio_config(&io);
+    if (err == ESP_OK) {
+        err = gpio_install_isr_service(0);
+        if (err == ESP_ERR_INVALID_STATE) {
+            err = ESP_OK; /* someone installed it already */
+        }
+    }
+    if (err == ESP_OK) {
+        err = gpio_isr_handler_add(CONFIG_KVM_BRIDGE_INT_GPIO, bridge_int_isr, NULL);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(CAPTURE_LOG_TAG, "bridge interrupt on GPIO %d: %s - polling only",
+                 CONFIG_KVM_BRIDGE_INT_GPIO, esp_err_to_name(err));
+    } else {
+        ESP_LOGI(CAPTURE_LOG_TAG, "bridge mode-change interrupt on GPIO %d", CONFIG_KVM_BRIDGE_INT_GPIO);
+    }
+}
+#endif
+
 static void capture_monitor_task(void *arg)
 {
     capture_ctx_t *c = (capture_ctx_t *)arg;
@@ -876,8 +927,14 @@ static void capture_monitor_task(void *arg)
     int nudges = 0;
     bool had_ddc5v = false;
 
+#if CONFIG_KVM_BRIDGE_INT_GPIO >= 0
+    s_monitor_task = xTaskGetCurrentTaskHandle();
+    bridge_int_init();
+#endif
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(200));
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200))) {
+            ESP_LOGI(CAPTURE_LOG_TAG, "the bridge says the mode changed");
+        }
         capture_status_tick();
 
         kvm_bridge_timings_t t = {0};
@@ -1025,4 +1082,15 @@ void capture_monitor_start(capture_ctx_t *c)
     }
     /* Below the capture task: telemetry must never delay an encode. */
     xTaskCreatePinnedToCore(capture_monitor_task, "cam_mon", 4096, c, 4, NULL, 0);
+}
+void capture_frame_counter(uint32_t *frames, int64_t *last_us)
+{
+    portENTER_CRITICAL(&s_frames_mu);
+    if (frames) {
+        *frames = s_frames_total;
+    }
+    if (last_us) {
+        *last_us = s_last_frame_us;
+    }
+    portEXIT_CRITICAL(&s_frames_mu);
 }

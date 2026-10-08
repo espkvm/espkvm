@@ -610,6 +610,20 @@ power LED without a direct electrical connection. A relay board does the two
 buttons just as well, but cannot sense the LED. Wiring for both is in
 [docs/wiring.md](docs/wiring.md).
 
+The **M5Stack Unit Relay** is one such relay, on a Grove cable: its yellow wire
+is the "Power button GPIO" in Settings &rarr; Power, with "Buttons active-high"
+on, and its contacts go across the target's power switch pins. One relay is one
+button - a second unit does reset. On the M5Stack Unit PoE-P4 the Grove port is
+GPIO 53 (yellow) and 54, the same pins as the status display, so it is one or
+the other. Not tried with the unit yet.
+
+**A button on the box.** Settings &rarr; Power &rarr; Button on the box puts a
+push button on a free pin - the M5Stack Unit Button on a Grove port, or any
+switch to ground - and gives a short press and a 1.5 s hold an action each:
+the target's power button, a hard off, reset, Wake-on-LAN, a runbook, saving
+the dashcam's last seconds, or a screenshot. The same actions a schedule can
+run. Not tried with real hardware yet.
+
 </td>
 </tr>
 </table>
@@ -625,12 +639,16 @@ buttons just as well, but cannot sense the LED. Wiring for both is in
 <tr>
 <td valign="top">
 
-**I2C OLED (SSD1306 / SH1106 / SSD1315)**
+**I2C OLED (SSD1306 / SH1106 / SSD1315 / SH1107 / SSD1309)**
 
 A mono OLED on four wires (VCC, GND, SCL, SDA). It shares the capture chip's I2C
 bus and needs no pins of its own. SSD1306 works as 128&times;64, 128&times;32,
 96&times;16, 72&times;40, 64&times;48 and 64&times;32; SH1106 as 128&times;64,
-128&times;32, 96&times;16 and 64&times;48; SSD1315 as 128&times;64 and 72&times;40.
+128&times;32, 96&times;16 and 64&times;48; SSD1315 as 128&times;64 and 72&times;40;
+SH1107 as 128&times;64, the M5Stack Unit OLED; SSD1309 as 128&times;64, the
+M5Stack Unit Glass2 transparent OLED (not tried on one yet; the first Unit Glass,
+with a microcontroller in front of its panel, is a different thing and not
+supported).
 Under Settings &rarr; Display you pick the panel by controller and size in one list, because these controllers cannot
 be asked how big the glass is. The shorter the panel, the fewer status
 lines it shows, and the address is the line it keeps. A line that does not fit
@@ -1254,7 +1272,7 @@ Everything the console does is available over HTTP.
 | `GET /api/capabilities` | what this device can do, and why it cannot do the rest |
 | `GET /api/v1/settings`, `PUT` | settings, validated and applied as a whole |
 | `GET /api/v1/settings/schema` | title, range and help text for every setting |
-| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, and whether this mode can be read as text |
+| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, and `frames` / `frameAgeMs`: frames captured since boot and how long ago the last one came, so a script can tell a live picture from a lock with nothing behind it |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
 | `GET /api/v1/screen/text` | the screen as characters when the target is in a text mode; 204 when it is showing a picture |
 | `GET /api/v1/system/usbprobe` | the target's USB enumeration fingerprint and the OS guessed from it |

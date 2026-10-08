@@ -75,6 +75,8 @@ static const char *const s_display_choices[] = {
     "SH1106 96x16",   "SH1106 64x48",
     "SSD1315 128x64 (untested)",
     "SSD1315 72x40 (M5Stack Mini OLED)",
+    "SH1107 128x64 (M5Stack Unit OLED)",
+    "SSD1309 128x64 (M5Stack Unit Glass2, untested)",
 };
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
@@ -83,6 +85,12 @@ static const char *const s_baud_choices[] = {"9600",   "19200",  "38400",  "5760
                                              "115200", "230400", "460800", "921600"};
 static const char *const s_pad_choices[] = {"off", "switch", "switch_alone", "xinput",
                                             "xinput_alone"};
+/* What the button on the box does. Order must match k_actions[] in
+   components/kvm_sched/button.c. */
+static const char *const s_btn_action_choices[] = {"nothing", "power", "power off (hold)", "reset",
+                                                   "wake (WoL)", "runbook", "save clip", "screenshot"};
+/* Read by the console only; how long its vibration tick lasts on a phone. */
+static const char *const s_haptic_choices[] = {"light", "medium", "strong"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap", "auto"};
 static const char *const s_fallback_choices[] = {"keep_trying", "hotspot"};
 
@@ -637,6 +645,46 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = -1,
     },
 
+    /* The button on the box - see components/kvm_sched/button.c. */
+    {
+        .key = "btn_gpio", .section = "power", .group = "Button on the box", .type = KVM_VT_INT,
+        .title = "Button GPIO",
+        .help = "A push button on a free pin: the M5Stack Unit Button on a Grove port (its "
+                "yellow wire), or any switch to ground. -1 for none. Not tried with real "
+                "hardware yet.",
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+    },
+    {
+        .key = "btn_press", .section = "power", .group = "Button on the box", .type = KVM_VT_ENUM,
+        .title = "A short press",
+        .help = "What a short press does: the target's power button, a hard power off, "
+                "reset, Wake-on-LAN, a runbook (named below), saving the dashcam's last "
+                "seconds as a clip, or a screenshot to the card.",
+        .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
+        .requires_cap = -1,
+    },
+    {
+        .key = "btn_hold", .section = "power", .group = "Button on the box", .type = KVM_VT_ENUM,
+        .title = "Held for 1.5 s",
+        .help = "What holding it does. It fires as soon as it has been held long enough, "
+                "so you know it took.",
+        .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
+        .requires_cap = -1,
+    },
+    {
+        .key = "btn_runbook", .section = "power", .group = "Button on the box", .type = KVM_VT_STR,
+        .title = "Runbook to run",
+        .help = "The name of the runbook, for either action set to \"runbook\".",
+        .def_str = "", .max_len = 47, .requires_cap = -1,
+    },
+    {
+        .key = "btn_active_high", .section = "power", .group = "Button on the box", .type = KVM_VT_BOOL,
+        .title = "Button reads high when pressed",
+        .help = "Off for a button that connects the pin to ground, which is the usual "
+                "kind and the M5Stack Unit Button. On for one that connects it to 3V3.",
+        .def = 0, .requires_cap = -1,
+    },
+
     {
         .key = "ser_enable", .section = "power", .group = "Serial console", .type = KVM_VT_BOOL,
         .title = "Serial console",
@@ -1120,10 +1168,54 @@ static const kvm_setting_t s_settings[] = {
         .min = 0, .max = ENUM_MAX(s_log_choices), .def = 2, .choices = s_log_choices, .requires_cap = -1,
     },
     {
-        .key = "ui_side", .section = "system", .group = "Console", .type = KVM_VT_ENUM,
+        .key = "ui_side", .section = "ui", .group = "Layout", .type = KVM_VT_ENUM,
         .title = "Panel side",
         .help = "Which side of the screen the button rail and its panels sit on.",
         .min = 0, .max = ENUM_MAX(s_side_choices), .def = 0, .choices = s_side_choices, .requires_cap = -1,
+    },
+    {
+        .key = "ui_fs_hide", .section = "ui", .group = "Full screen", .type = KVM_VT_BOOL,
+        .title = "Hide the bars in full screen",
+        .help = "In full screen the status strip, the rail and the bottom bar slide away "
+                "and the picture takes the whole screen. They come back over it with the "
+                "mouse at an edge (after a moment while you have control), the small tab "
+                "at the top, or a tap of the right Ctrl key on its own, and go again a few "
+                "seconds after you leave them.",
+        .def = 1, .requires_cap = -1,
+    },
+    {
+        .key = "ui_hidden", .section = "ui", .group = "Buttons", .type = KVM_VT_STR,
+        .title = "Shown in the console",
+        .help = "Untick a control to take its button out of the console, for everyone who "
+                "signs in. It only hides the button: the feature itself stays as its own "
+                "settings have it. Stored as the ids of the hidden controls; the console "
+                "keeps the list of what can be hidden.",
+        .def_str = "", .max_len = 255, .requires_cap = -1,
+    },
+    /* Vibration on a phone. Read by the console only; the device keeps the
+       values so every phone that signs in gets the same feel. */
+    {
+        .key = "ui_haptic_keys", .section = "ui", .group = "Vibration on a phone", .type = KVM_VT_BOOL,
+        .title = "On key presses",
+        .help = "A short tick under the finger on each press of the on-screen keyboard, the "
+                "arrow keys and the gamepad buttons, like a phone's own keyboard. Android "
+                "only: Safari on an iPhone cannot vibrate.",
+        .def = 1, .requires_cap = -1,
+    },
+    {
+        .key = "ui_haptic_pad", .section = "ui", .group = "Vibration on a phone", .type = KVM_VT_BOOL,
+        .title = "On the touchpad",
+        .help = "In touch mode, a faint tick every few millimetres the finger travels, the "
+                "way the touchpads of the Steam Controller feel. Half the strength of a key "
+                "press.",
+        .def = 1, .requires_cap = -1,
+    },
+    {
+        .key = "ui_haptic_level", .section = "ui", .group = "Vibration on a phone", .type = KVM_VT_ENUM,
+        .title = "Strength",
+        .help = "A browser cannot set how strong a vibration is, only how long, so stronger "
+                "means a longer tick: about 12, 25 or 45 ms.",
+        .min = 0, .max = ENUM_MAX(s_haptic_choices), .def = 0, .choices = s_haptic_choices, .requires_cap = -1,
     },
 
     /* ---- status display ------------------------------------------------- */
@@ -1233,7 +1325,8 @@ static const kvm_section_t s_sections[] = {
     {"notify", "Notifications", "Where the device sends news of its own accord."},
     {"security", "Security", "Who may connect, and over what."},
     {"display", "Display", "The optional screen on the device."},
-    {"system", "System", "The clock, updates, logging and the console itself."},
+    {"ui", "UI", "How the console in the browser looks and feels."},
+    {"system", "System", "The clock, updates and logging."},
 };
 /* clang-format on */
 

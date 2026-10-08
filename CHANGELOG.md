@@ -7,6 +7,83 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-10-08
+
+### Added
+- **The M5Stack Unit OLED (SH1107).** "SH1107 128x64" in Settings ->
+  Display. The SH1107 sees this panel on its side, so the picture is turned
+  as it is sent. Checked on a Unit OLED plugged into the Grove port of the
+  M5Stack Unit PoE-P4.
+- **A button on the box.** Settings -> Power -> Button on the box: a push
+  button on a free pin (the M5Stack Unit Button on a Grove port, or any switch
+  to ground), with an action for a short press and one for a 1.5 s hold -
+  power, a hard off, reset, Wake-on-LAN, a runbook, save a dashcam clip, or a
+  screenshot. The same actions a schedule runs, and a schedule can now save a
+  clip or take a screenshot too. Not tried with real hardware yet.
+- **The M5Stack Unit Glass2.** "SSD1309 128x64" in Settings -> Display, for
+  the 1.51" transparent OLED. Not tried on one yet.
+- **The M5Stack Unit Relay, documented.** One relay presses one button: wire
+  it as the power (or reset) button GPIO with "Buttons active-high" on. No new
+  code; not tried with the unit yet.
+- **M5Stack Unit PoE-P4: the add-on's two spare lines, used.** M5Stack's
+  schematic of the Add-on Display In shows the LT6911D pulsing G38 on every
+  resolution change, and the microSD socket's card-detect switch on G37. The
+  picture now follows a mode change the moment it happens rather than at the
+  next poll, and a card going in or out is noticed at once rather than within
+  five seconds. (Card detect there reads high with a card in - the opposite of
+  most - which a first try got wrong and read every card as gone.)
+- **A pin probe, for diagnosis.** `GET /api/v1/system/pinprobe?pins=19,20`
+  counts how fast each pin switches (and `&test=<pin>` puts a known 48 kHz
+  signal on a free pin to prove it counts). It settled that the M5Stack
+  Add-on Display In brings no HDMI audio to the board: every header pin it
+  sits on is the microSD, USB or the UART, and all read 0 Hz with sound
+  playing into the HDMI input.
+- **A frame counter in the video status.** `GET /api/v1/video/status` now
+  has `frames` (captured since boot) and `frameAgeMs` (since the last one).
+  "signal" only says the HDMI is locked; these say pictures are really
+  arriving, even on a still screen that nobody is encoding. The idea came
+  from a fork that tests games on a real Xbox.
+- **A tick under the finger on a phone.** The on-screen keyboard, the arrow
+  keys and the gamepad buttons give a short vibration on each press, like a
+  phone's own keyboard, and the touchpad gives a faint tick every few
+  millimetres the finger travels, the way the Steam Controller's pads do.
+  Android only - Safari on an iPhone cannot vibrate.
+- **Full screen is all picture.** In full screen the status strip, the rail
+  and the bottom bar slide away. They come back over the picture - it does
+  not resize - with the mouse at an edge of the screen (after a short pause
+  while you have control, so the target's own taskbar stays usable), the
+  small tab at the top for a finger, or a tap of the right Ctrl key on its
+  own; and go again a few seconds after you leave them. Settings -> UI ->
+  "Hide the bars in full screen" turns it off.
+- **A UI tab in Settings.** For how the console looks and feels: "Panel
+  side" moved here from System; "Shown in the console" is a tick per button
+  (the gamepad, the TV remote, recording, screen text, the serial console
+  and the rest) to take the ones you never use out of the bar - it hides the
+  button only, the feature stays as its own settings have it; and "Vibration
+  on a phone" has three settings - on key presses, on the touchpad, and the
+  strength (a browser can only make a tick longer, not stronger, so that is
+  12, 25 or 45 ms).
+
+### Fixed
+- **The M5Stack Unit RTC was not found.** Its BM8563 reads one bit of a
+  register differently from the NXP PCF8563 it copies, and a new one holds no
+  valid time - either was enough for "Auto" to pass it over. Both are
+  accepted now, and "Auto" also looks on the status display's own bus, so a
+  clock plugged in beside the display (the Grove port of the Unit PoE-P4) is
+  found with nothing to set. Checked on the board.
+- **Settings opened empty.** The window showed only the search field until a
+  tab was clicked: it chose the first tab by the whole section instead of its
+  name, which matched no setting. Broken since settings moved into a window.
+- **Full screen on a phone.** In Chrome on a Pixel the bottom bar slid off
+  the bottom of the screen in full screen, and the page cannot be scrolled
+  to reach it. In full screen the console is now sized to what is actually
+  visible.
+- **The touchpad in the demo.** On a phone the demo ignored the touchpad: it
+  took no mouse reports at all, only the keyboard. Its pointer now follows
+  them, and a tap clicks.
+- The read-only card note in Media reads as a sentence and no longer tells
+  you to reformat the card.
+
 ## [0.60.0] - 2026-10-06
 
 ### Added

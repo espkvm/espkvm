@@ -44,12 +44,14 @@ extern const kvm_display_driver_t kvm_display_ssd1306;
 extern const kvm_display_driver_t kvm_display_sh1106;
 extern const kvm_display_driver_t kvm_display_gc9a01;
 extern const kvm_display_driver_t kvm_display_ssd1315;
+extern const kvm_display_driver_t kvm_display_sh1107;
 
 static const kvm_display_driver_t *const s_drivers[] = {
     &kvm_display_ssd1306,
     &kvm_display_sh1106,
     &kvm_display_gc9a01,
     &kvm_display_ssd1315,
+    &kvm_display_sh1107,
 };
 
 #define RENDER_TICK_MS 1000 /* how often the driver is handed fresh telemetry */

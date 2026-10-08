@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 #include "kvm_atx.h"
 #include "kvm_caps.h"
+#include "kvm_record.h"
 #include "kvm_settings.h"
 #include "runbook.h"
 #include "sched_cron.h"
@@ -71,6 +72,16 @@ static void dispatch(const char *name, const char *action, const char *arg, cons
         const esp_err_t err = runbook_start(arg ? arg : "", source, NULL, 0);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s: runbook \"%s\": %s", name, arg ? arg : "", esp_err_to_name(err));
+        }
+    } else if (strcmp(action, "clip") == 0) {
+        char why[96] = "";
+        if (!kvm_record_event(source, why, sizeof(why))) {
+            ESP_LOGW(TAG, "%s: no clip saved: %s", name, why);
+        }
+    } else if (strcmp(action, "screenshot") == 0) {
+        char file[64] = "", why[96] = "";
+        if (kvm_record_screenshot(file, sizeof(file), why, sizeof(why)) != ESP_OK) {
+            ESP_LOGW(TAG, "%s: no screenshot: %s", name, why);
         }
     } else if (strcmp(action, "restart") == 0) {
         ESP_LOGW(TAG, "%s: restarting the device on schedule", name);
@@ -173,6 +184,14 @@ static void task(void *arg)
         }
         vTaskDelay(pdMS_TO_TICKS(TICK_MS));
     }
+}
+
+void kvm_action_run(const char *name, const char *action, const char *arg, const char *source)
+{
+    if (!action || !action[0]) {
+        return;
+    }
+    dispatch(name ? name : source, action, arg, source);
 }
 
 void kvm_sched_init(void)

@@ -34,6 +34,8 @@ esp_transport_handle_t kvm_web_chacha_transport(void);
 const httpd_uri_t *url_fetch_routes(size_t *count);
 /** The target's log over the network (netconsole). See netlog_api.c. */
 const httpd_uri_t *netlog_api_routes(size_t *count);
+/** GET /api/v1/system/pinprobe: how fast some pins switch. See pinprobe_api.c. */
+const httpd_uri_t *pinprobe_api_routes(size_t *count);
 /** A session went away; forget it as a serial console client. */
 void serial_api_drop(int fd);
 

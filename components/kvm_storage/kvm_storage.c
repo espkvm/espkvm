@@ -984,11 +984,82 @@ static void sd_log_mounted(void)
              (unsigned long long)(st.free_bytes / (1024 * 1024)), (unsigned long)st.bus_khz);
 }
 
+/*
+ * The slot's card-detect switch, where a board wires one (CONFIG_KVM_SD_CD_GPIO;
+ * low with a card in unless CONFIG_KVM_SD_CD_ACTIVE_HIGH - the M5Stack add-on's
+ * TF_DET on G37 reads high with a card in, against the internal pull-up). A change on it wakes
+ * the slot check at once instead of at the next five-second tick, and an empty
+ * slot is not tried. Without it the check simply asks the card, as before.
+ */
+static TaskHandle_t s_probe_task;
+
+#if CONFIG_KVM_SD_CD_GPIO >= 0
+static void IRAM_ATTR sd_cd_isr(void *arg)
+{
+    (void)arg;
+    BaseType_t woken = pdFALSE;
+    if (s_probe_task) {
+        vTaskNotifyGiveFromISR(s_probe_task, &woken);
+    }
+    portYIELD_FROM_ISR(woken);
+}
+
+static void sd_cd_init(void)
+{
+    const gpio_config_t io = {
+        .pin_bit_mask = 1ULL << CONFIG_KVM_SD_CD_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        /* The internal pull-up either way. On the M5Stack add-on the switch is
+           open with a card in and closes to ground without one, and nothing
+           else holds the line: left floating it read 0 - no card - with a card
+           in, and so did an internal pull-down. */
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
+    };
+    esp_err_t err = gpio_config(&io);
+    if (err == ESP_OK) {
+        err = gpio_install_isr_service(0);
+        if (err == ESP_ERR_INVALID_STATE) {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK) {
+        err = gpio_isr_handler_add(CONFIG_KVM_SD_CD_GPIO, sd_cd_isr, NULL);
+    }
+    ESP_LOGI(TAG, "card detect on GPIO %d%s", CONFIG_KVM_SD_CD_GPIO,
+             err == ESP_OK ? "" : " - not usable, checking by asking the card");
+}
+#endif
+
+/* Whether the slot's switch says a card is in; true where there is no switch. */
+static bool sd_cd_says_card(void)
+{
+#if CONFIG_KVM_SD_CD_GPIO >= 0
+#if CONFIG_KVM_SD_CD_ACTIVE_HIGH
+    return gpio_get_level(CONFIG_KVM_SD_CD_GPIO) == 1;
+#else
+    return gpio_get_level(CONFIG_KVM_SD_CD_GPIO) == 0;
+#endif
+#else
+    return true;
+#endif
+}
+
 static void sd_probe_task(void *arg)
 {
     (void)arg;
+    s_probe_task = xTaskGetCurrentTaskHandle();
+#if CONFIG_KVM_SD_CD_GPIO >= 0
+    sd_cd_init();
+#endif
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000))) {
+            /* The switch moved. Let a card going in finish seating, and let the
+               check run now even if the card was just in use. */
+            vTaskDelay(pdMS_TO_TICKS(300));
+            (void)ulTaskNotifyTake(pdTRUE, 0);
+            s_slot_recheck = true;
+        }
         const int64_t now = esp_timer_get_time();
         /*
          * The slot, watched. A card pushed in after boot should work without a
@@ -1004,7 +1075,7 @@ static void sd_probe_task(void *arg)
             xSemaphoreTake(s_media_lock, 0) == pdTRUE) {
             s_slot_recheck = false;
             bool changed = false;
-            if (!s_card && !s_handed_over && !s_other_slot_busy) {
+            if (!s_card && !s_handed_over && !s_other_slot_busy && sd_cd_says_card()) {
                 /*
                  * One quiet try; the next tick is five seconds away. Not while
                  * the co-processor holds the other slot: mounting re-initialises
@@ -1018,7 +1089,7 @@ static void sd_probe_task(void *arg)
                     sd_log_mounted();
                     changed = true;
                 }
-            } else if (s_card && !sd_present()) {
+            } else if (s_card && (!sd_cd_says_card() || !sd_present())) {
                 ESP_LOGW(TAG, "microSD is gone; the slot reads as empty now");
                 /* Files open on the card are closed before it is unmounted. */
                 xSemaphoreGive(s_media_lock);

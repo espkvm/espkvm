@@ -30,6 +30,15 @@ typedef struct {
     char last_at[24];      /* when it fired, local time */
 } kvm_sched_status_t;
 
+/**
+ * Carry out one device action, the same set a schedule can fire: "wol",
+ * "power", "reset", "poweroff", "runbook" (@p arg is its name), "clip" (save
+ * the dashcam's last seconds), "screenshot", "restart". @p name labels it in
+ * the log and the status ("button", a schedule's name); @p source says who
+ * asked. Quick: a runbook starts its own task. An empty action does nothing.
+ */
+void kvm_action_run(const char *name, const char *action, const char *arg, const char *source);
+
 /** Start the scheduler task and register the capability. Call once at boot. */
 void kvm_sched_init(void);
 
@@ -41,6 +50,14 @@ void kvm_sched_status(kvm_sched_status_t *out);
  * such schedule.
  */
 esp_err_t kvm_sched_run(const char *name);
+
+/**
+ * The button on the box: a push button on a free GPIO (the M5Stack Unit Button
+ * on a Grove port, or any switch to ground). A short press and a long hold each
+ * run one action from kvm_action_run, as the btn_* settings choose. Call once
+ * at boot; it follows the settings as they change.
+ */
+void kvm_button_init(void);
 
 #ifdef __cplusplus
 }

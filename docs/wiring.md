@@ -129,12 +129,40 @@ Under **Settings -> Power**:
 | `atx_short_ms` | Normal press length | 200 ms |
 | `atx_long_ms` | Hard-off hold length | 5000 ms |
 | `atx_active_high` | Drive high to press (high-level-trigger module) | on |
-| `atx_led_active_high` | LED reads high when the target is on | on |
+| `atx_led_ah` | LED reads high when the target is on | on |
 
 Set the pins and turn `atx_enable` on; the power button at the bottom of the
 console's side rail lights up.
 If the target reacts to the wrong button, or the reported power state is
 inverted, flip the matching polarity setting - no reflash.
+
+## A relay unit instead (M5Stack Unit Relay)
+
+A relay does the buttons the same way: its COM and NO contacts go across the
+switch pins, and the signal wire is the button GPIO. Set `atx_pwr_gpio` (or
+`atx_rst_gpio`) to that pin and `atx_active_high` on - the relay closes while
+the pin is high. One relay is one button, and a relay cannot sense the power
+LED. The M5Stack unit takes its signal on the yellow Grove wire. Not tried with
+that unit yet.
+
+# A button on the box
+
+A push button on a free GPIO that runs an action - the M5Stack Unit Button on a
+Grove port (yellow wire), or any switch to ground. Settings -> Power -> Button
+on the box:
+
+| Setting | Meaning | Default |
+|---|---|---|
+| `btn_gpio` | The button's pin | -1 (none) |
+| `btn_press` | What a short press does | nothing |
+| `btn_hold` | What a 1.5 s hold does | nothing |
+| `btn_runbook` | The runbook, for the "runbook" action | empty |
+| `btn_active_high` | The button connects the pin to 3V3, not ground | off |
+
+The actions are the ones a schedule runs: power, a hard off, reset, Wake-on-LAN,
+a runbook, save a dashcam clip, a screenshot. A button to ground needs nothing
+else: the pin's own pull-up holds it high until it is pressed. Not tried with
+real hardware yet.
 
 # Serial console
 

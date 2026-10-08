@@ -12,6 +12,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -45,6 +46,14 @@ typedef struct mono_oled mono_oled_t;
  */
 esp_err_t mono_oled_attach(mono_oled_t **out, const uint8_t *init_cmds, size_t init_len,
                            uint8_t base_col);
+
+/**
+ * As mono_oled_attach, for a controller that drives the glass on its side (the
+ * SH1107: 64 columns by 128 rows of RAM for a 128x64 panel). The layout is still
+ * drawn 128x64; it is turned as it is sent.
+ */
+esp_err_t mono_oled_attach_ex(mono_oled_t **out, const uint8_t *init_cmds, size_t init_len,
+                              uint8_t base_col, bool portrait);
 
 /**
  * Draw the current status and push the framebuffer. Called on each tick; this

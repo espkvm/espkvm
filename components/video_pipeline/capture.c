@@ -178,6 +178,10 @@ void capture_status_get(kvm_video_status_t *out)
        holding the critical section the encoder's counters live in. */
     out->flat_ms = capture_flat_ms();
     out->flat_dark = out->flat_ms && capture_flat_dark();
+    int64_t last_us = 0;
+    capture_frame_counter(&out->frames, &last_us);
+    const int64_t age = last_us ? (esp_timer_get_time() - last_us) / 1000 : -1;
+    out->frame_age_ms = age < 0 ? UINT32_MAX : age > UINT32_MAX - 1 ? UINT32_MAX - 1 : (uint32_t)age;
 }
 
 static bool s_probed;

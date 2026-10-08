@@ -164,9 +164,21 @@ static bool pcf8563_recognise(void)
     if (!rd(0x00, r, sizeof(r))) {
         return false;
     }
-    /* The bits a PCF8563 always reads as zero, and a time that parses. */
-    if ((r[0] & 0x57) || (r[1] & 0xe0) || (r[13] & 0x7c) || (r[14] & 0x7c) || (r[6] & 0xf8)) {
+    /* The bits a PCF8563 always reads as zero, and a time that parses. Bit 2 of
+       the timer control (0x0E) is not one of them on the BM8563 in the M5Stack
+       Unit RTC: it read 0x07 there, and the old mask turned the chip away. */
+    if ((r[0] & 0x57) || (r[1] & 0xe0) || (r[13] & 0x7c) || (r[14] & 0x78) || (r[6] & 0xf8)) {
+        ESP_LOGW(TAG, "0x51 answers but is not taken for a PCF8563: %02x %02x .. %02x %02x %02x .. "
+                      "%02x %02x",
+                 r[0], r[1], r[2], r[5], r[6], r[13], r[14]);
         return false;
+    }
+    /* VL set: the chip itself says its time is not to be trusted - a new one,
+       or one whose battery ran out - so the time may be anything. The M5Stack
+       Unit RTC came like that and was turned away until the time check
+       stopped applying to it. */
+    if (r[2] & 0x80) {
+        return true;
     }
     const int day = bcd(r[5] & 0x3f), mon = bcd(r[7] & 0x1f);
     return bcd_ok(r[2] & 0x7f) && bcd_ok(r[3] & 0x7f) && bcd_ok(r[4] & 0x3f) && bcd_ok(r[8]) &&
@@ -290,19 +302,10 @@ static bool attach(i2c_master_bus_handle_t bus, const rtc_drv_t *d, bool must_re
     return true;
 }
 
-/* The bus the operator wired it to: the capture board's, or the second one on
-   pins of their own - which the status OLED may already have made. */
-static i2c_master_bus_handle_t rtc_bus(i2c_master_bus_handle_t capture_bus)
+/* The second I2C bus, on @p sda / @p scl: made here, or taken over from the
+   status OLED if it made it first on the same pins. */
+static i2c_master_bus_handle_t own_bus(int sda, int scl)
 {
-    if (kvm_setting_int("rtc_bus") != 1) {
-        return capture_bus;
-    }
-    const int sda = (int)kvm_setting_int("rtc_sda");
-    const int scl = (int)kvm_setting_int("rtc_scl");
-    if (sda < 0 || scl < 0) {
-        ESP_LOGW(TAG, "clock chip on its own pins, but SDA or SCL is not set");
-        return NULL;
-    }
     i2c_master_bus_handle_t bus = NULL;
     if (i2c_master_get_bus_handle(I2C_NUM_1, &bus) == ESP_OK && bus) {
         return bus; /* already made, for the OLED on the same pins */
@@ -320,6 +323,31 @@ static i2c_master_bus_handle_t rtc_bus(i2c_master_bus_handle_t capture_bus)
         return NULL;
     }
     return bus;
+}
+
+/* The bus the operator wired it to: the capture board's, or the second one on
+   pins of their own - which the status OLED may already have made. */
+static i2c_master_bus_handle_t rtc_bus(i2c_master_bus_handle_t capture_bus)
+{
+    if (kvm_setting_int("rtc_bus") != 1) {
+        return capture_bus;
+    }
+    const int sda = (int)kvm_setting_int("rtc_sda");
+    const int scl = (int)kvm_setting_int("rtc_scl");
+    if (sda < 0 || scl < 0) {
+        ESP_LOGW(TAG, "clock chip on its own pins, but SDA or SCL is not set");
+        return NULL;
+    }
+    return own_bus(sda, scl);
+}
+
+/* "Auto" on the capture bus: try it, and then the status display's own bus if
+   the board has one - where a clock module is plugged in beside the display
+   (the M5Stack Unit RTC on the Grove port of the Unit PoE-P4), with nothing to
+   set. */
+static bool auto_attach(i2c_master_bus_handle_t bus)
+{
+    return attach(bus, &k_drivers[CHIP_DS3231], true) || attach(bus, &k_drivers[CHIP_PCF8563], true);
 }
 
 /* ---- keeping it in step -------------------------------------------------- */
@@ -365,8 +393,21 @@ void kvm_rtc_init(i2c_master_bus_handle_t capture_bus)
         return;
     }
     if (choice == CHIP_AUTO) {
-        if (!attach(bus, &k_drivers[CHIP_DS3231], true) &&
-            !attach(bus, &k_drivers[CHIP_PCF8563], true)) {
+        bool found = auto_attach(bus);
+        const int dsda = (int)kvm_setting_int("disp_sda");
+        const int dscl = (int)kvm_setting_int("disp_scl");
+        /* Only while the display is on: those pins may be a relay or a button
+           otherwise, and must not be turned into an I2C bus behind its back. */
+        if (!found && kvm_setting_int("rtc_bus") != 1 && kvm_setting_bool("disp_enable") &&
+            dsda >= 0 && dscl >= 0) {
+            i2c_master_bus_handle_t other = own_bus(dsda, dscl);
+            if (other && auto_attach(other)) {
+                found = true;
+                bus = other;
+                ESP_LOGI(TAG, "clock chip found on the display's bus (SDA %d / SCL %d)", dsda, dscl);
+            }
+        }
+        if (!found) {
             if (i2c_master_probe(bus, 0x68, 50) == ESP_OK) {
                 ESP_LOGW(TAG, "something answers at 0x68 but it is not a DS3231 (a DS1307, a "
                               "PCF8523, a motion sensor?) - left alone; a PCF8523 can be named "

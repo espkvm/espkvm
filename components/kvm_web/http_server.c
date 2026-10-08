@@ -636,7 +636,12 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
     const char *rec_blocked = rec.recording ? NULL : kvm_record_blocked();
     const char *shot_blocked = kvm_record_screenshot_blocked();
 
-    char body[1400];
+    char age[12] = "null";
+    if (st.frame_age_ms != UINT32_MAX) {
+        snprintf(age, sizeof(age), "%u", (unsigned)st.frame_age_ms);
+    }
+
+    char body[1460];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,"
@@ -648,6 +653,10 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                         of a stop screen or a blanked output, neither of which
                         can be read as text. 0 means it is a picture. */
                      "\"textMode\":%s,\"flatMs\":%u,"
+                     /* Frames the capture delivered since boot, and how long ago
+                        the last one came: a lock with nothing behind it stops
+                        the count even while "signal" stays true. */
+                     "\"frames\":%u,\"frameAgeMs\":%s,"
                      /* The recorder rides along: the console polls this anyway. */
                      "\"record\":{\"on\":%s,\"file\":\"%s\",\"seconds\":%u,\"bytes\":%llu,"
                      "\"dropped\":%u,\"stopped\":\"%s\",\"blocked\":%s%s%s,"
@@ -666,7 +675,8 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      video_frame_viewer_count(), (unsigned)s_video_client_count,
                      (unsigned)s_text_client_count, s_stream_workers, codec,
                      text_mode ? "true" : "false",
-                     (unsigned)st.flat_ms, rec.recording ? "true" : "false", rec.file,
+                     (unsigned)st.flat_ms, (unsigned)st.frames, age,
+                     rec.recording ? "true" : "false", rec.file,
                      (unsigned)rec.seconds, (unsigned long long)rec.bytes, (unsigned)rec.dropped,
                      rec.stopped, rec_blocked ? "\"" : "", rec_blocked ? rec_blocked : "null",
                      rec_blocked ? "\"" : "", rec.event ? "true" : "false",
@@ -4849,6 +4859,11 @@ httpd_handle_t http_server_start(void)
     const httpd_uri_t *netlog_uris = netlog_api_routes(&n_netlog);
     for (size_t i = 0; i < n_netlog; i++) {
         register_route(h, &netlog_uris[i]);
+    }
+    size_t n_probe = 0;
+    const httpd_uri_t *probe_uris = pinprobe_api_routes(&n_probe);
+    for (size_t i = 0; i < n_probe; i++) {
+        register_route(h, &probe_uris[i]);
     }
     size_t n_serial = 0;
     const httpd_uri_t *serial_uris = serial_api_routes(&n_serial);

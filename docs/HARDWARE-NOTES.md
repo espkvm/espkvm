@@ -327,6 +327,55 @@ the old one.
 A register dump of both banks, for whoever picks this up, is in
 `ignore/m5poe-lt6911-7-dump.log`.
 
+## No audio from the M5Stack Add-on Display In - measured
+
+The LT6911D has I2S and SPDIF outputs of its own, so the add-on could have
+brought audio to the P4. It does not, and every line it has is accounted for.
+Besides the 24-pin flat cable (two CSI lanes, I2C, power) it sits on two of the
+Unit PoE-P4's pin headers, as M5Stack's own product photo labels them:
+
+| Header | Pins | Carries |
+|---|---|---|
+| SDIO-Bus, 2.54 mm 9-pin | G8-G11, G13 | microSD D0-D3, CMD |
+| | G12 | microSD CLK |
+| | DP, DN | USB, for the add-on's USB-A socket |
+| ISP-Bus, 2.54 mm 6-pin | G37, G38 | UART0 |
+| | two pins | marked NC |
+
+Measured on 2026-10-08 with a laptop playing a video into the HDMI input (its
+sound went to the HDMI output, and came back to its own speakers each time the
+board restarted and dropped the link), with the pulse counter
+(`GET /api/v1/system/pinprobe?pins=8,9,10,11,12,13,37,38`): 0 Hz on all of
+them, four times over - the card lines held high and CLK low, as an idle card
+leaves them, and the UART idle high. The probe was proved on the same board
+first: a 48 kHz test signal on GPIO 21 (`&test=21`) read 47 827 Hz. An I2S word
+clock would have shown as 44 100 or 48 000. (The Hat2-Bus pins, which the
+add-on does not touch, read 0 Hz too.)
+
+M5Stack's schematic settles it
+([V0.3, 2026-03-26](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1265/SCH_UnitPoEP4_display_in_V0.3_SCH_PDF_20260326_2026_03_26_16_04_18.pdf),
+from the [add-on's page](https://docs.m5stack.com/en/addon/AddOn_Display_In_For_PoE-P4)):
+every audio pin of the LT6911D - I2S_D0 to D3, WS, SCLK, MCLK and SPDIF, pins
+17-19, 27-29 and 31 - is marked not connected. HDMI audio on this board would
+mean wiring to those pins of the QFN itself.
+
+The same sheet has three things worth using:
+
+- **INTIO (GPIO5, pin 26) goes to G38** through a 0 R resistor, with the note
+  "When the resolution changes, GPIO5 generates a 200mS high-level pulse". The
+  firmware polled the chip over I2C every 200 ms to notice a mode change; it
+  now wakes on this pulse as well (`CONFIG_KVM_BRIDGE_INT_GPIO=38`).
+- **G37 is TF_DET**, the microSD socket's card-detect switch. Measured, it is
+  the opposite of the usual: the switch is open with a card in and pulls the
+  line to ground without one, and the 100 k pull-up the sheet draws (R13) is
+  not doing the job - left floating, or with an internal pull-down, the line
+  read 0 with a card in. With the P4's internal pull-up it reads 1 with a card.
+  The firmware now uses it (`CONFIG_KVM_SD_CD_GPIO=37`,
+  `CONFIG_KVM_SD_CD_ACTIVE_HIGH`).
+- **The chip's CEC pin (33) is wired to the HDMI connector's CEC line.** The
+  LT6911D's CEC, if it has a usable one, is not documented; nothing here drives
+  it yet.
+
 ## The bridge's audio output - read off the wiki, not off a board
 
 Everything above was measured here; this section was not. Nothing in the

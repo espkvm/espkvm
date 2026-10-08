@@ -37,6 +37,9 @@
 struct mono_oled {
     i2c_master_dev_handle_t dev;
     uint8_t col_offset;
+    /* An SH1107: the glass is 64 columns by 128 rows in the controller's eyes,
+       turned on its side. The framebuffer stays 128x64; flush turns it. */
+    bool portrait;
     uint8_t w;     /* visible width, pixels */
     uint8_t h;     /* visible height, pixels */
     uint8_t pages; /* h / 8 - the controller addresses rows in bands of eight */
@@ -557,8 +560,43 @@ static i2c_master_bus_handle_t oled_bus(void)
     return s_own_bus;
 }
 
+/* The SH1107's way: sixteen bands of eight rows of the controller, each a
+ * column of eight pixels of ours. Its row r is our x, its column c our y
+ * counted from the bottom - a quarter turn; disp_rotate_180 gives the other. */
+static esp_err_t flush_portrait(mono_oled_t *m)
+{
+    uint8_t band[MONO_OLED_MAX_H];
+    for (uint8_t page = 0; page < m->w / 8; page++) {
+        for (uint8_t c = 0; c < m->h; c++) {
+            const uint8_t y = (uint8_t)(m->h - 1 - c);
+            const uint8_t *src = m->fb + (size_t)(y >> 3) * m->w + page * 8;
+            uint8_t byte = 0;
+            for (uint8_t b = 0; b < 8; b++) {
+                byte |= (uint8_t)(((src[b] >> (y & 7)) & 1) << b);
+            }
+            band[c] = byte;
+        }
+        const uint8_t set[] = {
+            (uint8_t)(0xB0 | page),
+            (uint8_t)(0x00 | (m->col_offset & 0x0F)),
+            (uint8_t)(0x10 | (m->col_offset >> 4)),
+        };
+        esp_err_t err = send_cmds(m->dev, set, sizeof(set));
+        if (err == ESP_OK) {
+            err = send_page(m->dev, band, m->h);
+        }
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return ESP_OK;
+}
+
 static esp_err_t flush(mono_oled_t *m)
 {
+    if (m->portrait) {
+        return flush_portrait(m);
+    }
     for (uint8_t page = 0; page < m->pages; page++) {
         const uint8_t set[] = {
             (uint8_t)(0xB0 | page),
@@ -579,6 +617,12 @@ static esp_err_t flush(mono_oled_t *m)
 
 esp_err_t mono_oled_attach(mono_oled_t **out, const uint8_t *init_cmds, size_t init_len,
                            uint8_t base_col)
+{
+    return mono_oled_attach_ex(out, init_cmds, init_len, base_col, false);
+}
+
+esp_err_t mono_oled_attach_ex(mono_oled_t **out, const uint8_t *init_cmds, size_t init_len,
+                              uint8_t base_col, bool portrait)
 {
     i2c_master_bus_handle_t bus = oled_bus();
     if (!bus) {
@@ -604,6 +648,7 @@ esp_err_t mono_oled_attach(mono_oled_t **out, const uint8_t *init_cmds, size_t i
     m->h = p->h;
     m->pages = (uint8_t)(p->h / 8);
     m->col_offset = (uint8_t)(base_col + p->extra_col);
+    m->portrait = portrait;
     plan_rows(m);
     m->splash = SPLASH_TICKS;
     const i2c_device_config_t dev_cfg = {
@@ -639,7 +684,10 @@ esp_err_t mono_oled_attach(mono_oled_t **out, const uint8_t *init_cmds, size_t i
             0xD3, 0x00, /* no display offset - the glass is centred by column */
             0xAF,       /* display on */
         };
-        err = send_cmds(m->dev, geom, sizeof(geom));
+        /* On its side the controller scans our width: all 128 rows. */
+        const uint8_t geom_portrait[] = {0xA8, (uint8_t)(m->w - 1), 0xD3, 0x00, 0xAF};
+        err = portrait ? send_cmds(m->dev, geom_portrait, sizeof(geom_portrait))
+                       : send_cmds(m->dev, geom, sizeof(geom));
     }
     if (err != ESP_OK) {
         i2c_master_bus_rm_device(m->dev);

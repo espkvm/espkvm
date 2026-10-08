@@ -164,6 +164,16 @@ menu "ESP-KVM"
                 its LT6911D the other way round - drive that pin high and the
                 bridge stays in reset and never answers I2C at all.
 
+        config KVM_BRIDGE_INT_GPIO
+            int "The capture bridge's mode-change interrupt GPIO (-1 if not wired)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default -1
+            help
+                A pin the bridge pulses when the source changes resolution. The
+                M5Stack Add-on Display In wires the LT6911D's INTIO to G38: a
+                200 ms high pulse on every change. With it the mode is read
+                again at once instead of at the next 200 ms poll.
+
         config KVM_LT6911
             bool "LT6911D capture bridge (M5Stack Add-on Display In)"
             default n
@@ -300,6 +310,25 @@ menu "ESP-KVM"
             int "microSD D3"
             range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
             default 42
+
+        config KVM_SD_CD_GPIO
+            int "microSD card-detect GPIO (-1 if not wired)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default -1
+            help
+                The slot's card-detect switch. With it a card pushed in or pulled
+                out is noticed at once rather than at the next five-second check,
+                and an empty slot is not tried. The M5Stack Add-on Display In
+                wires it to G37.
+
+        config KVM_SD_CD_ACTIVE_HIGH
+            bool "Card detect reads high with a card in"
+            depends on KVM_SD_CD_GPIO >= 0
+            default n
+            help
+                Off for the usual switch that pulls the line low when a card is
+                in. The M5Stack Add-on Display In reads high with a card in
+                (measured on the board).
 
         config KVM_SD_PWR_GPIO
             int "microSD slot power-gate GPIO (-1 if always powered)"

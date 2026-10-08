@@ -10,6 +10,7 @@ idf_component_register(
         "serial_api.c"
         "netlog_api.c"
         "url_fetch.c"
+        "pinprobe_api.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES
@@ -17,6 +18,9 @@ idf_component_register(
         esp_https_server
     PRIV_REQUIRES
         tcp_transport
+        esp_driver_pcnt
+        esp_driver_ledc
+        esp_driver_gpio
         video_pipeline
         kvm_screentext
         kvm_hid

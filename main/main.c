@@ -772,6 +772,7 @@ void app_main(void)
     }
     /* The scheduler fires runbooks and power actions on a clock it sets itself. */
     kvm_sched_init();
+    kvm_button_init();
     /* Push notifications, on their own low-priority task. */
     kvm_notify_init();
     kvm_record_dashcam_init();

@@ -6,6 +6,7 @@ idf_component_register(
         "drivers/ssd1306/ssd1306.c"
         "drivers/ssd1315/ssd1315.c"
         "drivers/sh1106/sh1106.c"
+        "drivers/sh1107/sh1107.c"
         "drivers/gc9a01/gc9a01.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "." "drivers"

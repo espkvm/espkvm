@@ -35,6 +35,13 @@ static const kvm_panel_t k_panels[] = {
     /* Appended, and it has to stay appended: the index is what NVS holds. */
     {KVM_PANEL_DRV_SSD1315, 128, 64, 0}, /* 0.96", untested */
     {KVM_PANEL_DRV_SSD1315, 72, 40, 28}, /* 0.42", the M5Stack Mini OLED Unit */
+    {KVM_PANEL_DRV_SH1107, 128, 64, 32}, /* 1.3", the M5Stack Unit OLED; RAM column 32 */
+    /* 1.51" transparent, the M5Stack Unit Glass2 (U158-B). An SSD1309 speaks the
+       SSD1306's commands but has no charge pump: the 0x14 after the SSD1306's
+       0x8D reads to it as a column address, which every page write sets again.
+       The first Unit Glass (U158) has an STM32 in front of its panel and is not
+       this. */
+    {KVM_PANEL_DRV_SSD1306, 128, 64, 0},
 };
 
 const kvm_panel_t *kvm_panel_selected(void)
