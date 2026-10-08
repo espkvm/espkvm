@@ -48,6 +48,9 @@ typedef struct {
     uint32_t frames;
     /** How long ago the last one landed, in ms; UINT32_MAX before the first. */
     uint32_t frame_age_ms;
+    /** H.264 frames are rearranged on the CPU here (LT6911D below rev 3.0):
+     *  fine at 720p, a few fps at 1080p. */
+    bool h264_cpu;
 } kvm_video_status_t;
 
 /**

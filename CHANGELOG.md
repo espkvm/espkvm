@@ -7,6 +7,27 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Added
+- **The console says when H.264 is slow on this board.** On the M5Stack Unit
+  PoE-P4, H.264 above 720p runs at 5-8 fps: the bridge writes every frame it
+  receives into PSRAM, 60 a second at 1080p60, and the byte shuffle the
+  encoder needs there gets what is left. A note offers MJPEG, and suggests
+  720p (17 fps) or 30 Hz (8 fps instead of 5-6 at 1080p) in the target's
+  display settings. `h264Cpu` in `GET /api/v1/video/status` says a board
+  works this way.
+- `psramLargest` in `GET /api/v1/system/info`: the biggest free piece of
+  PSRAM, next to `psramFree`.
+
+### Fixed
+- **Uploads failed with "out of memory" after a few hours.** An upload takes
+  four 256 KB buffers in PSRAM, and after a while the free PSRAM is there but
+  in smaller pieces. Seen on the M5Stack Unit PoE-P4: one upload went
+  through, every one after it failed. Now it takes smaller buffers, or fewer,
+  instead of giving up.
+- **The EDID profile setting is hidden where it does nothing.** The LT6911D
+  on M5Stack's add-on holds its own EDID, so the setting had no effect on
+  the Unit PoE-P4. A new `edid` capability says whether the bridge takes one.
+
 ## [0.61.0] - 2026-10-08
 
 ### Added

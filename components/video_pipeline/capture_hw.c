@@ -565,6 +565,10 @@ capture_ctx_t *capture_hw_init_start(void)
     /* The setting's choices are in the same order as the driver's enum. */
     const int32_t edid_choice = kvm_setting_int("edid_prof");
     (void)kvm_bridge_set_edid_profile(&s_cap.bridge, (kvm_bridge_edid_profile_t)edid_choice);
+    if (!s_cap.bridge.ops->set_edid_profile) {
+        kvm_cap_report(KVM_CAP_EDID, false, "the %s holds its own EDID",
+                       s_cap.bridge.name);
+    }
 
     probe_err = kvm_bridge_init_streaming(&s_cap.bridge);
     if (probe_err != ESP_OK) {

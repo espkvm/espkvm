@@ -656,7 +656,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      /* Frames the capture delivered since boot, and how long ago
                         the last one came: a lock with nothing behind it stops
                         the count even while "signal" stays true. */
-                     "\"frames\":%u,\"frameAgeMs\":%s,"
+                     "\"frames\":%u,\"frameAgeMs\":%s,\"h264Cpu\":%s,"
                      /* The recorder rides along: the console polls this anyway. */
                      "\"record\":{\"on\":%s,\"file\":\"%s\",\"seconds\":%u,\"bytes\":%llu,"
                      "\"dropped\":%u,\"stopped\":\"%s\",\"blocked\":%s%s%s,"
@@ -676,6 +676,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)s_text_client_count, s_stream_workers, codec,
                      text_mode ? "true" : "false",
                      (unsigned)st.flat_ms, (unsigned)st.frames, age,
+                     st.h264_cpu ? "true" : "false",
                      rec.recording ? "true" : "false", rec.file,
                      (unsigned)rec.seconds, (unsigned long long)rec.bytes, (unsigned)rec.dropped,
                      rec.stopped, rec_blocked ? "\"" : "", rec_blocked ? rec_blocked : "null",
@@ -899,7 +900,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"boardId\":\"%s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
-                     "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,"
+                     "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,\"psramLargest\":%u,"
                      "\"internalFree\":%u,\"internalLargest\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"active\":\"%s\","
@@ -921,6 +922,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
@@ -1613,6 +1615,7 @@ static esp_err_t api_storage_images_get(httpd_req_t *req)
  */
 #define UPLOAD_CHUNK (256 * 1024)
 #define UPLOAD_BUFS 4
+#define UPLOAD_CHUNK_MIN (32 * 1024)
 #define UPLOAD_WRITER_STACK (4 * 1024)
 
 typedef struct {
@@ -1697,12 +1700,34 @@ static void upload_worker_task(void *arg)
     w.empty = xQueueCreate(UPLOAD_BUFS, sizeof(upload_buf_t));
     w.done = xSemaphoreCreateBinary();
     ok = w.full && w.empty && w.done;
-    for (int i = 0; ok && i < UPLOAD_BUFS; i++) {
-        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, UPLOAD_CHUNK, MALLOC_CAP_SPIRAM)};
-        ok = b.data != NULL;
-        if (ok) {
+    /* PSRAM is mostly taken by video, and what is left can be in pieces: take
+     * smaller buffers, or fewer, rather than refuse the upload. */
+    size_t chunk = UPLOAD_CHUNK;
+    int bufs = 0;
+    while (ok && bufs < UPLOAD_BUFS) {
+        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, chunk, MALLOC_CAP_SPIRAM)};
+        if (b.data) {
             xQueueSend(w.empty, &b, 0);
+            bufs++;
+        } else if (bufs < 2 && chunk > UPLOAD_CHUNK_MIN) {
+            chunk /= 2;
+            while (xQueueReceive(w.empty, &b, 0) == pdTRUE) { /* all one size */
+                free(b.data);
+            }
+            bufs = 0;
+        } else {
+            break;
         }
+    }
+    ok = ok && bufs > 0;
+    if (ok && (chunk != UPLOAD_CHUNK || bufs != UPLOAD_BUFS)) {
+        ESP_LOGW(TAG, "upload: %d buffers of %u KB (PSRAM largest %u KB)", bufs,
+                 (unsigned)(chunk / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
+    } else if (!ok) {
+        ESP_LOGE(TAG, "upload: no buffers (PSRAM free %u KB, largest %u KB)",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
     }
     const bool writer = ok && xTaskCreate(upload_writer_task, "kvm_upload_wr", UPLOAD_WRITER_STACK,
                                           &w, UPLOAD_WORKER_PRIO, NULL) == pdPASS;
@@ -1717,8 +1742,8 @@ static void upload_worker_task(void *arg)
         b.len = 0; /* it comes back holding the length it was written with */
         /* Fill the buffer, or take whatever arrived before a lull. recv hands
          * back a TLS record at a time; batching them makes a few large writes. */
-        while (b.len < UPLOAD_CHUNK && received + b.len < ctx->content_len) {
-            const size_t room = UPLOAD_CHUNK - b.len;
+        while (b.len < chunk && received + b.len < ctx->content_len) {
+            const size_t room = chunk - b.len;
             const size_t left = ctx->content_len - received - b.len;
             const int n = httpd_req_recv(req, b.data + b.len, room < left ? room : left);
             if (kvm_recv_stalled(n)) {

@@ -181,6 +181,7 @@ void capture_status_get(kvm_video_status_t *out)
     int64_t last_us = 0;
     capture_frame_counter(&out->frames, &last_us);
     const int64_t age = last_us ? (esp_timer_get_time() - last_us) / 1000 : -1;
+    out->h264_cpu = CAPTURE_YUV_SWAP;
     out->frame_age_ms = age < 0 ? UINT32_MAX : age > UINT32_MAX - 1 ? UINT32_MAX - 1 : (uint32_t)age;
 }
 

@@ -50,6 +50,8 @@ typedef enum {
     KVM_CAP_CEC,        /**< HDMI-CEC: the bridge has a controller and the line answers */
     KVM_CAP_SERIAL,     /**< the target's serial console: a UART on pins picked in settings */
     KVM_CAP_NETLOG,     /**< netconsole / syslog receiver: the target's log over UDP */
+    KVM_CAP_EDID,       /**< the capture bridge takes an EDID from us (a TC358743; an
+                             LT6911D holds its own and cannot be told) */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

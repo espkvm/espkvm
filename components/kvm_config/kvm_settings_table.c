@@ -263,7 +263,7 @@ static const kvm_setting_t s_settings[] = {
                 "for old consoles and TV boxes. Text modes stay on offer either way, so a "
                 "BIOS still comes through as text.",
         .min = 0, .max = ENUM_MAX(s_edid_choices), .def = 0, .choices = s_edid_choices,
-        .requires_cap = KVM_CAP_VIDEO, .flags = KVM_SF_REBOOT,
+        .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "scr_watch", .section = "video", .type = KVM_VT_BOOL,
