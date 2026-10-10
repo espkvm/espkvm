@@ -22,6 +22,8 @@
 #include "kvm_caps.h"
 #include "kvm_record.h"
 #include "kvm_settings.h"
+#include "nvs.h"
+#include "sdkconfig.h"
 #include "runbook.h"
 #include "sched_cron.h"
 
@@ -55,6 +57,88 @@ static void status_last(const char *name, const char *action)
     xSemaphoreGive(s_lock);
 }
 
+/*
+ * The button's network actions. net_mode only takes effect on a restart, so
+ * each one saves the new mode and restarts. Indexes are s_netmode_choices:
+ * 0 ethernet, 1 wifi, 2 ap, 3 auto.
+ */
+#define NET_ETH 0
+#define NET_WIFI 1
+#define NET_AP 2
+#define NET_AUTO 3
+
+static int32_t net_prev_load(int32_t fallback)
+{
+    nvs_handle_t h;
+    int32_t v = fallback;
+    if (nvs_open("kvm_sched", NVS_READONLY, &h) == ESP_OK) {
+        (void)nvs_get_i32(h, "net_prev", &v);
+        nvs_close(h);
+    }
+    return (v >= 0 && v <= NET_AUTO && v != NET_AP) ? v : fallback;
+}
+
+static void net_prev_save(int32_t v)
+{
+    nvs_handle_t h;
+    if (nvs_open("kvm_sched", NVS_READWRITE, &h) == ESP_OK) {
+        (void)nvs_set_i32(h, "net_prev", v);
+        (void)nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+static bool net_switch(const char *name, const char *action)
+{
+    if (!kvm_cap_available(KVM_CAP_WIFI)) {
+        ESP_LOGW(TAG, "%s: %s needs WiFi, and this board has none", name, action);
+        return false;
+    }
+#if CONFIG_KVM_ETH_ENABLE
+    const bool eth = true;
+#else
+    const bool eth = false;
+#endif
+    const int32_t now = kvm_setting_int("net_mode");
+    int32_t next;
+    if (strcmp(action, "hotspot") == 0) {
+        /* To the hotspot, and back to whatever it was before. */
+        if (now == NET_AP) {
+            next = net_prev_load(eth ? NET_ETH : NET_WIFI);
+        } else {
+            net_prev_save(now);
+            next = NET_AP;
+        }
+    } else if (strcmp(action, "netswap") == 0) {
+        if (!eth) {
+            ESP_LOGW(TAG, "%s: no Ethernet on this board to swap with", name);
+            return false;
+        }
+        next = now == NET_ETH ? NET_WIFI : NET_ETH;
+    } else {
+        /* netnext: every mode the board has, in turn. */
+        static const int32_t with_eth[] = {NET_ETH, NET_WIFI, NET_AP, NET_AUTO};
+        static const int32_t without_eth[] = {NET_WIFI, NET_AP};
+        const int32_t *order = eth ? with_eth : without_eth;
+        const int n = eth ? 4 : 2;
+        int at = 0;
+        for (int i = 0; i < n; i++) {
+            if (order[i] == now) {
+                at = i;
+            }
+        }
+        next = order[(at + 1) % n];
+    }
+    if (kvm_setting_set_int("net_mode", next) != ESP_OK) {
+        ESP_LOGW(TAG, "%s: could not save the network mode", name);
+        return false;
+    }
+    ESP_LOGW(TAG, "%s: network mode %d -> %d, restarting", name, (int)now, (int)next);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_restart();
+    return true;
+}
+
 /* Carry out one action. Everything here is quick except a runbook, which starts
    its own task and returns at once. */
 static void dispatch(const char *name, const char *action, const char *arg, const char *source)
@@ -82,6 +166,11 @@ static void dispatch(const char *name, const char *action, const char *arg, cons
         char file[64] = "", why[96] = "";
         if (kvm_record_screenshot(file, sizeof(file), why, sizeof(why)) != ESP_OK) {
             ESP_LOGW(TAG, "%s: no screenshot: %s", name, why);
+        }
+    } else if (strcmp(action, "hotspot") == 0 || strcmp(action, "netnext") == 0 ||
+               strcmp(action, "netswap") == 0) {
+        if (!net_switch(name, action)) {
+            return;
         }
     } else if (strcmp(action, "restart") == 0) {
         ESP_LOGW(TAG, "%s: restarting the device on schedule", name);

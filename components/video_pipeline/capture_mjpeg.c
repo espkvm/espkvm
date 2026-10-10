@@ -231,6 +231,13 @@ static esp_err_t mjpeg_encode(capture_ctx_t *c, const void *src, bool force_publ
         return ESP_ERR_INVALID_STATE;
     }
     uint8_t q = s_quality;
+    {
+        /* Coarser while a viewer's link is behind; see capture_link_pct(). */
+        const uint32_t pct = capture_link_pct();
+        if (pct < 100 && q > 25) {
+            q = (uint8_t)(25u + (uint32_t)(q - 25u) * pct / 100u);
+        }
+    }
     if (q < 1u) {
         q = 1u;
     } else if (q > 100u) {

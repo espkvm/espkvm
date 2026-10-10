@@ -60,7 +60,7 @@ enum {
 
 #define HID_KBD_KEYS 6            /* boot-protocol keyboard: 6-key rollover */
 #define HID_QUEUE_DEPTH 192       /* HID reports that can queue to the worker */
-#define HID_WORKER_STACK 4096     /* bytes */
+#define HID_WORKER_STACK 2560     /* bytes; peak 0.5 KB */
 #define HID_WORKER_PRIO (tskIDLE_PRIORITY + 8) /* above stream/httpd so input isn't delayed */
 
 /* How long to sit off the bus at startup so the target counts it as a detach.
@@ -274,14 +274,21 @@ static const tusb_desc_device_t k_pad_device_desc = {
 static const uint8_t k_cfg_header[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CFG_DESC_MAX, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
 };
-/* interface, string index, protocol, report descriptor length, endpoint, size, interval */
+/*
+ * interface, string index, protocol, report descriptor length, endpoint, size, interval.
+ *
+ * The interval is 4. At high speed - which this device runs at - it is an
+ * exponent, 2^(n-1) microframes of 125 us, so the 10 these had was a poll
+ * every 64 ms: on average 32 ms added to every key and every pointer move.
+ * 4 is 1 ms at high speed and 4 ms at full speed.
+ */
 static const uint8_t k_hid_ifaces[] = {
     TUD_HID_DESCRIPTOR(ITF_KEYBOARD, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(s_kbd_report_desc), 0x81,
-                       CFG_TUD_HID_EP_BUFSIZE, 10),
+                       CFG_TUD_HID_EP_BUFSIZE, 4),
     TUD_HID_DESCRIPTOR(ITF_POINTER, 5, HID_ITF_PROTOCOL_NONE, sizeof(s_pointer_report_desc), 0x82,
-                       CFG_TUD_HID_EP_BUFSIZE, 10),
+                       CFG_TUD_HID_EP_BUFSIZE, 4),
     TUD_HID_DESCRIPTOR(ITF_REL_MOUSE, 6, HID_ITF_PROTOCOL_NONE, sizeof(s_rel_report_desc), 0x83,
-                       CFG_TUD_HID_EP_BUFSIZE, 10),
+                       CFG_TUD_HID_EP_BUFSIZE, 4),
 };
 /*
  * Old BIOS mode: the keyboard alone, with the 8-byte endpoint a boot keyboard

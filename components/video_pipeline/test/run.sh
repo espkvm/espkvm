@@ -8,3 +8,8 @@ cc -std=c11 -Wall -Wextra -O2 -I "$here/.." \
    "$here/test_capture_flat.c" "$here/../capture_flat_scan.c" -o "$out/test_capture_flat"
 "$out/test_capture_flat"
 rm -rf "$out"
+out=$(mktemp -d)
+cc -std=c11 -Wall -Wextra -O2 -I "$here/.." \
+   "$here/test_h264_sps.c" "$here/../h264_sps.c" -o "$out/test_h264_sps"
+"$out/test_h264_sps"
+rm -rf "$out"

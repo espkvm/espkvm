@@ -15,6 +15,7 @@
 #include "esp_check.h"
 #include "esp_eth.h"
 #include "esp_event.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "lwip/sockets.h"
@@ -164,6 +165,45 @@ static void eth_on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *da
 static volatile bool s_eth_up = false;
 static volatile int s_eth_mbps = 0;
 
+/*
+ * In "auto" both links can be on the same network, and the WiFi station would
+ * answer espkvm.local too - a browser that takes its address gets the slower
+ * link (about 8 Mbit/s over the co-processor against 10+ on the cable, which
+ * H.264 of a moving picture fills). So while the cable is up only Ethernet
+ * answers, and the station takes over the name when the cable goes.
+ *
+ * Applied a moment after the change: mDNS reacts to the same events itself,
+ * and acting first would be undone.
+ */
+static esp_timer_handle_t s_mdns_timer;
+
+static void mdns_policy(void *arg)
+{
+    (void)arg;
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta) {
+        return;
+    }
+    if (s_eth_up) {
+        (void)mdns_netif_action(sta, MDNS_EVENT_DISABLE_IP4 | MDNS_EVENT_DISABLE_IP6);
+    } else {
+        (void)mdns_netif_action(sta, MDNS_EVENT_ENABLE_IP4 | MDNS_EVENT_ENABLE_IP6 |
+                                         MDNS_EVENT_ANNOUNCE_IP4 | MDNS_EVENT_ANNOUNCE_IP6);
+    }
+}
+
+void kvm_net_mdns_policy_soon(void)
+{
+    if (!s_mdns_timer) {
+        const esp_timer_create_args_t a = {.callback = mdns_policy, .name = "mdns_pol"};
+        if (esp_timer_create(&a, &s_mdns_timer) != ESP_OK) {
+            return;
+        }
+    }
+    (void)esp_timer_stop(s_mdns_timer);
+    (void)esp_timer_start_once(s_mdns_timer, 1500 * 1000);
+}
+
 static void eth_on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -180,10 +220,12 @@ static void eth_on_event(void *arg, esp_event_base_t base, int32_t id, void *dat
          * needs the interface to be up, and everything else is autoconfigured
          * from the router once it is. */
         kvm_ipv6_start(s_eth_netif);
+        kvm_net_mdns_policy_soon();
     } else if (id == ETHERNET_EVENT_DISCONNECTED) {
         s_eth_up = false;
         s_eth_mbps = 0;
         ESP_LOGI(TAG, "Ethernet link down");
+        kvm_net_mdns_policy_soon();
     }
 }
 
@@ -195,6 +237,10 @@ void kvm_eth_link(bool *up, int *mbps)
     if (mbps) {
         *mbps = s_eth_mbps;
     }
+}
+#else
+void kvm_net_mdns_policy_soon(void)
+{
 }
 #endif /* CONFIG_KVM_ETH_ENABLE */
 

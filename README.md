@@ -622,7 +622,9 @@ push button on a free pin - the M5Stack Unit Button on a Grove port, or any
 switch to ground - and gives a short press and a 1.5 s hold an action each:
 the target's power button, a hard off, reset, Wake-on-LAN, a runbook, saving
 the dashcam's last seconds, or a screenshot. The same actions a schedule can
-run. Not tried with real hardware yet.
+run. On a board with WiFi it can also change the connection (restarting the
+device): hotspot on and off, the next network mode, or Ethernet and WiFi
+swapped. Not tried with real hardware yet.
 
 </td>
 </tr>
@@ -1028,10 +1030,17 @@ leave a key held down on the target.
 One thing to know about the absolute pointer: it addresses the target's whole
 desktop, not the single output being captured. On a target with a second display
 the desktop is wider than the picture, so the pointer travels further than the
-mouse and part of the picture aims at the screen you cannot see. Unplug the second
-display while working through ESP-KVM, or switch the pointer to relative in
-Settings - relative sends movement rather than position, so the desktop's layout
-stops mattering.
+mouse and part of the picture aims at the screen you cannot see. Settings ->
+Input -> Several screens -> "Find this screen" fixes that: the console sweeps the
+pointer across the desktop, sees where it lands in the picture and saves where
+this screen sits, so a click lands where you click. Relative mode is the other
+way out - it sends movement, not position.
+
+**How long it takes.** The Video readout (click the video figures in the status
+bar) shows how long a frame spends in the device and in this browser, and
+"Measure the delay" times the whole way round - pointer moved on the target until
+it shows here. On a Function EV at 1080p: about 160 ms with MJPEG and 155 ms
+with H.264.
 
 **Target OS.** How a machine enumerates a USB device is a fingerprint. Windows
 asks for a Microsoft OS descriptor, macOS reads each string twice, Linux does

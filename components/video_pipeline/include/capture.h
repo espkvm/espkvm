@@ -51,6 +51,13 @@ typedef struct {
     /** H.264 frames are rearranged on the CPU here (LT6911D below rev 3.0):
      *  fine at 720p, a few fps at 1080p. */
     bool h264_cpu;
+    /** Latency through the device, averaged over the last second (ms): a
+     *  frame landing until the loop takes it, publish until sent, and landing
+     *  until sent; plus the worst landing-to-sent in that second. */
+    uint32_t lag_wait_ms, lag_send_ms, lag_total_ms, lag_total_max_ms;
+    /** Share of the configured quality in use, 25..100: lowered while a
+     *  viewer's link cannot keep up. */
+    uint32_t link_pct;
 } kvm_video_status_t;
 
 /**
@@ -58,6 +65,14 @@ typedef struct {
  * frames is the one that matters. `failed` is true when a codec has just failed
  * to get a buffer and will try once more; false when H.264 has simply closed.
  */
+/** A viewer could not take a frame: its link is behind. */
+void capture_link_miss(void);
+/** Share of the configured quality to use now, 25..100. */
+uint32_t capture_link_pct(void);
+
+/** Latency samples, for the status: see kvm_video_status_t.lag_*. */
+void capture_status_add_sent(uint32_t send_us, uint32_t total_us);
+
 typedef void (*capture_memory_pressure_cb_t)(bool failed);
 void capture_set_memory_pressure_cb(capture_memory_pressure_cb_t cb);
 

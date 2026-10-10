@@ -193,6 +193,9 @@ void capture_loop_run(capture_ctx_t *c)
         while (xSemaphoreTake(c->csi_done_sem, 0) == pdTRUE) {
             /* Drop stale completions; done_fb always points at the newest completed frame. */
         }
+        /* The next frame lands while this one is worked on (M5Stack; a no-op
+         * elsewhere). */
+        capture_hw_frame_gate_open();
 
         if (c->ready_fb_idx < 0) {
             continue; /* no frame has completed yet */
@@ -308,6 +311,13 @@ void capture_loop_run(capture_ctx_t *c)
             continue;
         }
         void *src = c->fb[hidx];
+        {
+            const int64_t landed = capture_hw_fb_landed_us(hidx);
+            video_frame_set_source_time(landed);
+            if (landed > 0) {
+                capture_status_add_wait((uint32_t)(esp_timer_get_time() - landed));
+            }
+        }
 
         ESP_ERROR_CHECK(esp_cache_msync(src, c->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C));
 

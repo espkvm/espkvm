@@ -434,7 +434,7 @@ void kvm_record_dashcam_init(void)
 {
     /* PSRAM: a job is a kilobyte, and internal RAM is what TLS needs. */
     s_jobs = xQueueCreateWithCaps(4, sizeof(record_finished_t), MALLOC_CAP_SPIRAM);
-    if (!s_jobs || xTaskCreate(convert_task, "clip_mp4", 6144, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
+    if (!s_jobs || xTaskCreate(convert_task, "clip_mp4", 4608, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the clip converter");
     }
     record_set_finished_cb(on_finished);

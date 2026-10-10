@@ -46,4 +46,7 @@ void kvm_eth_link(bool *up, int *mbps);
  * broadcast, to power on a target that has WoL enabled. Returns
  * ESP_ERR_INVALID_ARG for a malformed MAC.
  */
-esp_err_t kvm_wol_send(const char *mac);
+esp_err_t kvm_wol_send(const char *mac);/** Let only Ethernet answer the mDNS name while the cable is up ("auto"). */
+void kvm_net_mdns_policy_soon(void);
+
+

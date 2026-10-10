@@ -125,7 +125,7 @@ esp_err_t kvm_atx_init(void)
     }
     memset(&s_cfg, 0, sizeof(s_cfg));
     s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = -1;
-    if (xTaskCreate(atx_task, "atx", 3072, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(atx_task, "atx", 2048, NULL, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

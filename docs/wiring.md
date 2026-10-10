@@ -160,7 +160,10 @@ on the box:
 | `btn_active_high` | The button connects the pin to 3V3, not ground | off |
 
 The actions are the ones a schedule runs: power, a hard off, reset, Wake-on-LAN,
-a runbook, save a dashcam clip, a screenshot. A button to ground needs nothing
+a runbook, save a dashcam clip, a screenshot. On a board with WiFi there are
+three more, and each restarts the device into the new mode: "hotspot on/off"
+(to its own hotspot, and back to the mode it had), "next network mode" (every
+mode the board has, in turn) and "Ethernet / WiFi". A button to ground needs nothing
 else: the pin's own pull-up holds it high until it is pressed. Not tried with
 real hardware yet.
 

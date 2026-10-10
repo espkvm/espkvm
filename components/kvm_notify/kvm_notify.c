@@ -47,7 +47,7 @@ static const char *TAG = "notify";
 /* TLS to Telegram needs room: the handshake alone wants several KB, and the
    sender keeps its buffers off the stack besides. 6 KB overflowed on the
    first real send. */
-#define TASK_STACK 12288
+#define TASK_STACK 8192 /* peak 5.2 KB sending to Telegram over TLS */
 #define TASK_PRIO 3 /* below the video and web tasks on purpose */
 #define POLL_MS 2000
 #define TITLE_MAX 80

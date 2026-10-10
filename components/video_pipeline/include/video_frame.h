@@ -48,6 +48,9 @@ typedef struct {
     bool keyframe;
     /** esp_timer time the frame was published. */
     int64_t at_us;
+    /** esp_timer time the picture it was made from landed from the bridge;
+     *  0 when unknown. */
+    int64_t src_us;
 } video_frame_ref_t;
 
 /** Mutexes and semaphores. Call once, before the web server starts. */
@@ -81,6 +84,8 @@ esp_err_t video_frame_begin_write(int *out_slot, uint8_t **out_buf, size_t *out_
 
 /** Make the slot written by @ref video_frame_begin_write the published frame. */
 void video_frame_publish(int slot, size_t len, bool keyframe);
+/** When the picture being encoded landed; the next publish carries it. */
+void video_frame_set_source_time(int64_t landed_us);
 
 /**
  * Whether the published frame is byte-identical to @p data. Used to drop a

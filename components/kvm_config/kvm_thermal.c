@@ -151,5 +151,5 @@ void kvm_thermal_init(void)
         return;
     }
     s_state = KVM_THERMAL_NORMAL;
-    xTaskCreate(thermal_task, "kvm_therm", 3072, NULL, 3, NULL);
+    xTaskCreate(thermal_task, "kvm_therm", 2048, NULL, 3, NULL);
 }

@@ -7,6 +7,8 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-10-10
+
 ### Added
 - **The console says when H.264 is slow on this board.** On the M5Stack Unit
   PoE-P4, H.264 above 720p runs at 5-8 fps: the bridge writes every frame it
@@ -15,10 +17,97 @@ bumps the patch).
   720p (17 fps) or 30 Hz (8 fps instead of 5-6 at 1080p) in the target's
   display settings. `h264Cpu` in `GET /api/v1/video/status` says a board
   works this way.
+- **Faster 1080p on the M5Stack Unit PoE-P4.** Its bridge sends 60 frames a
+  second and every one landed in PSRAM, whether or not it was encoded. Above
+  720p the CSI bridge is now closed as each frame lands and opened again once
+  the capture loop has taken it. At 1080p60: H.264 5.5 -> 7.2 fps, MJPEG
+  9.6 -> 11.0. Not used at 720p, where it made MJPEG slower. Other boards
+  are not changed.
+- **The button on the box can change the connection.** Three new actions on
+  a board with WiFi, each restarting into the new mode: "hotspot on/off" (to
+  the device's own hotspot and back to the mode it had), "next network mode"
+  (every mode the board has, in turn) and "Ethernet / WiFi". Asked for by a
+  user. Not tried on hardware yet.
+- **A restart no longer signs everyone out.** Sessions are kept in flash, so
+  after an update or a restart the console carries on without a new sign-in.
+  Only a SHA-256 of each token is stored - in flash and now in RAM too - so a
+  copy of the flash holds no cookie that works. Signing out or changing the
+  password still ends them. A restored session starts a fresh 12 hours.
+- **Wake the target.** A screen that went dark after idling sends no HDMI at
+  all, and the console showed "No signal" for a machine that was fine. The
+  console now nudges the mouse once by itself - a pixel there and back - when
+  it opens to no signal, and the "No signal" screen has a "Wake the target"
+  button for the same.
+- **Measure the delay, from the console.** The Video readout (click the video
+  figures in the status bar) has a "Measure the delay" button: after a few
+  seconds to let go of the mouse, it moves the target's pointer back and
+  forth and times how long until this page shows it - the whole way round,
+  which is the delay you feel. Beside it, how much of that is the device and
+  how much is decoding in this browser. Measured on a Function EV at 1080p:
+  about 160 ms with MJPEG and 155 ms with H.264. Needs a visible pointer and a
+  still screen; it says so when it cannot see one.
+- **A target with several screens.** An absolute pointer covers the whole
+  desktop, not the one screen captured, so on a second monitor the cursor
+  ran off onto the other one. Settings -> Input -> Several screens -> "Find
+  this screen" sweeps the pointer across the desktop, sees where it shows up
+  in the picture and saves where this screen sits; the four numbers can also
+  be typed in. Absolute pointing then lands where you click. It needs a
+  still screen with the pointer visible, and on some desktops (seen on KDE
+  under Wayland) a second run, because the pointer sometimes shows up one
+  move late; a result that cannot be right is refused rather than saved. A settings file
+  loaded onto another box leaves these four alone: they describe the computer
+  it is plugged into.
+- **Keyboard and mouse off? The console says so.** A gamepad-only USB mode
+  (for a Switch or an Xbox pad on Windows) leaves a computer with no keyboard
+  or mouse, which looked like a dead pointer. A bar now says what is going on
+  and brings them back in one click.
+- **Latency in the video status.** `lagMs` in `GET /api/v1/video/status`:
+  how long a frame waits after it lands before the loop takes it, how long
+  sending takes, and the whole way from landing to sent, with the worst in
+  the last second. On a Function EV at 1080p H.264: about 80-100 ms, the
+  encoder's 43 ms the largest part.
+- `GET /api/v1/system/memory`: each heap (internal, DMA, PSRAM) with its
+  largest free piece and the lowest it has been, and every task's stack -
+  where it is, its size and how close it has come to the end. For finding
+  where the internal RAM goes.
 - `psramLargest` in `GET /api/v1/system/info`: the biggest free piece of
   PSRAM, next to `psramFree`.
 
 ### Fixed
+- **Video on a slow link stopped stuttering.** A viewer that could not take a
+  frame was skipped and asked to wait for a keyframe - many times bigger than
+  a frame - which filled the link again: on WiFi the picture ran smoothly for
+  a second and then stuttered. Now the device sends less instead: two misses
+  in a second cut the H.264 bitrate (or the JPEG quality) by 30%, down to a
+  quarter, and every three clean seconds give a quarter back. The Video
+  readout says when it is cutting, and `linkPct` in the video status how much.
+- **Keys and the pointer reach the target up to 64 ms sooner.** The USB
+  keyboard and mouse asked to be polled every 64 ms - the interval in their
+  descriptor is an exponent at high speed, and 10 meant 2^9 x 125 us. Now 1 ms.
+- **H.264 in the browser: 170 ms less delay.** The encoder writes no B-frames
+  but its stream did not say so, and without that Chrome's decoder held about
+  four frames back before showing one - 174 ms at 1080p, more than the whole
+  device takes. The device now writes "frames are never reordered" into the
+  stream's header (the SPS), so any player gets it, and the console adds it
+  itself to a stream from older firmware. On the M5Stack Unit PoE-P4, where
+  H.264 runs at 5-16 fps, four frames held back were most of a second; there
+  the whole round trip at 720p is now about 185 ms. Measured the whole way round on a
+  Function EV at 1080p: 250-370 ms before, about 155 ms now - the same as
+  MJPEG.
+- **Twice the free internal RAM.** Task stacks took 220 KB of it, most of it
+  never touched: the sizes were guesses. Measured with the new memory page
+  over four hours of use, plus a Telegram message and a clip, and cut to
+  between one and a half and two times the peak. The WireGuard worker now
+  starts only when WireGuard is on. On a Function EV: free internal RAM 31 ->
+  66 KB, the lowest it went 10 -> 50 KB, free DMA-capable RAM 5 -> 41 KB.
+  That RAM is what TLS needs; when it ran out, the console could not open a
+  connection.
+- **espkvm.local pointed at the slower link.** In "Ethernet with WiFi as the
+  backup" both links answered the name, and a browser that took the WiFi
+  address got about 8 Mbit/s against 10+ on the cable - H.264 of a moving
+  picture filled it, and the video ran smoothly for a second, then stuttered.
+  While the cable is up only Ethernet answers now; WiFi takes the name when
+  the cable goes.
 - **Uploads failed with "out of memory" after a few hours.** An upload takes
   four 256 KB buffers in PSRAM, and after a while the free PSRAM is there but
   in smaller pieces. Seen on the M5Stack Unit PoE-P4: one upload went

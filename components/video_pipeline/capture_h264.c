@@ -16,6 +16,7 @@
  *    which is what video_frame_request_keyframe() asks for.
  *  - Frame size is fixed at open, so a resolution change means a new encoder.
  */
+#include "h264_sps.h"
 #include "capture_priv.h"
 
 #include <inttypes.h>
@@ -329,6 +330,11 @@ static uint32_t wanted_bitrate(void)
     int32_t kbps = kvm_setting_int("h264_kbps");
     if (kbps < 100) {
         kbps = 4000;
+    }
+    /* Less while a viewer's link is behind; see capture_link_pct(). */
+    kbps = kbps * (int32_t)capture_link_pct() / 100;
+    if (kbps < 300) {
+        kbps = 300;
     }
     return (uint32_t)kbps * 1000u;
 }
@@ -879,6 +885,10 @@ static void h264_encode_job(const h264_job_t *job)
      */
     const bool is_idr = out.frame_type == ESP_H264_FRAME_TYPE_IDR;
     wedge_watch(is_idr, out.length);
+    if (is_idr) {
+        /* Tell decoders frames are never reordered; see h264_sps.h. */
+        out.length = (uint32_t)h264_sps_add_restriction(dst, out.length, cap);
+    }
     video_frame_publish(slot, out.length, is_idr);
     capture_status_add_frame(out.length);
 }
@@ -977,6 +987,9 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
     }
     const bool is_idr = out.frame_type == ESP_H264_FRAME_TYPE_IDR;
     wedge_watch(is_idr, out.length);
+    if (is_idr) {
+        out.length = (uint32_t)h264_sps_add_restriction(dst, out.length, cap);
+    }
     video_frame_publish(wslot, out.length, is_idr);
     capture_status_add_frame(out.length);
     return ESP_OK;

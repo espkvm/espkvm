@@ -31,6 +31,10 @@ static uint32_t s_window_frames;
 static uint32_t s_window_skipped;
 static uint64_t s_window_encode_us;
 static uint64_t s_window_ppa_us;
+/* Latency, per window: landed -> taken by the loop, published -> sent, and
+ * landed -> sent (the whole way through the device). */
+static uint64_t s_window_wait_us, s_window_send_us, s_window_total_us;
+static uint32_t s_window_waits, s_window_sends, s_window_total_max_us;
 static uint32_t s_window_encodes;
 static uint64_t s_window_bytes;
 static int64_t s_window_start_us;
@@ -99,6 +103,79 @@ void capture_status_add_ppa_time(uint32_t us)
     taskEXIT_CRITICAL(&s_mu);
 }
 
+void capture_status_add_wait(uint32_t us)
+{
+    taskENTER_CRITICAL(&s_mu);
+    s_window_wait_us += us;
+    s_window_waits++;
+    taskEXIT_CRITICAL(&s_mu);
+}
+
+void capture_status_add_sent(uint32_t send_us, uint32_t total_us)
+{
+    /* A new viewer is sent the last frame at once, however old it is; that is
+     * a replay, not the live path being slow. */
+    if (send_us > 1000000u) {
+        return;
+    }
+    taskENTER_CRITICAL(&s_mu);
+    s_window_send_us += send_us;
+    s_window_total_us += total_us;
+    s_window_sends++;
+    if (total_us > s_window_total_max_us) {
+        s_window_total_max_us = total_us;
+    }
+    taskEXIT_CRITICAL(&s_mu);
+}
+
+/*
+ * How much of the configured quality the slowest viewer's link can take, in
+ * percent. A viewer that cannot take a frame (its socket is still full of the
+ * last one) is skipped, and for H.264 asked to wait for a keyframe - which is
+ * many times bigger than a frame and fills the link again. On a slow WiFi link
+ * that loop is the picture running smoothly for a second and then stuttering.
+ * So two misses in a second cut the quality by 30% (down to a quarter), and
+ * every three clean seconds give back a quarter of it.
+ */
+#define LINK_MIN_PCT 25
+#define LINK_CLEAN_US (3 * 1000000LL)
+static uint32_t s_link_pct = 100;
+/* s_status.link_pct is filled at the first window; until then it reads 0,
+ * which the console takes as "not known yet". */
+static uint32_t s_window_misses;
+static int64_t s_link_last_miss_us;
+static int64_t s_link_last_step_us;
+
+void capture_link_miss(void)
+{
+    taskENTER_CRITICAL(&s_mu);
+    s_window_misses++;
+    s_link_last_miss_us = esp_timer_get_time();
+    taskEXIT_CRITICAL(&s_mu);
+}
+
+uint32_t capture_link_pct(void)
+{
+    return s_link_pct;
+}
+
+/* Called once a second with the window lock held. */
+static void link_step_locked(int64_t now)
+{
+    if (s_window_misses >= 2) {
+        const uint32_t next = s_link_pct * 7u / 10u;
+        s_link_pct = next < LINK_MIN_PCT ? LINK_MIN_PCT : next;
+        s_link_last_step_us = now;
+    } else if (s_link_pct < 100 && now - s_link_last_miss_us > LINK_CLEAN_US &&
+               now - s_link_last_step_us > LINK_CLEAN_US) {
+        const uint32_t next = s_link_pct * 125u / 100u + 1u;
+        s_link_pct = next > 100u ? 100u : next;
+        s_link_last_step_us = now;
+    }
+    s_window_misses = 0;
+    s_status.link_pct = s_link_pct;
+}
+
 void capture_status_add_skipped(void)
 {
     taskENTER_CRITICAL(&s_mu);
@@ -134,6 +211,13 @@ void capture_status_tick(void)
     s_window_ppa_us = 0;
     s_window_encodes = 0;
     s_window_start_us = now;
+    link_step_locked(now);
+    s_status.lag_wait_ms = s_window_waits ? (uint32_t)(s_window_wait_us / s_window_waits / 1000) : 0;
+    s_status.lag_send_ms = s_window_sends ? (uint32_t)(s_window_send_us / s_window_sends / 1000) : 0;
+    s_status.lag_total_ms = s_window_sends ? (uint32_t)(s_window_total_us / s_window_sends / 1000) : 0;
+    s_status.lag_total_max_ms = s_window_total_max_us / 1000;
+    s_window_wait_us = s_window_send_us = s_window_total_us = 0;
+    s_window_waits = s_window_sends = s_window_total_max_us = 0;
 
     s_status.fps_x100 = (uint32_t)((uint64_t)frames * 100000000ull / (uint64_t)elapsed_us);
     s_status.kbps = (uint32_t)(bytes * 8000ull / (uint64_t)elapsed_us);
@@ -257,7 +341,8 @@ void capture_start(void)
     screentext_store_init();
     capture_screentext_init();
     capture_mjpeg_bind_settings();
-    const uint32_t cam_stack = 10240;
+    /* Peak 1.4 KB measured; the rest was internal RAM for nothing. */
+    const uint32_t cam_stack = 6144;
     xTaskCreatePinnedToCore(camera_task, "cam", cam_stack, NULL, 5, NULL, 0);
 }
 

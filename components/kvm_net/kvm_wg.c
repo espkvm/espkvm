@@ -204,9 +204,23 @@ static void stop_tunnel(void)
     }
 }
 
-esp_err_t kvm_wg_init(void)
+/* The worker's 8 KB of internal RAM is only spent once WireGuard is on: most
+ * devices never turn it on, and internal RAM is what runs out on this chip. */
+static esp_err_t start_task(void)
 {
     if (s_task) {
+        return ESP_OK;
+    }
+    if (xTaskCreate(wg_task, "kvm_wg", 8192, NULL, 5, &s_task) != pdPASS) {
+        s_task = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+esp_err_t kvm_wg_init(void)
+{
+    if (s_mtx) {
         return ESP_OK;
     }
     s_mtx = xSemaphoreCreateMutex();
@@ -218,11 +232,7 @@ esp_err_t kvm_wg_init(void)
     if (ev != ESP_OK) {
         ESP_LOGW(TAG, "could not watch for GOT_IP: %s", esp_err_to_name(ev));
     }
-    if (xTaskCreate(wg_task, "kvm_wg", 8192, NULL, 5, &s_task) != pdPASS) {
-        s_task = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
+    return kvm_setting_bool("wg_enable") ? start_task() : ESP_OK;
 }
 
 /* Resolve "host" (a name or a literal address) to an IPv4 ip_addr_t. */
@@ -466,6 +476,12 @@ esp_err_t kvm_wg_apply(void)
 {
     if (!s_apply_sem) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_task && kvm_setting_bool("wg_enable")) {
+        esp_err_t err = start_task();
+        if (err != ESP_OK) {
+            return err;
+        }
     }
     xSemaphoreGive(s_apply_sem);
     return ESP_OK;

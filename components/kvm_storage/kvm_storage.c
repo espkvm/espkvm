@@ -1297,7 +1297,7 @@ esp_err_t kvm_storage_init(void)
     static bool s_probe_started;
     if (!s_probe_started) {
         s_probe_started =
-            xTaskCreate(sd_probe_task, "sd_probe", 6144, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS;
+            xTaskCreate(sd_probe_task, "sd_probe", 4096, NULL, tskIDLE_PRIORITY + 1, NULL) == pdPASS;
     }
 
     if (err != ESP_OK) {

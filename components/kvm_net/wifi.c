@@ -353,6 +353,7 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     char text[16];
     snprintf(text, sizeof(text), IPSTR, IP2STR(&e->ip_info.ip));
     kvm_net_record_ip4(text, s_mode == KVM_NET_AUTO);
+    kvm_net_mdns_policy_soon();
 }
 
 /*

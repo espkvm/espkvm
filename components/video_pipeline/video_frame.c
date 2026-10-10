@@ -25,6 +25,7 @@ static struct {
     bool key[VIDEO_SLOT_COUNT];
     /** When the frame was published: the time a recording gives it. */
     int64_t at_us[VIDEO_SLOT_COUNT];
+    int64_t src_us[VIDEO_SLOT_COUNT];
     int slots;
     int front;
     size_t cap;
@@ -191,6 +192,13 @@ esp_err_t video_frame_begin_write(int *out_slot, uint8_t **out_buf, size_t *out_
     }
 }
 
+static int64_t s_next_src_us;
+
+void video_frame_set_source_time(int64_t landed_us)
+{
+    s_next_src_us = landed_us;
+}
+
 void video_frame_publish(int slot, size_t len, bool keyframe)
 {
     if (!s.mutex || slot < 0 || slot >= VIDEO_SLOT_COUNT) {
@@ -202,6 +210,7 @@ void video_frame_publish(int slot, size_t len, bool keyframe)
     s.len[slot] = len;
     s.key[slot] = keyframe;
     s.at_us[slot] = esp_timer_get_time();
+    s.src_us[slot] = s_next_src_us;
     s.front = slot;
     s.seq++;
     xSemaphoreGive(s.mutex);
@@ -254,6 +263,7 @@ bool video_frame_acquire(video_frame_ref_t *out)
         out->payload = s.payload;
         out->keyframe = s.key[f];
         out->at_us = s.at_us[f];
+        out->src_us = s.src_us[f];
         got = true;
     }
     xSemaphoreGive(s.mutex);

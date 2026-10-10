@@ -47,6 +47,9 @@
 #define NVS_KEY_TOTP "totp"
 #define NVS_KEY_TOTP_LAST "totp_last"
 #define NVS_KEY_RCODES "rcodes"
+/* The live sessions, as SHA-256 of each token: a restart (an update, say) no
+ * longer signs everyone out, and a copy of the flash holds no usable cookie. */
+#define NVS_KEY_SESSIONS "sessions"
 
 #define SALT_LEN 16
 #define HASH_LEN 32
@@ -81,7 +84,9 @@
 #define SESSION_TTL_US ((int64_t)12 * 60 * 60 * 1000000)
 
 typedef struct {
-    char token[TOKEN_CHARS + 1];
+    /** SHA-256 of the token. The token itself is only ever in the cookie. */
+    uint8_t hash[32];
+    /** 0 for a free slot. */
     int64_t expires_us;
     /** When this session was last used, so a busy one is not the one thrown
      *  out. Without it "oldest" meant "signed in longest ago", which is the
@@ -401,10 +406,13 @@ static bool password_matches(const char *password)
     return equal_ct(candidate, s_hash, HASH_LEN);
 }
 
+static void sessions_save_locked(void);
+
 static void session_clear_all(void)
 {
     lock();
     memset(s_sessions, 0, sizeof(s_sessions));
+    sessions_save_locked();
     /* Sockets authenticated under the old password go with them. */
     for (int i = 0; i < MAX_WS_SOCKETS; i++) {
         s_ws_authed[i] = -1;
@@ -412,16 +420,74 @@ static void session_clear_all(void)
     unlock();
 }
 
-static const char *session_create(bool must_change)
+/* What goes to flash for one session. Times are not kept: they count from
+ * boot, so a restored session simply starts a fresh TTL. */
+typedef struct {
+    uint8_t hash[32];
+    uint8_t must_change;
+} saved_session_t;
+
+/* Call with the lock held: copies the live sessions, then writes them. */
+static void sessions_save_locked(void)
+{
+    saved_session_t out[MAX_SESSIONS];
+    size_t n = 0;
+    const int64_t now = esp_timer_get_time();
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (s_sessions[i].expires_us > now) {
+            memcpy(out[n].hash, s_sessions[i].hash, sizeof(out[n].hash));
+            out[n].must_change = s_sessions[i].must_change;
+            n++;
+        }
+    }
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    esp_err_t err = n ? nvs_set_blob(nvs, NVS_KEY_SESSIONS, out, n * sizeof(out[0]))
+                      : nvs_erase_key(nvs, NVS_KEY_SESSIONS);
+    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
+        (void)nvs_commit(nvs);
+    } else {
+        ESP_LOGW(TAG, "could not save the sessions: %s", esp_err_to_name(err));
+    }
+    nvs_close(nvs);
+}
+
+static void sessions_load(nvs_handle_t nvs)
+{
+    saved_session_t in[MAX_SESSIONS];
+    size_t len = sizeof(in);
+    if (nvs_get_blob(nvs, NVS_KEY_SESSIONS, in, &len) != ESP_OK || len % sizeof(in[0]) != 0) {
+        return;
+    }
+    const int64_t now = esp_timer_get_time();
+    const size_t n = len / sizeof(in[0]);
+    for (size_t i = 0; i < n && i < MAX_SESSIONS; i++) {
+        memcpy(s_sessions[i].hash, in[i].hash, sizeof(s_sessions[i].hash));
+        s_sessions[i].must_change = in[i].must_change != 0;
+        s_sessions[i].expires_us = now + SESSION_TTL_US;
+        s_sessions[i].used_us = 0;
+    }
+    ESP_LOGI(TAG, "%u session(s) kept from before the restart", (unsigned)n);
+}
+
+/* A new session; its token goes into @p token, which must hold TOKEN_CHARS+1. */
+static void session_create(bool must_change, char *token)
 {
     uint8_t raw[TOKEN_BYTES];
     esp_fill_random(raw, sizeof(raw));
+    for (int i = 0; i < TOKEN_BYTES; i++) {
+        snprintf(&token[i * 2], 3, "%02x", raw[i]);
+    }
+    uint8_t hash[32];
+    (void)sha256((const uint8_t *)token, TOKEN_CHARS, NULL, 0, hash);
 
     lock();
     int slot = -1;
     const int64_t now = esp_timer_get_time();
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (s_sessions[i].token[0] == '\0' || s_sessions[i].expires_us < now) {
+        if (s_sessions[i].expires_us < now) {
             slot = i;
             break;
         }
@@ -439,32 +505,33 @@ static const char *session_create(bool must_change)
             }
         }
     }
-    for (int i = 0; i < TOKEN_BYTES; i++) {
-        snprintf(&s_sessions[slot].token[i * 2], 3, "%02x", raw[i]);
-    }
+    memcpy(s_sessions[slot].hash, hash, sizeof(hash));
     s_sessions[slot].expires_us = now + SESSION_TTL_US;
     s_sessions[slot].used_us = now;
     s_sessions[slot].must_change = must_change;
-    const char *token = s_sessions[slot].token;
+    sessions_save_locked();
     unlock();
-    return token;
 }
 
 static session_t *session_find(const char *token)
 {
-    if (!token || !token[0]) {
+    if (!token || strlen(token) != TOKEN_CHARS) {
+        return NULL;
+    }
+    uint8_t hash[32];
+    if (sha256((const uint8_t *)token, TOKEN_CHARS, NULL, 0, hash) != ESP_OK) {
         return NULL;
     }
     const int64_t now = esp_timer_get_time();
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (s_sessions[i].token[0] == '\0') {
+        if (s_sessions[i].expires_us == 0) {
             continue;
         }
         if (s_sessions[i].expires_us < now) {
             memset(&s_sessions[i], 0, sizeof(s_sessions[i]));
             continue;
         }
-        if (strcmp(s_sessions[i].token, token) == 0) {
+        if (equal_ct(s_sessions[i].hash, hash, sizeof(hash))) {
             /* Being used keeps it alive: a console open all day used to be
                signed out twelve hours after the sign-in, mid-shift, which is
                the one moment it must not happen. */
@@ -1141,7 +1208,8 @@ static esp_err_t auth_login_post(httpd_req_t *req)
     kvm_web_clock_from_browser(browser_time);
 
     const bool must_change = !s_have_password;
-    const char *token = session_create(must_change);
+    char token[TOKEN_CHARS + 1];
+    session_create(must_change, token);
     char cookie[192];
     set_session_cookie(req, cookie, sizeof(cookie), token, false);
     char out[64];
@@ -1158,6 +1226,7 @@ static esp_err_t auth_logout_post(httpd_req_t *req)
         session_t *s = session_find(token);
         if (s) {
             memset(s, 0, sizeof(*s));
+            sessions_save_locked();
         }
         unlock();
     }
@@ -1788,6 +1857,7 @@ esp_err_t kvm_auth_init(void)
         }
         ESP_LOGI(TAG, "two-factor sign-in is on");
     }
+    sessions_load(nvs);
     nvs_close(nvs);
     s_inited = true;
     return ESP_OK;

@@ -29,7 +29,8 @@ static const char *TAG = "button";
 /* Index = the btn_press / btn_hold choice; must match s_btn_action_choices in
    kvm_settings_table.c. */
 static const char *const k_actions[] = {"", "power", "poweroff", "reset", "wol",
-                                        "runbook", "clip", "screenshot"};
+                                        "runbook", "clip", "screenshot",
+                                        "hotspot", "netnext", "netswap"};
 
 static const char *action_of(const char *key)
 {

@@ -445,7 +445,7 @@ void kvm_rtc_init(i2c_master_bus_handle_t capture_bus)
     } else {
         ESP_LOGI(TAG, "%s found", s_drv->name);
     }
-    xTaskCreate(sync_task, "rtc", 3072, NULL, 2, NULL);
+    xTaskCreate(sync_task, "rtc", 2048, NULL, 2, NULL);
 }
 
 bool kvm_rtc_present(void)

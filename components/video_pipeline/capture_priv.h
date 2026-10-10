@@ -191,6 +191,10 @@ void capture_screentext_init(void);
 esp_err_t capture_hw_hdmi_recover(capture_ctx_t *c);
 /** Frames arrive again: the next recovery starts its count from one. */
 void capture_hw_frames_flowing(void);
+/** Let the next frame through the CSI bridge (M5Stack: it is closed between frames). */
+void capture_hw_frame_gate_open(void);
+/** esp_timer time ring slot @p idx last landed from the bridge. */
+int64_t capture_hw_fb_landed_us(int idx);
 
 /** Poll the bridge for signal state and resolution changes (200 ms cadence). */
 void capture_monitor_start(capture_ctx_t *c);
@@ -307,6 +311,10 @@ void capture_status_set_signal(bool present, uint8_t sys_status);
 /** Measured input refresh (0 unknown), and whether the mode is over the lane limit. */
 void capture_status_set_input(uint8_t hz, bool too_fast);
 void capture_status_add_frame(size_t bytes);
+/** A frame taken by the loop @p us after it landed. */
+void capture_status_add_wait(uint32_t us);
+/** Share of the configured quality to use now, 25..100 (see capture.c). */
+uint32_t capture_link_pct(void);
 /** An encoded frame identical to the last published one. */
 void capture_status_add_skipped(void);
 /** Time one encode took, in microseconds (the encoder alone, not any colour

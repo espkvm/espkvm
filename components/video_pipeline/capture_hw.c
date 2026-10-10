@@ -53,6 +53,7 @@ static capture_ctx_t s_cap;
 static portMUX_TYPE s_frames_mu = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_frames_total;
 static int64_t s_last_frame_us;
+static int64_t s_fb_landed_us[CAPTURE_FB_COUNT];
 static i2c_master_bus_handle_t s_i2c_bus; /* shared with an optional status OLED */
 
 /*
@@ -321,6 +322,37 @@ static void capture_configure_p4_csi_bridge(uint32_t hres, uint32_t vres)
 #endif
 }
 
+#if CAPTURE_YUV_SWAP
+/*
+ * On the M5Stack board the bridge sends 60 frames a second and every one of
+ * them lands in PSRAM - about 250 MB/s at 1080p, most of what the memory can
+ * do - while the encoder takes 5 to 8. So the CSI bridge is closed as each
+ * frame lands, and opened again once the capture loop has taken it, so the
+ * next one lands while this one is encoded. The PHY and the LT6911D are not
+ * touched: only the gate between the receiver and the DMA. Opened mid-frame,
+ * the bridge waits for the next frame start: the picture stays whole.
+ * Measured at 1080p60: H.264 5.5 -> 7.2 fps, MJPEG 9.6 -> 11.0; at 1080p30
+ * H.264 7.0 -> 7.75.
+ */
+static volatile bool s_gate_closed;
+/* Only above 720p. There the loop is fast (MJPEG 40 ms a frame), and waiting
+ * for the next frame to start costs more than the memory saves: MJPEG 720p60
+ * fell from 19 to 12 fps with the gate. */
+static bool s_gate_on;
+
+void capture_hw_frame_gate_open(void)
+{
+    if (s_gate_closed) {
+        s_gate_closed = false;
+        MIPI_CSI_BRIDGE.csi_en.csi_brg_en = 1;
+    }
+}
+#else
+void capture_hw_frame_gate_open(void)
+{
+}
+#endif
+
 static bool IRAM_ATTR cam_on_get_new(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t *trans, void *ud)
 {
     (void)h;
@@ -365,10 +397,20 @@ static bool IRAM_ATTR cam_on_done(esp_cam_ctlr_handle_t h, esp_cam_ctlr_trans_t 
             }
         }
         if (idx >= 0) {
+            s_fb_landed_us[idx] = s_last_frame_us;
             portENTER_CRITICAL_ISR(&c->fb_lock);
             c->ready_fb_idx = idx;
             portEXIT_CRITICAL_ISR(&c->fb_lock);
             c->done_fb = trans->buffer;
+#if CAPTURE_YUV_SWAP
+            /* Close the bridge until the loop wants the next frame; see
+             * capture_hw_frame_gate_open(). The DMA is already set up for the
+             * next buffer and waits. */
+            if (s_gate_on) {
+                MIPI_CSI_BRIDGE.csi_en.csi_brg_en = 0;
+                s_gate_closed = true;
+            }
+#endif
         }
     }
     BaseType_t high_task_woken = pdFALSE;
@@ -418,6 +460,10 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     capture_fill_esp_cam_color_types(&csi_cfg, &isp_cfg);
 
     ESP_RETURN_ON_ERROR(esp_cam_new_csi_ctlr(&csi_cfg, &s_cam), CAPTURE_LOG_TAG, "csi ctlr");
+#if CAPTURE_YUV_SWAP
+    s_gate_on = hres * vres > 1280u * 720u;
+    s_gate_closed = false;
+#endif
 
     esp_cam_ctlr_evt_cbs_t cbs = {
         .on_get_new_trans = cam_on_get_new,
@@ -565,7 +611,9 @@ capture_ctx_t *capture_hw_init_start(void)
     /* The setting's choices are in the same order as the driver's enum. */
     const int32_t edid_choice = kvm_setting_int("edid_prof");
     (void)kvm_bridge_set_edid_profile(&s_cap.bridge, (kvm_bridge_edid_profile_t)edid_choice);
-    if (!s_cap.bridge.ops->set_edid_profile) {
+    if (s_cap.bridge.ops->set_edid_profile) {
+        kvm_cap_report(KVM_CAP_EDID, true, NULL);
+    } else {
         kvm_cap_report(KVM_CAP_EDID, false, "the %s holds its own EDID",
                        s_cap.bridge.name);
     }
@@ -1097,4 +1145,9 @@ void capture_frame_counter(uint32_t *frames, int64_t *last_us)
         *last_us = s_last_frame_us;
     }
     portEXIT_CRITICAL(&s_frames_mu);
+}
+
+int64_t capture_hw_fb_landed_us(int idx)
+{
+    return (idx >= 0 && idx < CAPTURE_FB_COUNT) ? s_fb_landed_us[idx] : 0;
 }

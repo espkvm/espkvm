@@ -22,7 +22,13 @@
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "driver/pulse_cnt.h"
+#include "cJSON.h"
+#include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
 #include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/freertos_debug.h"
+#include "freertos/task.h"
 #include "esp_timer.h"
 
 #include "kvm_auth.h"
@@ -114,7 +120,85 @@ static esp_err_t pinprobe_get(httpd_req_t *req)
     return httpd_resp_sendstr(req, out);
 }
 
+/*
+ * Where the memory is: each kind of heap, and each task's stack - where it
+ * lives, how big it is and how close it came to the end. The internal RAM is
+ * what runs out on this chip (TLS needs tens of KB of it in one piece), and
+ * this is how to see who holds it.
+ */
+static cJSON *heap_json(uint32_t caps)
+{
+    multi_heap_info_t i;
+    heap_caps_get_info(&i, caps);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "total", (double)heap_caps_get_total_size(caps));
+    cJSON_AddNumberToObject(o, "free", (double)i.total_free_bytes);
+    cJSON_AddNumberToObject(o, "largest", (double)i.largest_free_block);
+    cJSON_AddNumberToObject(o, "minFree", (double)i.minimum_free_bytes);
+    cJSON_AddNumberToObject(o, "usedBlocks", (double)i.allocated_blocks);
+    cJSON_AddNumberToObject(o, "freeBlocks", (double)i.free_blocks);
+    return o;
+}
+
+static esp_err_t memory_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    UBaseType_t n = uxTaskGetNumberOfTasks() + 4;
+    TaskStatus_t *st = heap_caps_calloc(n, sizeof(TaskStatus_t), MALLOC_CAP_SPIRAM);
+    uint32_t *size = heap_caps_calloc(n, sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+    if (!st || !size) {
+        free(st);
+        free(size);
+        return send_json_error(req, "503 Service Unavailable", "out of memory");
+    }
+    vTaskSuspendAll();
+    n = uxTaskGetSystemState(st, n, NULL);
+    for (UBaseType_t k = 0; k < n; k++) {
+        TaskSnapshot_t snap;
+        if (vTaskGetSnapshot(st[k].xHandle, &snap) == pdTRUE && st[k].pxStackBase) {
+            size[k] = (uint32_t)((uint8_t *)snap.pxEndOfStack - (uint8_t *)st[k].pxStackBase);
+        }
+    }
+    (void)xTaskResumeAll();
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "internal", heap_json(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddItemToObject(root, "dma", heap_json(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    cJSON_AddItemToObject(root, "psram", heap_json(MALLOC_CAP_SPIRAM));
+    cJSON *tasks = cJSON_AddArrayToObject(root, "tasks");
+    uint32_t internal_stacks = 0;
+    for (UBaseType_t k = 0; k < n; k++) {
+        const bool ext = esp_ptr_external_ram(st[k].pxStackBase);
+        if (!ext) {
+            internal_stacks += size[k];
+        }
+        cJSON *t = cJSON_CreateObject();
+        cJSON_AddStringToObject(t, "name", st[k].pcTaskName);
+        cJSON_AddNumberToObject(t, "prio", st[k].uxCurrentPriority);
+        cJSON_AddStringToObject(t, "stackIn", ext ? "psram" : "internal");
+        cJSON_AddNumberToObject(t, "stack", size[k]);
+        cJSON_AddNumberToObject(t, "stackFreeMin", st[k].usStackHighWaterMark);
+        cJSON_AddItemToArray(tasks, t);
+    }
+    cJSON_AddNumberToObject(root, "internalStacks", internal_stacks);
+    free(st);
+    free(size);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t err = httpd_resp_sendstr(req, json);
+    free(json);
+    return err;
+}
+
 static const httpd_uri_t k_routes[] = {
+    {.uri = "/api/v1/system/memory", .method = HTTP_GET, .handler = memory_get},
     {.uri = "/api/v1/system/pinprobe", .method = HTTP_GET, .handler = pinprobe_get},
 };
 

@@ -4,6 +4,7 @@ idf_component_register(
     REQUIRES
         esp_common
     PRIV_REQUIRES
+        nvs_flash
         espressif__cjson
         esp_timer
         esp_netif

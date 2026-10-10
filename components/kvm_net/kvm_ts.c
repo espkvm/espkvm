@@ -119,7 +119,7 @@ esp_err_t kvm_ts_init(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "could not watch for GOT_IP: %s", esp_err_to_name(err));
     }
-    if (xTaskCreate(ts_task, "kvm_ts", 8192, NULL, 5, &s_task) != pdPASS) {
+    if (xTaskCreate(ts_task, "kvm_ts", 5120, NULL, 5, &s_task) != pdPASS) {
         s_task = NULL;
         return ESP_ERR_NO_MEM;
     }

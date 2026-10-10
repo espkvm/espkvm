@@ -657,6 +657,11 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                         the last one came: a lock with nothing behind it stops
                         the count even while "signal" stays true. */
                      "\"frames\":%u,\"frameAgeMs\":%s,\"h264Cpu\":%s,"
+                     /* Through the device, ms: landed -> taken, encode (the
+                        two encode figures above), published -> sent, and
+                        landed -> sent with the second's worst. */
+                     "\"lagMs\":{\"wait\":%u,\"send\":%u,\"total\":%u,\"totalMax\":%u},"
+                     "\"linkPct\":%u,"
                      /* The recorder rides along: the console polls this anyway. */
                      "\"record\":{\"on\":%s,\"file\":\"%s\",\"seconds\":%u,\"bytes\":%llu,"
                      "\"dropped\":%u,\"stopped\":\"%s\",\"blocked\":%s%s%s,"
@@ -676,7 +681,9 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)s_text_client_count, s_stream_workers, codec,
                      text_mode ? "true" : "false",
                      (unsigned)st.flat_ms, (unsigned)st.frames, age,
-                     st.h264_cpu ? "true" : "false",
+                     st.h264_cpu ? "true" : "false", (unsigned)st.lag_wait_ms,
+                     (unsigned)st.lag_send_ms, (unsigned)st.lag_total_ms,
+                     (unsigned)st.lag_total_max_ms, (unsigned)st.link_pct,
                      rec.recording ? "true" : "false", rec.file,
                      (unsigned)rec.seconds, (unsigned long long)rec.bytes, (unsigned)rec.dropped,
                      rec.stopped, rec_blocked ? "\"" : "", rec_blocked ? rec_blocked : "null",
@@ -3588,6 +3595,10 @@ static void stream_worker_task(void *arg)
                 se = httpd_resp_send_chunk(req, "\r\n--frame\r\n", 11);
             }
         }
+        if (se == ESP_OK && f.src_us > 0) {
+            const int64_t now = esp_timer_get_time();
+            capture_status_add_sent((uint32_t)(now - f.at_us), (uint32_t)(now - f.src_us));
+        }
         video_frame_release(&f);
         xSemaphoreGive(s_xmit_mu);
 
@@ -4141,6 +4152,7 @@ static void video_pump_task(void *arg)
         const size_t packet_len = VIDEO_HDR_LEN + f.len;
         const bool keyframe = f.keyframe;
         const int f_payload = f.payload;
+        const int64_t f_at_us = f.at_us, f_src_us = f.src_us;
         video_frame_release(&f);
 
         httpd_ws_frame_t frame = {
@@ -4189,6 +4201,7 @@ static void video_pump_task(void *arg)
             FD_SET(fd, &wfds);
             struct timeval tv0 = {0, 0};
             if (select(fd + 1, NULL, &wfds, NULL, &tv0) <= 0 || !FD_ISSET(fd, &wfds)) {
+                capture_link_miss();
                 if (++s_video_stall[i] >= VIDEO_STALL_DROP_FRAMES) {
                     video_drop_client_locked(i);
                 } else if (f_payload == VIDEO_PAYLOAD_H264 && !s_video_need_key[i]) {
@@ -4222,6 +4235,9 @@ static void video_pump_task(void *arg)
                 /* A viewer that has gone stops being counted, which is also
                  * what lets the encoder go idle again. */
                 video_remove_client(targets[i]);
+            } else if (f_src_us > 0) {
+                const int64_t now = esp_timer_get_time();
+                capture_status_add_sent((uint32_t)(now - f_at_us), (uint32_t)(now - f_src_us));
             }
         }
     }
@@ -4635,7 +4651,9 @@ httpd_handle_t http_server_start(void)
     /* Browsers send >1 KiB of headers; Vite dev proxy forwards them. Default 1024 -> 431. */
     cfg.max_req_hdr_len = 8192;
     cfg.server_port = 80;
-    cfg.stack_size = 20 * 1024;
+    /* Peak 7.2 KB over hours of use with TLS (2026-10-10); certificates are
+     * made on a task of their own. Internal RAM is what runs out. */
+    cfg.stack_size = 12 * 1024;
     /* Prefer draining TCP slightly above capture so multipart frames reach the browser. */
     cfg.task_priority = tskIDLE_PRIORITY + 6;
     cfg.send_wait_timeout = 30;

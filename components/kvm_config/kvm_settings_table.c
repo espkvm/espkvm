@@ -88,7 +88,9 @@ static const char *const s_pad_choices[] = {"off", "switch", "switch_alone", "xi
 /* What the button on the box does. Order must match k_actions[] in
    components/kvm_sched/button.c. */
 static const char *const s_btn_action_choices[] = {"nothing", "power", "power off (hold)", "reset",
-                                                   "wake (WoL)", "runbook", "save clip", "screenshot"};
+                                                   "wake (WoL)", "runbook", "save clip", "screenshot",
+                                                   "hotspot on/off", "next network mode",
+                                                   "Ethernet / WiFi"};
 /* Read by the console only; how long its vibration tick lasts on a phone. */
 static const char *const s_haptic_choices[] = {"light", "medium", "strong"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap", "auto"};
@@ -316,6 +318,36 @@ static const kvm_setting_t s_settings[] = {
                 "the video, the way a remote desktop behaves. Keyboard input always "
                 "requires a click first.",
         .min = 0, .max = ENUM_MAX(s_engage_choices), .def = 0, .choices = s_engage_choices, .requires_cap = KVM_CAP_HID,
+    },
+    /* A target with several screens: an absolute pointer addresses the whole
+       desktop, not the one screen captured. Read by the console only. */
+    {
+        .key = "ptr_desk_w", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
+        .title = "Whole desktop width (px)",
+        .help = "Only for a target with more than one screen. The absolute pointer covers "
+                "the whole desktop, not just the screen shown here, so the cursor runs off "
+                "onto the other screen. Give the size of the whole desktop and where this "
+                "screen sits in it, in the target's pixels - for two 1920x1080 screens side "
+                "by side with this one on the right: 3840, 1080, 1920, 0. 0 here turns it off.",
+        .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
+    },
+    {
+        .key = "ptr_desk_h", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
+        .title = "Whole desktop height (px)",
+        .help = "The height of the whole desktop. 0 means the same as this screen.",
+        .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
+    },
+    {
+        .key = "ptr_scr_x", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
+        .title = "This screen's left edge (px)",
+        .help = "Where this screen starts, from the left of the whole desktop.",
+        .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
+    },
+    {
+        .key = "ptr_scr_y", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
+        .title = "This screen's top edge (px)",
+        .help = "Where this screen starts, from the top of the whole desktop.",
+        .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
     },
     {
         .key = "mouse_sens", .section = "input", .group = "Pointer", .type = KVM_VT_INT,
@@ -659,7 +691,11 @@ static const kvm_setting_t s_settings[] = {
         .title = "A short press",
         .help = "What a short press does: the target's power button, a hard power off, "
                 "reset, Wake-on-LAN, a runbook (named below), saving the dashcam's last "
-                "seconds as a clip, or a screenshot to the card.",
+                "seconds as a clip, or a screenshot to the card. On a board with WiFi it "
+                "can also change the connection, which restarts the device: \"hotspot "
+                "on/off\" goes to its own hotspot and back to the mode it had, \"next "
+                "network mode\" steps through them all, \"Ethernet / WiFi\" swaps the "
+                "two.",
         .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
         .requires_cap = -1,
     },

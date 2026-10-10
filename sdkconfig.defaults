@@ -168,3 +168,6 @@ CONFIG_FATFS_USE_LABEL=y
 # Accept a chain whose top certificate is cross-signed by a root the bundle has
 # not got (e.g. GTS Root R4 signed by GlobalSign Root CA behind Cloudflare).
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
+
+# Task list with stacks for GET /api/v1/system/memory.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
