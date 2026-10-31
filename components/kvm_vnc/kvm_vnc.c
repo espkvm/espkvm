@@ -30,6 +30,7 @@
 #include "capture.h"
 #include "kvm_settings.h"
 #include "usb_hid.h"
+#include "video_frame.h"
 
 static const char *TAG = "vnc";
 
@@ -684,7 +685,7 @@ static void vnc_task(void *arg)
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(listener, &readfds);
-        const struct timeval wait = {.tv_sec = 1, .tv_usec = 0};
+        struct timeval wait = {.tv_sec = 1, .tv_usec = 0};
         const int ready = select(listener + 1, &readfds, NULL, NULL, &wait);
         if (ready <= 0 || !FD_ISSET(listener, &readfds)) continue;
         struct sockaddr_in peer;
