@@ -35,6 +35,7 @@
 #include "kvm_tools.h"
 #include "kvm_audio.h"
 #include "kvm_netlog.h"
+#include "kvm_vnc.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
 #include "kvm_ipv6.h"
@@ -145,6 +146,9 @@ static void on_setting_changed(const char *key, void *user)
     }
     if (strncmp(key, "nc_", 3) == 0 || strcmp(key, "*") == 0) {
         kvm_netlog_apply();
+    }
+    if (strncmp(key, "vnc_", 4) == 0 || strcmp(key, "*") == 0) {
+        kvm_vnc_apply();
     }
     if (strncmp(key, "mqtt_", 5) == 0 || strcmp(key, "*") == 0) {
         kvm_mqtt_apply();
@@ -640,7 +644,6 @@ void app_main(void)
     if (kvm_netlog_init() != ESP_OK) {
         ESP_LOGW(TAG, "netconsole receiver: no memory for its buffer");
     }
-
     /*
      * Before anything reads the network settings: the button shares its pin
      * with the Ethernet interface, so this is the only moment it can be read
@@ -752,6 +755,9 @@ void app_main(void)
 
     /* Before the web server, which reads published frames. */
     video_frame_store_init();
+    if (kvm_vnc_init() != ESP_OK) {
+        ESP_LOGW(TAG, "VNC server worker did not start");
+    }
     ESP_LOGI(TAG, "boot: web server");
     httpd_handle_t httpd = http_server_start();
     if (httpd) {

@@ -101,6 +101,19 @@ be given a URL.
 | `DELETE /api/v1/video/webrtc?id=N` | close WebRTC session N; 204 |
 | `POST /api/v1/video/webrtc/sound?id=N&on=1` | the target's sound in WebRTC session N on (`on=0`: off). The offer has to carry an Opus audio m-line too; nothing is sent until this is on |
 
+### VNC
+
+The optional RFB 3.8 server listens directly on IPv4 TCP (default port 5900)
+and serves one viewer at a time. Enable
+it in Settings &rarr; Video &rarr; VNC server and set a password first. It uses
+VNC Authentication and Tight/JPEG updates, and forwards keyboard and pointer
+events to the target. The password is write-only in the settings API and is
+limited to eight printable ASCII characters by the VNC protocol. The classic
+VNC password exchange and stream are not encrypted; keep the listener on a
+trusted network or reach it through a VPN. HTTPS does not encrypt this TCP
+connection. `vnc_enable` and `vnc_port` are returned by `GET` and accepted by
+`PUT /api/v1/settings`; `vnc_pass` is accepted by `PUT` and never returned.
+
 ### Sound
 
 | | |

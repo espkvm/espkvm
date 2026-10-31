@@ -59,6 +59,7 @@ components/
                   timelapse, .ts muxer, MP4 remux with chapters, keystroke .srt
   kvm_web/        HTTPS server, REST + WebSocket, auth, self-signed TLS, OTA
   kvm_net/        Ethernet + mDNS + WireGuard (kvm_wg) + native Tailscale (kvm_ts)
+  kvm_vnc/        optional authenticated RFB server with Tight/JPEG screen updates
   kvm_board/      pin map (thin: names the Kconfig CONFIG_ values)
   esp_tinyusb/    VENDORED fork of esp_tinyusb (see gotchas)
 third_party/microlink/  git submodule (espkvm/microlink, branch idf6): native
