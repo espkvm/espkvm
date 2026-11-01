@@ -97,6 +97,24 @@ bool kvm_auth_required(void);
  */
 #define KVM_AUTH_TOKEN_CHARS 32
 
+/** VNC Authentication only transmits an eight-character password. */
+#define KVM_AUTH_VNC_TICKET_CHARS 8
+#define KVM_AUTH_VNC_TICKET_TTL_SECONDS 60
+#define KVM_AUTH_VNC_TICKET_SLOTS 8
+
+/** Make one short-lived VNC password; it is returned once and kept in RAM. */
+esp_err_t kvm_auth_vnc_ticket_create(char *out, size_t out_len);
+
+/** Copy tickets still valid so the RFB server can check their challenge response. */
+size_t kvm_auth_vnc_tickets_copy(
+    char out[][KVM_AUTH_VNC_TICKET_CHARS + 1], size_t capacity);
+
+/** Consume a ticket after its VNC challenge response has been verified. */
+bool kvm_auth_vnc_ticket_consume(const char *ticket);
+
+/** Revoke every outstanding VNC ticket. */
+void kvm_auth_vnc_tickets_clear(void);
+
 /** Make one (replacing any before it) and write it to @p out, once. */
 esp_err_t kvm_auth_token_create(char *out, size_t out_len);
 

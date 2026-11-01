@@ -109,6 +109,13 @@ typedef struct {
 static session_t s_sessions[MAX_SESSIONS];
 static SemaphoreHandle_t s_mu;
 
+typedef struct {
+    char value[KVM_AUTH_VNC_TICKET_CHARS + 1];
+    int64_t expires_us;
+} vnc_ticket_t;
+
+static vnc_ticket_t s_vnc_tickets[KVM_AUTH_VNC_TICKET_SLOTS];
+
 static uint8_t s_salt[SALT_LEN];
 static uint8_t s_hash[HASH_LEN];
 static uint32_t s_iterations;
@@ -440,6 +447,114 @@ static bool equal_ct(const uint8_t *a, const uint8_t *b, size_t len)
     return diff == 0;
 }
 
+esp_err_t kvm_auth_vnc_ticket_create(char *out, size_t out_len)
+{
+    if (!out || out_len < KVM_AUTH_VNC_TICKET_CHARS + 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* 64 symbols make each character exactly six random bits without modulo bias. */
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        "0123456789-_";
+    lock();
+    const int64_t now = esp_timer_get_time();
+    int slot = -1;
+    int oldest = 0;
+    for (int i = 0; i < KVM_AUTH_VNC_TICKET_SLOTS; i++) {
+        if (s_vnc_tickets[i].expires_us <= now) {
+            if (slot < 0) slot = i;
+            memset(&s_vnc_tickets[i], 0, sizeof(s_vnc_tickets[i]));
+        } else if (s_vnc_tickets[i].expires_us < s_vnc_tickets[oldest].expires_us) {
+            oldest = i;
+        }
+    }
+    if (slot < 0) slot = oldest;
+
+    uint8_t random[KVM_AUTH_VNC_TICKET_CHARS];
+    char ticket[KVM_AUTH_VNC_TICKET_CHARS + 1];
+    bool unique = false;
+    for (int attempt = 0; attempt < 4 && !unique; attempt++) {
+        esp_fill_random(random, sizeof(random));
+        for (size_t i = 0; i < sizeof(random); i++) {
+            ticket[i] = alphabet[random[i] & 0x3fu];
+        }
+        ticket[KVM_AUTH_VNC_TICKET_CHARS] = '\0';
+        unique = true;
+        for (int i = 0; i < KVM_AUTH_VNC_TICKET_SLOTS; i++) {
+            if (s_vnc_tickets[i].expires_us > now &&
+                memcmp(s_vnc_tickets[i].value, ticket, KVM_AUTH_VNC_TICKET_CHARS) == 0) {
+                unique = false;
+                break;
+            }
+        }
+    }
+    if (!unique) {
+        unlock();
+        memset(random, 0, sizeof(random));
+        memset(ticket, 0, sizeof(ticket));
+        return ESP_FAIL;
+    }
+    memcpy(s_vnc_tickets[slot].value, ticket, sizeof(ticket));
+    s_vnc_tickets[slot].expires_us =
+        now + (int64_t)KVM_AUTH_VNC_TICKET_TTL_SECONDS * 1000000;
+    memcpy(out, ticket, sizeof(ticket));
+    unlock();
+    memset(random, 0, sizeof(random));
+    memset(ticket, 0, sizeof(ticket));
+    return ESP_OK;
+}
+
+size_t kvm_auth_vnc_tickets_copy(
+    char out[][KVM_AUTH_VNC_TICKET_CHARS + 1], size_t capacity)
+{
+    if (!out || !capacity || !kvm_setting_bool("vnc_enable")) {
+        return 0;
+    }
+    const int64_t now = esp_timer_get_time();
+    size_t count = 0;
+    lock();
+    for (int i = 0; i < KVM_AUTH_VNC_TICKET_SLOTS; i++) {
+        if (s_vnc_tickets[i].expires_us <= now) {
+            memset(&s_vnc_tickets[i], 0, sizeof(s_vnc_tickets[i]));
+        } else if (count < capacity) {
+            memcpy(out[count++], s_vnc_tickets[i].value,
+                   sizeof(s_vnc_tickets[i].value));
+        }
+    }
+    unlock();
+    return count;
+}
+
+bool kvm_auth_vnc_ticket_consume(const char *ticket)
+{
+    if (!ticket || strlen(ticket) != KVM_AUTH_VNC_TICKET_CHARS) {
+        return false;
+    }
+    const int64_t now = esp_timer_get_time();
+    bool consumed = false;
+    lock();
+    for (int i = 0; i < KVM_AUTH_VNC_TICKET_SLOTS; i++) {
+        if (s_vnc_tickets[i].expires_us <= now) {
+            memset(&s_vnc_tickets[i], 0, sizeof(s_vnc_tickets[i]));
+        } else if (equal_ct((const uint8_t *)s_vnc_tickets[i].value,
+                            (const uint8_t *)ticket, KVM_AUTH_VNC_TICKET_CHARS)) {
+            memset(&s_vnc_tickets[i], 0, sizeof(s_vnc_tickets[i]));
+            consumed = true;
+            break;
+        }
+    }
+    unlock();
+    return consumed;
+}
+
+void kvm_auth_vnc_tickets_clear(void)
+{
+    lock();
+    memset(s_vnc_tickets, 0, sizeof(s_vnc_tickets));
+    unlock();
+}
+
 static esp_err_t store_password(const char *password)
 {
     uint8_t salt[SALT_LEN];
@@ -571,6 +686,7 @@ static void session_clear_all(void)
 {
     lock();
     memset(s_sessions, 0, sizeof(s_sessions));
+    memset(s_vnc_tickets, 0, sizeof(s_vnc_tickets));
     sessions_save_locked();
     unlock();
 }

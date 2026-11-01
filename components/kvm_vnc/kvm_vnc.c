@@ -237,28 +237,23 @@ typedef enum {
     VNC_AUTH_OK,
 } vnc_auth_result_t;
 
-static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_us)
+static bool vnc_response_matches(const char *password, const uint8_t challenge[16],
+                                 const uint8_t response[16])
 {
-    const char *password = kvm_setting_str("vnc_pass");
-    if (!password || !password[0] || strlen(password) > 8) {
-        return VNC_AUTH_IO_ERROR;
-    }
+    if (!password) return false;
+    const size_t len = strlen(password);
+    if (!len || len > 8) return false;
+
     uint8_t key[8] = {0};
-    for (size_t i = 0; password[i]; i++) {
+    for (size_t i = 0; i < len; i++) {
         const unsigned char ch = (unsigned char)password[i];
         if (ch < 0x20 || ch > 0x7e) {
-            return VNC_AUTH_IO_ERROR;
+            memset(key, 0, sizeof(key));
+            return false;
         }
         key[i] = reverse_bits(ch);
     }
 
-    uint8_t challenge[16], response[16];
-    esp_fill_random(challenge, sizeof(challenge));
-    kvm_auth_attempt_wait();
-    if (!send_all(fd, challenge, sizeof(challenge), generation) ||
-        !recv_exact_until(fd, response, sizeof(response), generation, deadline_us)) {
-        return VNC_AUTH_IO_ERROR;
-    }
     uint8_t expected[16];
     for (unsigned i = 0; i < 2; i++) {
         uint64_t block = 0;
@@ -271,10 +266,44 @@ static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_
         }
     }
     uint8_t diff = 0;
-    for (unsigned i = 0; i < sizeof(response); i++) {
+    for (unsigned i = 0; i < sizeof(expected); i++) {
         diff |= expected[i] ^ response[i];
     }
-    return diff == 0 ? VNC_AUTH_OK : VNC_AUTH_BAD_PASSWORD;
+    memset(key, 0, sizeof(key));
+    memset(expected, 0, sizeof(expected));
+    return diff == 0;
+}
+
+static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_us)
+{
+    const char *password = kvm_setting_str("vnc_pass");
+    if (!password || !password[0] || strlen(password) > 8) {
+        return VNC_AUTH_IO_ERROR;
+    }
+    uint8_t challenge[16], response[16];
+    esp_fill_random(challenge, sizeof(challenge));
+    kvm_auth_attempt_wait();
+    if (!send_all(fd, challenge, sizeof(challenge), generation) ||
+        !recv_exact_until(fd, response, sizeof(response), generation, deadline_us)) {
+        return VNC_AUTH_IO_ERROR;
+    }
+
+    char tickets[KVM_AUTH_VNC_TICKET_SLOTS][KVM_AUTH_VNC_TICKET_CHARS + 1] = {{0}};
+    const size_t count = kvm_auth_vnc_tickets_copy(tickets, KVM_AUTH_VNC_TICKET_SLOTS);
+    bool ticket_authenticated = false;
+    for (size_t i = 0; i < count; i++) {
+        if (vnc_response_matches(tickets[i], challenge, response)) {
+            ticket_authenticated = kvm_auth_vnc_ticket_consume(tickets[i]);
+            break;
+        }
+    }
+    memset(tickets, 0, sizeof(tickets));
+    const bool password_authenticated = !ticket_authenticated &&
+                                        vnc_response_matches(password, challenge, response);
+    memset(challenge, 0, sizeof(challenge));
+    memset(response, 0, sizeof(response));
+    return ticket_authenticated || password_authenticated ? VNC_AUTH_OK
+                                                           : VNC_AUTH_BAD_PASSWORD;
 }
 
 static bool rfb_handshake(int fd, uint32_t generation, int64_t deadline_us,
@@ -810,5 +839,6 @@ esp_err_t kvm_vnc_init(void)
 
 void kvm_vnc_apply(void)
 {
+    kvm_auth_vnc_tickets_clear();
     s_generation++;
 }

@@ -774,6 +774,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/tls", .method = HTTP_GET, .handler = api_tls_get},
         {.uri = "/api/v1/auth/token", .method = HTTP_POST, .handler = api_token_post},
         {.uri = "/api/v1/auth/token", .method = HTTP_DELETE, .handler = api_token_delete},
+        {.uri = "/api/v1/vnc/session", .method = HTTP_POST, .handler = api_vnc_session_post},
         {.uri = "/api/v1/tls/cert", .method = HTTP_PUT, .handler = api_tls_cert_put},
         {.uri = "/api/v1/tls/cert", .method = HTTP_DELETE, .handler = api_tls_cert_delete},
         {.uri = "/api/v1/tls/acme", .method = HTTP_POST, .handler = api_tls_acme_post},

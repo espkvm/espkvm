@@ -45,6 +45,7 @@ esp_err_t api_wifi_coproc_update_post(httpd_req_t *req);
 esp_err_t api_system_usbprobe_get(httpd_req_t *req);
 esp_err_t api_system_log_get(httpd_req_t *req);
 esp_err_t api_video_timing_get(httpd_req_t *req);
+esp_err_t api_vnc_session_post(httpd_req_t *req);
 esp_err_t api_system_coredump_get(httpd_req_t *req);
 esp_err_t api_system_coredump_delete(httpd_req_t *req);
 esp_err_t api_system_restart_post(httpd_req_t *req);

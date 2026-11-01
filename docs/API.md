@@ -114,6 +114,24 @@ trusted network or reach it through a VPN. HTTPS does not encrypt this TCP
 connection. `vnc_enable` and `vnc_port` are returned by `GET` and accepted by
 `PUT /api/v1/settings`; `vnc_pass` is accepted by `PUT` and never returned.
 
+`POST /api/v1/vnc/session` issues a one-use ticket for an enabled VNC server.
+Send an empty JSON object with the authenticated session cookie:
+
+```sh
+curl -sk -b jar -H 'Content-Type: application/json' -d '{}' \
+  https://espkvm.local/api/v1/vnc/session
+```
+
+The response contains `ticket`, `port`, `expiresIn` (60 seconds), and `uses`
+(1). Connect a normal VNC viewer to the device and returned port, and enter
+the ticket as its VNC password. The ticket is consumed after a successful
+handshake; the configured VNC password continues to work as well. Issuing a
+ticket requires the VNC password to be configured, and changing VNC settings
+revokes outstanding tickets. The eight-character limit is imposed by classic
+VNC Authentication, so tickets have 48 random bits and are intentionally
+short-lived. The VNC exchange is not encrypted, including when the ticket is
+used; use a trusted network or VPN.
+
 ### Sound
 
 | | |

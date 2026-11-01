@@ -297,6 +297,45 @@ esp_err_t api_token_delete(httpd_req_t *req)
     return send_json_owned(req, strdup("{\"status\":\"revoked\"}"));
 }
 
+esp_err_t api_vnc_session_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (!kvm_setting_bool("vnc_enable")) {
+        return send_json_error(req, "409 Conflict", "the VNC server is disabled");
+    }
+
+    const char *password = kvm_setting_str("vnc_pass");
+    const size_t pass_len = password ? strlen(password) : 0;
+    bool password_ready = pass_len > 0 && pass_len <= 8;
+    for (size_t i = 0; password_ready && i < pass_len; i++) {
+        password_ready = (unsigned char)password[i] >= 0x20 &&
+                         (unsigned char)password[i] <= 0x7e;
+    }
+    if (!password_ready) {
+        return send_json_error(req, "409 Conflict",
+                               "set a 1-8 character printable ASCII VNC password first");
+    }
+
+    char ticket[KVM_AUTH_VNC_TICKET_CHARS + 1];
+    const esp_err_t err = kvm_auth_vnc_ticket_create(ticket, sizeof(ticket));
+    if (err != ESP_OK) {
+        return send_json_error(req, "500 Internal Server Error", "could not create VNC ticket");
+    }
+    char body[128];
+    snprintf(body, sizeof(body),
+             "{\"ticket\":\"%s\",\"port\":%d,\"expiresIn\":%d,\"uses\":1}",
+             ticket, (int)kvm_setting_int("vnc_port"), KVM_AUTH_VNC_TICKET_TTL_SECONDS);
+    memset(ticket, 0, sizeof(ticket));
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    ESP_LOGI(TAG, "short-lived VNC ticket issued");
+    const esp_err_t send_err = httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+    memset(body, 0, sizeof(body));
+    return send_err;
+}
+
 esp_err_t api_settings_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
