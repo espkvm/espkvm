@@ -160,6 +160,14 @@ esp_err_t capture_thumbnail(uint16_t *dst, int max_w, int max_h, bool swap, int 
                             int *out_h, uint32_t timeout_ms);
 
 /**
+ * Open a persistent JPEG path for one VNC viewer. The returned bytes remain
+ * valid until the next call; the caller must send them before asking again.
+ */
+esp_err_t capture_vnc_snapshot_begin(void);
+esp_err_t capture_vnc_snapshot_next(const uint8_t **jpeg, size_t *jpeg_len, uint32_t timeout_ms);
+void capture_vnc_snapshot_end(void);
+
+/**
  * The I2C master bus the capture bridge lives on (I2C_NUM_0, the board's
  * TC358743 SDA/SCL). Shared so an optional status OLED wired to the same two
  * lines can be probed and driven without any dedicated pins. NULL before the

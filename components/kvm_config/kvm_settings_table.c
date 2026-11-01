@@ -274,6 +274,12 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "", .max_len = 8, .requires_cap = -1, .flags = KVM_SF_SECRET,
     },
     {
+        .key = "vnc_hotspot", .section = "video", .group = "VNC server", .type = KVM_VT_BOOL,
+        .title = "Allow VNC on hotspot",
+        .help = "Allow VNC clients to connect through the device's own WiFi hotspot. Off by default.",
+        .def = 0, .requires_cap = -1,
+    },
+    {
         .key = "h264_guard", .section = "video", .group = "Picture", .type = KVM_VT_BOOL,
         .title = "Rebuild a stuck H.264 encoder",
         .help = "The encoder's rate controller can settle at its coarsest setting and "

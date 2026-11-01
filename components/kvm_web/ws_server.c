@@ -656,7 +656,7 @@ void http_sess_close_cb(httpd_handle_t hd, int sockfd)
     /* A dropped control session leaves whatever was held down still pressed on
      * the target, and there is no longer anyone able to release it. */
     if (was_control_session) {
-        usb_hid_release_all();
+        usb_hid_release_console();
     }
     video_remove_client(sockfd);
     serial_api_drop(sockfd);
@@ -754,7 +754,7 @@ esp_err_t ws_input_handler(httpd_req_t *req)
      * it here; the new holder re-asserts its own state on the next move. */
     if (demoted >= 0) {
         ws_send_control(demoted, CTRL_HELD_OTHER);
-        usb_hid_release_all();
+        usb_hid_release_console();
         s_ws_buttons = 0;
     }
 
@@ -813,7 +813,7 @@ esp_err_t ws_input_handler(httpd_req_t *req)
         }
         break;
     case WS_C2D_RELEASE_ALL:
-        usb_hid_release_all();
+        usb_hid_release_console();
         s_ws_buttons = 0;
         break;
     case WS_C2D_PING:

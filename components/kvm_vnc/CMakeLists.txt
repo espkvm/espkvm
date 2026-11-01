@@ -4,6 +4,8 @@ idf_component_register(
     PRIV_REQUIRES
         lwip
         kvm_config
+        kvm_net
+        kvm_web
         kvm_hid
         video_pipeline
         esp_timer

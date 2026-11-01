@@ -801,6 +801,20 @@ bool kvm_wifi_setup_ap_active(void)
     return s_setup_ap;
 }
 
+bool kvm_wifi_is_ap_address(uint32_t address_network_order)
+{
+    esp_netif_t *ap = s_ap_netif;
+    if (!ap && s_mode == KVM_NET_WIFI_AP) {
+        ap = s_netif;
+    }
+    if (!ap) {
+        return false;
+    }
+    esp_netif_ip_info_t info = {0};
+    return esp_netif_get_ip_info(ap, &info) == ESP_OK &&
+           info.ip.addr == address_network_order;
+}
+
 void kvm_wifi_status(kvm_wifi_status_t *out)
 {
     if (!out) {
@@ -997,6 +1011,12 @@ esp_err_t kvm_wifi_setup_ap_start(void)
 
 bool kvm_wifi_setup_ap_active(void)
 {
+    return false;
+}
+
+bool kvm_wifi_is_ap_address(uint32_t address_network_order)
+{
+    (void)address_network_order;
     return false;
 }
 

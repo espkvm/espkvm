@@ -504,10 +504,14 @@ static size_t build_config_descriptor(uint8_t *buf, bool full_speed, bool kbd_on
 
 typedef enum {
     Q_MOUSE_ABS,
+    Q_VNC_MOUSE_ABS,
     Q_MOUSE_REL,
     Q_KEY,
+    Q_VNC_KEY,
     Q_CONSUMER,
     Q_PAD,
+    Q_RELEASE_CONSOLE,
+    Q_VNC_RELEASE,
     Q_RELEASE_ALL,
 } q_type_t;
 
@@ -542,6 +546,12 @@ static TaskHandle_t s_hid_task;
  * target's cursor somewhere it never was. */
 static uint16_t s_last_abs_x;
 static uint16_t s_last_abs_y;
+/* Owned by the HID worker; source reports are folded there in queue order. */
+static uint8_t s_console_buttons, s_vnc_buttons;
+static struct {
+    uint8_t modifier;
+    uint8_t keycode[HID_KBD_KEYS];
+} s_console_keys, s_vnc_keys;
 static volatile uint8_t s_leds;
 /* Old BIOS mode: the keyboard is the only interface there is. */
 static bool s_kbd_only;
@@ -1391,6 +1401,9 @@ static void send_pad(const pad_report_t *r)
 
 static void send_release_all(void)
 {
+    memset(&s_console_keys, 0, sizeof(s_console_keys));
+    memset(&s_vnc_keys, 0, sizeof(s_vnc_keys));
+    s_console_buttons = s_vnc_buttons = 0;
     const uint8_t none[HID_KBD_KEYS] = {0};
     send_keyboard(0, none);
     send_pad(&k_pad_idle);
@@ -1405,6 +1418,57 @@ static void send_release_all(void)
      */
     const abs_mouse_report_t idle = {
         .buttons = 0,
+        .x = s_last_abs_x,
+        .y = s_last_abs_y,
+        .wheel = 0,
+        .pan = 0,
+    };
+    send_abs(&idle);
+}
+
+static void send_combined_keyboard(void)
+{
+    uint8_t modifier = s_console_keys.modifier | s_vnc_keys.modifier;
+    uint8_t keys[HID_KBD_KEYS] = {0};
+    unsigned n = 0;
+    const uint8_t *sources[] = {s_console_keys.keycode, s_vnc_keys.keycode};
+    for (size_t source = 0; source < sizeof(sources) / sizeof(sources[0]); source++) {
+        for (unsigned i = 0; i < HID_KBD_KEYS; i++) {
+            const uint8_t key = sources[source][i];
+            if (!key) continue;
+            bool duplicate = false;
+            for (unsigned j = 0; j < n; j++) duplicate |= keys[j] == key;
+            if (!duplicate && n < HID_KBD_KEYS) keys[n++] = key;
+        }
+    }
+    send_keyboard(modifier, keys);
+}
+
+static void send_console_release(void)
+{
+    memset(&s_console_keys, 0, sizeof(s_console_keys));
+    s_console_buttons = 0;
+    send_combined_keyboard();
+    send_pad(&k_pad_idle);
+    send_consumer(0);
+    send_rel(0, 0, 0, 0, 0);
+    const abs_mouse_report_t idle = {
+        .buttons = s_vnc_buttons,
+        .x = s_last_abs_x,
+        .y = s_last_abs_y,
+        .wheel = 0,
+        .pan = 0,
+    };
+    send_abs(&idle);
+}
+
+static void send_vnc_release(void)
+{
+    memset(&s_vnc_keys, 0, sizeof(s_vnc_keys));
+    s_vnc_buttons = 0;
+    send_combined_keyboard();
+    const abs_mouse_report_t idle = {
+        .buttons = s_console_buttons,
         .x = s_last_abs_x,
         .y = s_last_abs_y,
         .wheel = 0,
@@ -1436,10 +1500,13 @@ static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
      * safe to drop because only the latest position matters; a change in the
      * buttons is not, so it forces the pending report out first.
      */
-    const uint8_t acc_buttons =
-        acc->type == Q_MOUSE_ABS ? acc->u.abs.buttons : acc->u.rel.buttons;
-    const uint8_t add_buttons =
-        add->type == Q_MOUSE_ABS ? add->u.abs.buttons : add->u.rel.buttons;
+    const bool acc_abs = acc->type == Q_MOUSE_ABS || acc->type == Q_VNC_MOUSE_ABS;
+    const bool add_abs = add->type == Q_MOUSE_ABS || add->type == Q_VNC_MOUSE_ABS;
+    if (acc_abs != add_abs) {
+        return false;
+    }
+    const uint8_t acc_buttons = acc_abs ? acc->u.abs.buttons : acc->u.rel.buttons;
+    const uint8_t add_buttons = add_abs ? add->u.abs.buttons : add->u.rel.buttons;
     if (acc_buttons != add_buttons) {
         return false;
     }
@@ -1451,7 +1518,7 @@ static bool merge_mouse(q_msg_t *acc, const q_msg_t *add)
     if (acc_buttons != 0) {
         return false;
     }
-    if (acc->type == Q_MOUSE_ABS) {
+    if (acc_abs) {
         /* Only the newest position matters - intermediate ones are not motion
          * the target needs to see. Scroll clicks still accumulate. */
         const int wheel = (int)acc->u.abs.wheel + (int)add->u.abs.wheel;
@@ -1549,19 +1616,39 @@ static void dispatch(const q_msg_t *m)
      * Releasing the keys is the exception. It is sent when a session ends, not
      * by anybody's hand, and waking a machine to tell it that nothing is held
      * down would be the device deciding on its own that sleep was over. */
-    if (m->type != Q_RELEASE_ALL) {
+    if (m->type != Q_RELEASE_ALL && m->type != Q_RELEASE_CONSOLE && m->type != Q_VNC_RELEASE) {
         wake_target_if_asleep();
     }
 
     switch (m->type) {
     case Q_MOUSE_ABS:
-        send_abs(&m->u.abs);
+        s_console_buttons = m->u.abs.buttons;
+        {
+            abs_mouse_report_t report = m->u.abs;
+            report.buttons = s_console_buttons | s_vnc_buttons;
+            send_abs(&report);
+        }
+        break;
+    case Q_VNC_MOUSE_ABS:
+        s_vnc_buttons = m->u.abs.buttons;
+        {
+            abs_mouse_report_t report = m->u.abs;
+            report.buttons = s_console_buttons | s_vnc_buttons;
+            send_abs(&report);
+        }
         break;
     case Q_MOUSE_REL:
         send_rel(m->u.rel.buttons, m->u.rel.dx, m->u.rel.dy, m->u.rel.wheel, m->u.rel.pan);
         break;
     case Q_KEY:
-        send_keyboard(m->u.key.modifier, m->u.key.keycode);
+        s_console_keys.modifier = m->u.key.modifier;
+        memcpy(s_console_keys.keycode, m->u.key.keycode, sizeof(s_console_keys.keycode));
+        send_combined_keyboard();
+        break;
+    case Q_VNC_KEY:
+        s_vnc_keys.modifier = m->u.key.modifier;
+        memcpy(s_vnc_keys.keycode, m->u.key.keycode, sizeof(s_vnc_keys.keycode));
+        send_combined_keyboard();
         break;
     case Q_CONSUMER:
         send_consumer(m->u.consumer);
@@ -1577,6 +1664,12 @@ static void dispatch(const q_msg_t *m)
         break;
     case Q_RELEASE_ALL:
         send_release_all();
+        break;
+    case Q_RELEASE_CONSOLE:
+        send_console_release();
+        break;
+    case Q_VNC_RELEASE:
+        send_vnc_release();
         break;
     }
 }
@@ -1605,7 +1698,7 @@ static void hid_worker(void *arg)
         if (!tud_mounted()) {
             continue;
         }
-        if (msg.type != Q_MOUSE_ABS && msg.type != Q_MOUSE_REL) {
+        if (msg.type != Q_MOUSE_ABS && msg.type != Q_VNC_MOUSE_ABS && msg.type != Q_MOUSE_REL) {
             dispatch(&msg);
             continue;
         }
@@ -1720,6 +1813,18 @@ void usb_hid_mouse_abs(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel, in
     enqueue(&m);
 }
 
+void usb_hid_vnc_mouse_abs(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel, int8_t pan)
+{
+    if (x > USB_HID_ABS_MAX) x = USB_HID_ABS_MAX;
+    if (y > USB_HID_ABS_MAX) y = USB_HID_ABS_MAX;
+    observe(&(usb_hid_obs_t){.type = USB_HID_OBS_MOUSE_ABS, .buttons = buttons, .x = x, .y = y});
+    const q_msg_t m = {
+        .type = Q_VNC_MOUSE_ABS,
+        .u.abs = {.buttons = buttons, .x = x, .y = y, .wheel = wheel, .pan = pan},
+    };
+    enqueue(&m);
+}
+
 void usb_hid_mouse_rel(uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, int8_t pan)
 {
     observe(&(usb_hid_obs_t){.type = USB_HID_OBS_MOUSE_REL, .buttons = buttons});
@@ -1752,6 +1857,28 @@ void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[HID_KBD_KEYS])
     m.u.key.modifier = modifier;
     memcpy(m.u.key.keycode, keycode, sizeof(m.u.key.keycode));
     enqueue(&m);
+}
+
+void usb_hid_vnc_keyboard(uint8_t modifier, const uint8_t keycode[HID_KBD_KEYS])
+{
+    if (!keycode) return;
+    usb_hid_obs_t obs = {.type = USB_HID_OBS_KEYBOARD, .modifier = modifier};
+    memcpy(obs.keys, keycode, sizeof(obs.keys));
+    observe(&obs);
+    q_msg_t m = {.type = Q_VNC_KEY};
+    m.u.key.modifier = modifier;
+    memcpy(m.u.key.keycode, keycode, sizeof(m.u.key.keycode));
+    enqueue(&m);
+}
+
+void usb_hid_vnc_release(void)
+{
+    if (!s_hid_q) return;
+    const q_msg_t m = {.type = Q_VNC_RELEASE};
+    if (xQueueSend(s_hid_q, &m, 0) != pdTRUE) {
+        xQueueReset(s_hid_q);
+        (void)xQueueSend(s_hid_q, &m, 0);
+    }
 }
 
 void usb_hid_consumer(uint16_t usage)
@@ -1859,6 +1986,16 @@ void usb_hid_release_all(void)
          * exists to prevent, e.g. on a control-session drop) is far worse than
          * losing queued motion. Clear the backlog and enqueue the release.
          */
+        xQueueReset(s_hid_q);
+        (void)xQueueSend(s_hid_q, &m, 0);
+    }
+}
+
+void usb_hid_release_console(void)
+{
+    if (!s_hid_q) return;
+    const q_msg_t m = {.type = Q_RELEASE_CONSOLE};
+    if (xQueueSend(s_hid_q, &m, 0) != pdTRUE) {
         xQueueReset(s_hid_q);
         (void)xQueueSend(s_hid_q, &m, 0);
     }

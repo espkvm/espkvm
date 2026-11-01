@@ -34,6 +34,17 @@ static uint8_t *s_jpeg; /* the answer, owned by the caller once taken */
 static size_t s_jpeg_len;
 static esp_err_t s_err;
 
+/* One VNC viewer keeps these allocations until it disconnects. The capture
+ * task is the only user of the encoder; its output stays untouched while the
+ * network task sends it because another encode is requested only afterwards. */
+static SemaphoreHandle_t s_stream_mu;
+static SemaphoreHandle_t s_stream_done;
+static jpeg_encoder_handle_t s_stream_encoder;
+static uint8_t *s_stream_buf;
+static size_t s_stream_cap, s_stream_len;
+static bool s_stream_active, s_stream_wanted, s_stream_ready;
+static esp_err_t s_stream_err;
+
 static esp_err_t encode(capture_ctx_t *c, const void *src, uint8_t **out, size_t *out_len)
 {
     jpeg_encode_engine_cfg_t ecfg = {.intr_priority = 0, .timeout_ms = 500};
@@ -94,6 +105,79 @@ static esp_err_t encode(capture_ctx_t *c, const void *src, uint8_t **out, size_t
     return err;
 }
 
+static void stream_sync_init(void)
+{
+    portENTER_CRITICAL(&s_mu);
+    if (!s_stream_mu) {
+        s_stream_mu = xSemaphoreCreateMutex();
+        s_stream_done = xSemaphoreCreateBinary();
+    }
+    portEXIT_CRITICAL(&s_mu);
+}
+
+static esp_err_t stream_encoder_open(capture_ctx_t *c)
+{
+    (void)c;
+    jpeg_encode_engine_cfg_t ecfg = {.intr_priority = 0, .timeout_ms = 500};
+    return jpeg_new_encoder_engine(&ecfg, &s_stream_encoder);
+}
+
+static esp_err_t stream_buffer_open(capture_ctx_t *c)
+{
+    const size_t worst = (size_t)c->hres * (size_t)c->vres + 512u * 1024u;
+    const size_t tries[] = {worst, 1024u * 1024u, 640u * 1024u, 384u * 1024u};
+    jpeg_encode_memory_alloc_cfg_t mcfg = {.buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER};
+    for (size_t i = 0; i < sizeof(tries) / sizeof(tries[0]) && !s_stream_buf; i++) {
+        if ((i == 0 || tries[i] < worst) &&
+            (tries[i] <= heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) ||
+             i == sizeof(tries) / sizeof(tries[0]) - 1)) {
+            s_stream_buf = jpeg_alloc_encoder_mem(tries[i], &mcfg, &s_stream_cap);
+        }
+    }
+    if (!s_stream_buf) {
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t stream_encode(capture_ctx_t *c, const void *src)
+{
+    esp_err_t err = s_stream_encoder ? ESP_OK : stream_encoder_open(c);
+    if (err != ESP_OK) {
+        return err;
+    }
+    const size_t worst = (size_t)c->hres * (size_t)c->vres + 512u * 1024u;
+    if (!s_stream_buf || s_stream_cap < worst) {
+        free(s_stream_buf);
+        s_stream_buf = NULL;
+        s_stream_cap = 0;
+        err = stream_buffer_open(c);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    const jpeg_encode_cfg_t cfg = {
+        .width = c->hres,
+        .height = c->vres,
+        .src_type = (jpeg_enc_input_format_t)capture_pixfmt()->jpeg_src,
+        .sub_sample = (jpeg_down_sampling_type_t)capture_pixfmt()->jpeg_subsample,
+        .image_quality = SNAPSHOT_QUALITY,
+    };
+    uint32_t len = 0;
+    err = jpeg_encoder_process(s_stream_encoder, &cfg, src, (uint32_t)c->frame_bytes,
+                               s_stream_buf, (uint32_t)s_stream_cap, &len);
+    if (err != ESP_OK && s_stream_cap < worst) {
+        jpeg_encode_cfg_t low = cfg;
+        low.image_quality = SNAPSHOT_QUALITY_LOW;
+        err = jpeg_encoder_process(s_stream_encoder, &low, src, (uint32_t)c->frame_bytes,
+                                   s_stream_buf, (uint32_t)s_stream_cap, &len);
+    }
+    if (err == ESP_OK) {
+        s_stream_len = len;
+    }
+    return err;
+}
+
 bool capture_snapshot_wanted(void)
 {
     portENTER_CRITICAL(&s_mu);
@@ -102,8 +186,117 @@ bool capture_snapshot_wanted(void)
     return wanted;
 }
 
+bool capture_vnc_snapshot_wanted(void)
+{
+    portENTER_CRITICAL(&s_mu);
+    const bool wanted = s_stream_active && s_stream_wanted;
+    portEXIT_CRITICAL(&s_mu);
+    return wanted;
+}
+
+esp_err_t capture_vnc_snapshot_begin(void)
+{
+    stream_sync_init();
+    if (!s_stream_mu || !s_stream_done) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (xSemaphoreTake(s_stream_mu, 0) != pdTRUE) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    portENTER_CRITICAL(&s_mu);
+    const bool already_active = s_stream_active;
+    if (!already_active) {
+        s_stream_active = true;
+        s_stream_wanted = false;
+        s_stream_ready = false;
+    }
+    portEXIT_CRITICAL(&s_mu);
+    xSemaphoreGive(s_stream_mu);
+    return already_active ? ESP_ERR_INVALID_STATE : ESP_OK;
+}
+
+esp_err_t capture_vnc_snapshot_next(const uint8_t **jpeg, size_t *jpeg_len, uint32_t timeout_ms)
+{
+    if (!jpeg || !jpeg_len || !s_stream_mu || !s_stream_done) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *jpeg = NULL;
+    *jpeg_len = 0;
+    (void)xSemaphoreTake(s_stream_done, 0);
+    portENTER_CRITICAL(&s_mu);
+    if (!s_stream_active) {
+        portEXIT_CRITICAL(&s_mu);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_stream_ready = false;
+    s_stream_wanted = true;
+    portEXIT_CRITICAL(&s_mu);
+    if (xSemaphoreTake(s_stream_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        portENTER_CRITICAL(&s_mu);
+        s_stream_wanted = false;
+        portEXIT_CRITICAL(&s_mu);
+        return ESP_ERR_TIMEOUT;
+    }
+    portENTER_CRITICAL(&s_mu);
+    const esp_err_t err = s_stream_ready ? s_stream_err : ESP_ERR_TIMEOUT;
+    if (err == ESP_OK) {
+        *jpeg = s_stream_buf;
+        *jpeg_len = s_stream_len;
+    }
+    s_stream_ready = false;
+    portEXIT_CRITICAL(&s_mu);
+    return err;
+}
+
+void capture_vnc_snapshot_end(void)
+{
+    if (!s_stream_mu || xSemaphoreTake(s_stream_mu, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+    portENTER_CRITICAL(&s_mu);
+    s_stream_active = false;
+    s_stream_wanted = false;
+    s_stream_ready = false;
+    portEXIT_CRITICAL(&s_mu);
+    if (s_stream_encoder) {
+        jpeg_del_encoder_engine(s_stream_encoder);
+        s_stream_encoder = NULL;
+    }
+    free(s_stream_buf);
+    s_stream_buf = NULL;
+    s_stream_cap = s_stream_len = 0;
+    xSemaphoreGive(s_stream_mu);
+}
+
 void capture_snapshot_tick(capture_ctx_t *c, const void *frame)
 {
+    portENTER_CRITICAL(&s_mu);
+    const bool stream_wanted = s_stream_active && s_stream_wanted;
+    portEXIT_CRITICAL(&s_mu);
+    if (stream_wanted && s_stream_mu && xSemaphoreTake(s_stream_mu, portMAX_DELAY) == pdTRUE) {
+        portENTER_CRITICAL(&s_mu);
+        const bool still_wanted = s_stream_active && s_stream_wanted;
+        portEXIT_CRITICAL(&s_mu);
+        if (still_wanted) {
+            const esp_err_t stream_err = stream_encode(c, frame);
+            portENTER_CRITICAL(&s_mu);
+            const bool notify = s_stream_active && s_stream_wanted;
+            if (notify) {
+                s_stream_wanted = false;
+                s_stream_ready = true;
+                s_stream_err = stream_err;
+            }
+            portEXIT_CRITICAL(&s_mu);
+            if (notify) {
+                xSemaphoreGive(s_stream_done);
+            }
+            if (stream_err != ESP_OK) {
+                ESP_LOGW(CAPTURE_LOG_TAG, "VNC JPEG: %s", esp_err_to_name(stream_err));
+            }
+        }
+        xSemaphoreGive(s_stream_mu);
+        return;
+    }
     portENTER_CRITICAL(&s_mu);
     const bool wanted = s_wanted;
     portEXIT_CRITICAL(&s_mu);

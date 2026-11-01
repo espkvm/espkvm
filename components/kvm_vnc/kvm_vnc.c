@@ -28,9 +28,11 @@
 #include "lwip/sockets.h"
 
 #include "capture.h"
+#include "kvm_auth.h"
 #include "kvm_settings.h"
 #include "usb_hid.h"
 #include "video_frame.h"
+#include "wifi.h"
 
 static const char *TAG = "vnc";
 
@@ -39,6 +41,7 @@ static const char *TAG = "vnc";
 #define VNC_CLIENT_TEXT_MAX 4096
 #define VNC_READ_TIMEOUT_MS 1000
 #define VNC_SEND_TIMEOUT_MS 3000
+#define VNC_HANDSHAKE_TIMEOUT_MS 10000
 
 static volatile uint32_t s_generation;
 static TaskHandle_t s_task;
@@ -68,10 +71,14 @@ static void put_be32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)v;
 }
 
-static bool recv_exact(int fd, void *data, size_t len, uint32_t generation)
+static bool recv_exact_until(int fd, void *data, size_t len, uint32_t generation,
+                             int64_t deadline_us)
 {
     uint8_t *p = data;
     while (len) {
+        if (deadline_us && esp_timer_get_time() >= deadline_us) {
+            return false;
+        }
         const int n = recv(fd, p, len, 0);
         if (n > 0) {
             p += n;
@@ -86,6 +93,11 @@ static bool recv_exact(int fd, void *data, size_t len, uint32_t generation)
         }
     }
     return generation == s_generation;
+}
+
+static bool recv_exact(int fd, void *data, size_t len, uint32_t generation)
+{
+    return recv_exact_until(fd, data, len, generation, 0);
 }
 
 static bool send_all(int fd, const void *data, size_t len, uint32_t generation)
@@ -219,26 +231,33 @@ static uint8_t reverse_bits(uint8_t v)
     return (uint8_t)((v << 4) | (v >> 4));
 }
 
-static bool vnc_auth(int fd, uint32_t generation)
+typedef enum {
+    VNC_AUTH_IO_ERROR,
+    VNC_AUTH_BAD_PASSWORD,
+    VNC_AUTH_OK,
+} vnc_auth_result_t;
+
+static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_us)
 {
     const char *password = kvm_setting_str("vnc_pass");
     if (!password || !password[0] || strlen(password) > 8) {
-        return false;
+        return VNC_AUTH_IO_ERROR;
     }
     uint8_t key[8] = {0};
     for (size_t i = 0; password[i]; i++) {
         const unsigned char ch = (unsigned char)password[i];
         if (ch < 0x20 || ch > 0x7e) {
-            return false;
+            return VNC_AUTH_IO_ERROR;
         }
         key[i] = reverse_bits(ch);
     }
 
     uint8_t challenge[16], response[16];
     esp_fill_random(challenge, sizeof(challenge));
+    kvm_auth_attempt_wait();
     if (!send_all(fd, challenge, sizeof(challenge), generation) ||
-        !recv_exact(fd, response, sizeof(response), generation)) {
-        return false;
+        !recv_exact_until(fd, response, sizeof(response), generation, deadline_us)) {
+        return VNC_AUTH_IO_ERROR;
     }
     uint8_t expected[16];
     for (unsigned i = 0; i < 2; i++) {
@@ -255,36 +274,42 @@ static bool vnc_auth(int fd, uint32_t generation)
     for (unsigned i = 0; i < sizeof(response); i++) {
         diff |= expected[i] ^ response[i];
     }
-    return diff == 0;
+    return diff == 0 ? VNC_AUTH_OK : VNC_AUTH_BAD_PASSWORD;
 }
 
-static bool rfb_handshake(int fd, uint32_t generation, uint16_t *width, uint16_t *height)
+static bool rfb_handshake(int fd, uint32_t generation, int64_t deadline_us,
+                          uint16_t *width, uint16_t *height)
 {
     static const uint8_t version[] = "RFB 003.008\n";
     uint8_t client_version[12];
     if (!send_all(fd, version, 12, generation) ||
-        !recv_exact(fd, client_version, sizeof(client_version), generation)) {
+        !recv_exact_until(fd, client_version, sizeof(client_version), generation, deadline_us)) {
         return false;
     }
     (void)client_version;
     static const uint8_t security_types[] = {1, 2}; /* one type: VNC Authentication */
     uint8_t selected;
     if (!send_all(fd, security_types, sizeof(security_types), generation) ||
-        !recv_exact(fd, &selected, 1, generation) || selected != 2) {
+        !recv_exact_until(fd, &selected, 1, generation, deadline_us) || selected != 2) {
         return false;
     }
-    if (!vnc_auth(fd, generation)) {
+    const vnc_auth_result_t auth = vnc_auth(fd, generation, deadline_us);
+    if (auth != VNC_AUTH_OK) {
+        if (auth == VNC_AUTH_BAD_PASSWORD) {
+            kvm_auth_attempt_failed();
+        }
         (void)send_u32(fd, 1, generation);
         static const char reason[] = "VNC password is invalid or authentication failed";
         (void)send_u32(fd, sizeof(reason) - 1, generation);
         (void)send_all(fd, reason, sizeof(reason) - 1, generation);
         return false;
     }
+    kvm_auth_attempt_succeeded();
     if (!send_u32(fd, 0, generation)) {
         return false;
     }
     uint8_t shared;
-    if (!recv_exact(fd, &shared, 1, generation)) {
+    if (!recv_exact_until(fd, &shared, 1, generation, deadline_us)) {
         return false;
     }
     (void)shared;
@@ -312,17 +337,63 @@ static bool rfb_handshake(int fd, uint32_t generation, uint16_t *width, uint16_t
            send_all(fd, "ESP-KVM VNC", 12, generation);
 }
 
-static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16_t *height,
-                            bool desktop_size)
+static bool send_empty_update(int fd, uint32_t generation)
 {
-    uint8_t *jpeg = NULL;
+    const uint8_t empty[] = {0, 0, 0, 0};
+    return send_all(fd, empty, sizeof(empty), generation);
+}
+
+static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16_t *height,
+                            bool desktop_size, bool incremental, bool *has_frame,
+                            uint32_t *last_seq, bool *stream_open)
+{
+    if (incremental && *has_frame &&
+        !video_frame_wait_new(*last_seq, VNC_READ_TIMEOUT_MS)) {
+        return send_empty_update(fd, generation);
+    }
+
+    const uint8_t *jpeg = NULL;
     size_t jpeg_len = 0;
-    const esp_err_t err = capture_snapshot_jpeg(&jpeg, &jpeg_len, 1800);
-    if (err != ESP_OK || !jpeg || !jpeg_len || jpeg_len > 0x3fffffu) {
-        free(jpeg);
-        /* An empty update leaves the client's outstanding request satisfied. */
-        const uint8_t empty[] = {0, 0, 0, 0};
-        return send_all(fd, empty, sizeof(empty), generation);
+    uint32_t seq = video_frame_seq();
+    video_frame_ref_t ref = {.slot = -1};
+    const bool mjpeg = video_frame_payload() == VIDEO_PAYLOAD_JPEG;
+    bool held = false;
+    if (mjpeg) {
+        if (!video_frame_acquire(&ref)) {
+            const uint32_t seen = video_frame_seq();
+            if (!video_frame_wait_new(seen, 1800) || !video_frame_acquire(&ref)) {
+                return send_empty_update(fd, generation);
+            }
+        }
+        held = true;
+        if (ref.payload != VIDEO_PAYLOAD_JPEG ||
+            (incremental && *has_frame && ref.seq == *last_seq)) {
+            video_frame_release(&ref);
+            return send_empty_update(fd, generation);
+        }
+        jpeg = ref.data;
+        jpeg_len = ref.len;
+        seq = ref.seq;
+        if (*stream_open) {
+            capture_vnc_snapshot_end();
+            *stream_open = false;
+        }
+    } else {
+        if (!*stream_open) {
+            if (capture_vnc_snapshot_begin() != ESP_OK) {
+                return send_empty_update(fd, generation);
+            }
+            *stream_open = true;
+        }
+        const esp_err_t err = capture_vnc_snapshot_next(&jpeg, &jpeg_len, 1800);
+        if (err != ESP_OK || !jpeg || !jpeg_len) {
+            return send_empty_update(fd, generation);
+        }
+        seq = video_frame_seq();
+    }
+    if (!jpeg || !jpeg_len || jpeg_len > 0x3fffffu) {
+        if (held) video_frame_release(&ref);
+        return send_empty_update(fd, generation);
     }
 
     kvm_video_status_t status;
@@ -331,25 +402,30 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
     const uint16_t h = (uint16_t)status.vres;
     const bool resized = w && h && (w != *width || h != *height);
     if (resized) {
-        if (!desktop_size) {
-            free(jpeg);
-            const uint8_t empty[] = {0, 0, 0, 0};
-            return send_all(fd, empty, sizeof(empty), generation);
+        bool ok = false;
+        if (desktop_size) {
+            const uint8_t update[] = {0, 0, 0, 1};
+            uint8_t rect[12] = {0};
+            put_be16(rect + 4, w);
+            put_be16(rect + 6, h);
+            put_be32(rect + 8, (uint32_t)-223); /* DesktopSize pseudo-encoding */
+            ok = send_all(fd, update, sizeof(update), generation) &&
+                 send_all(fd, rect, sizeof(rect), generation);
+            if (ok) {
+                *width = w;
+                *height = h;
+            }
+        } else {
+            ok = send_empty_update(fd, generation);
         }
-        const uint8_t update[] = {0, 0, 0, 1};
-        uint8_t rect[12] = {0};
-        put_be16(rect + 4, w);
-        put_be16(rect + 6, h);
-        put_be32(rect + 8, (uint32_t)-223); /* DesktopSize pseudo-encoding */
-        const bool ok = send_all(fd, update, sizeof(update), generation) &&
-                        send_all(fd, rect, sizeof(rect), generation);
+        if (held) video_frame_release(&ref);
         if (ok) {
-            *width = w;
-            *height = h;
+            *last_seq = seq;
+            *has_frame = true;
         }
-        free(jpeg);
         return ok;
     }
+
     const uint8_t update[] = {0, 0, 0, 1};
     bool ok = send_all(fd, update, sizeof(update), generation);
     if (ok) {
@@ -379,7 +455,11 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
         }
         ok = send_all(fd, compact, n, generation) && send_all(fd, jpeg, jpeg_len, generation);
     }
-    free(jpeg);
+    if (held) video_frame_release(&ref);
+    if (ok) {
+        *last_seq = seq;
+        *has_frame = true;
+    }
     return ok;
 }
 
@@ -464,7 +544,7 @@ static void send_keyboard_state(const client_state_t *state)
         for (unsigned j = 0; j < n; j++) duplicate |= keys[j] == usage;
         if (!duplicate && n < sizeof(keys)) keys[n++] = usage;
     }
-    usb_hid_keyboard(modifier, keys);
+    usb_hid_vnc_keyboard(modifier, keys);
 }
 
 static void client_key(client_state_t *state, bool down, uint32_t keysym)
@@ -498,8 +578,8 @@ static void client_pointer(client_state_t *state, uint8_t mask, uint16_t x, uint
     state->buttons = mask;
     state->x = x;
     state->y = y;
-    usb_hid_mouse_abs(buttons, (uint16_t)((uint32_t)x * 32767u / (w > 1 ? w - 1 : 1)),
-                      (uint16_t)((uint32_t)y * 32767u / (h > 1 ? h - 1 : 1)), wheel, pan);
+    usb_hid_vnc_mouse_abs(buttons, (uint16_t)((uint32_t)x * 32767u / (w > 1 ? w - 1 : 1)),
+                          (uint16_t)((uint32_t)y * 32767u / (h > 1 ? h - 1 : 1)), wheel, pan);
 }
 
 static bool discard_bytes(int fd, uint32_t len, uint32_t generation)
@@ -516,9 +596,14 @@ static bool discard_bytes(int fd, uint32_t len, uint32_t generation)
 static bool client_loop(int fd, uint32_t generation)
 {
     uint16_t width, height;
-    if (!rfb_handshake(fd, generation, &width, &height)) return false;
+    const int64_t handshake_deadline = esp_timer_get_time() +
+                                       (int64_t)VNC_HANDSHAKE_TIMEOUT_MS * 1000;
+    if (!rfb_handshake(fd, generation, handshake_deadline, &width, &height)) return false;
     client_state_t state = {0};
     video_frame_viewer_enter();
+    bool has_frame = false;
+    bool stream_open = false;
+    uint32_t last_seq = video_frame_seq();
     bool alive = true;
     while (alive && generation == s_generation) {
         uint8_t type;
@@ -556,9 +641,9 @@ static bool client_loop(int fd, uint32_t generation)
         case 3: { /* FramebufferUpdateRequest */
             uint8_t request[9];
             if (!recv_exact(fd, request, sizeof(request), generation)) { alive = false; break; }
-            (void)request;
             if (state.tight) {
-                alive = rfb_send_update(fd, generation, &width, &height, state.desktop_size);
+                alive = rfb_send_update(fd, generation, &width, &height, state.desktop_size,
+                                        request[0] != 0, &has_frame, &last_seq, &stream_open);
             } else {
                 const uint8_t empty[] = {0, 0, 0, 0};
                 alive = send_all(fd, empty, sizeof(empty), generation);
@@ -589,10 +674,10 @@ static bool client_loop(int fd, uint32_t generation)
             break;
         }
     }
-    uint8_t released[6] = {0};
-    usb_hid_keyboard(0, released);
-    usb_hid_mouse_abs(0, (uint16_t)((uint32_t)state.x * 32767u / (width > 1 ? width - 1 : 1)),
-                      (uint16_t)((uint32_t)state.y * 32767u / (height > 1 ? height - 1 : 1)), 0, 0);
+    usb_hid_vnc_release();
+    if (stream_open) {
+        capture_vnc_snapshot_end();
+    }
     video_frame_viewer_leave();
     return alive;
 }
@@ -693,6 +778,15 @@ static void vnc_task(void *arg)
         const int client = accept(listener, (struct sockaddr *)&peer, &peer_len);
         if (client < 0) continue;
         set_client_timeouts(client);
+        struct sockaddr_in local = {0};
+        socklen_t local_len = sizeof(local);
+        if (!kvm_setting_bool("vnc_hotspot") &&
+            getsockname(client, (struct sockaddr *)&local, &local_len) == 0 &&
+            kvm_wifi_is_ap_address(local.sin_addr.s_addr)) {
+            ESP_LOGI(TAG, "rejected client from hotspot (enable vnc_hotspot to allow it)");
+            close(client);
+            continue;
+        }
         char ip[16];
         inet_ntoa_r(peer.sin_addr, ip, sizeof(ip));
         ESP_LOGI(TAG, "client connected from %s", ip);

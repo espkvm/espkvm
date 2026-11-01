@@ -6,6 +6,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -57,6 +58,9 @@ esp_err_t kvm_wifi_setup_ap_start(void);
 
 /** Is the open setup hotspot up? The console is served in the clear while it is. */
 bool kvm_wifi_setup_ap_active(void);
+
+/** True when a local socket address belongs to this device's WiFi hotspot. */
+bool kvm_wifi_is_ap_address(uint32_t address_network_order);
 
 
 /** Live WiFi state for the console's network indicator. */

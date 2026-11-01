@@ -25,6 +25,11 @@ extern "C" {
 /** Load the stored credentials. Call once at start-up. */
 esp_err_t kvm_auth_init(void);
 
+/** Shared delay and result accounting for password-based network logins. */
+void kvm_auth_attempt_wait(void);
+void kvm_auth_attempt_failed(void);
+void kvm_auth_attempt_succeeded(void);
+
 /**
  * How the start-up reset window is going, for whatever the board can show it
  * on. Called from the polling loop, so it must return promptly and must not

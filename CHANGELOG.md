@@ -247,6 +247,12 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 - Scrolling with a touchpad often did nothing, and so did a mouse wheel in a browser that reports small steps, like Firefox. Small steps now add up, and every notch of a wheel is at least one click on the target.
 - MJPEG on rev 3.x boards was washed out: black came out dark grey, white a little dim. The HDMI bridge sent black as 16 and white as 235, and a browser reads a JPEG as 0 to 255. It sends the full range now, and H.264 says in its stream which range it uses.
 
+### Fixed
+- VNC reuses its H.264 JPEG encoder and output buffer for a connected viewer,
+  waits for new frames on incremental requests, times out stalled handshakes,
+  shares the web login throttle, and keeps VNC input independent from console
+  input. VNC on the WiFi hotspot is now an opt-in setting.
+
 ## [0.75.0] - 2026-10-30
 
 ### Added

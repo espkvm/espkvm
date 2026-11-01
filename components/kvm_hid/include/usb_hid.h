@@ -142,6 +142,12 @@ uint32_t usb_hid_jiggler_nudges(void);
 
 /** Boot keyboard report: modifier bitmap plus up to six key usages. */
 void usb_hid_keyboard(uint8_t modifier, const uint8_t keycode[6]);
+/** VNC keyboard state, merged with the console and released independently. */
+void usb_hid_vnc_keyboard(uint8_t modifier, const uint8_t keycode[6]);
+/** VNC pointer state, merged with console buttons and released independently. */
+void usb_hid_vnc_mouse_abs(uint8_t buttons, uint16_t x, uint16_t y, int8_t wheel, int8_t pan);
+/** Clear VNC keys and buttons without moving the pointer. */
+void usb_hid_vnc_release(void);
 
 /** Consumer control usage (volume, media, power). 0 releases. */
 void usb_hid_consumer(uint16_t usage);
@@ -176,6 +182,8 @@ void usb_hid_set_observer(void (*cb)(const usb_hid_obs_t *report));
  * cannot be left stuck on the target with no way to clear it.
  */
 void usb_hid_release_all(void);
+/** Release console-owned input while preserving an independent VNC key state. */
+void usb_hid_release_console(void);
 
 /** Is a gamepad part of the USB device (the usb_pad setting, from boot)? */
 bool usb_hid_pad_present(void);

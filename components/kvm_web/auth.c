@@ -154,6 +154,35 @@ static void unlock(void)
     }
 }
 
+/* VNC and any other password login share the web login's lockout: the same
+ * counter and the same time. They run on their own task, so they may wait. */
+void kvm_auth_attempt_wait(void)
+{
+    for (;;) {
+        lock();
+        const int64_t left_us = s_locked_until_us - esp_timer_get_time();
+        unlock();
+        if (left_us <= 0) {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(left_us / 1000 + 1));
+    }
+}
+
+static void note_failure(void);
+
+void kvm_auth_attempt_failed(void)
+{
+    note_failure();
+}
+
+void kvm_auth_attempt_succeeded(void)
+{
+    lock();
+    s_failures = 0;
+    unlock();
+}
+
 /*
  * WebSockets are authenticated once, at the upgrade, and then by socket.
  *
@@ -1606,9 +1635,7 @@ static esp_err_t auth_login_post(httpd_req_t *req)
             return send_json(req, "401 Unauthorized", "{\"error\":\"wrong code\",\"needCode\":true}");
         }
     }
-    lock();
-    s_failures = 0;
-    unlock();
+    kvm_auth_attempt_succeeded();
     /* Signed in, so the time it brought can be trusted as far as a clock goes. */
     kvm_web_clock_from_browser(browser_time);
 

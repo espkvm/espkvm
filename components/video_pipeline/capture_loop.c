@@ -663,7 +663,7 @@ void capture_loop_run(capture_ctx_t *c)
 #endif
 
 #if CAPTURE_YUV_SWAP
-        if (h264_running && capture_snapshot_wanted()) {
+        if (h264_running && (capture_snapshot_wanted() || capture_vnc_snapshot_wanted())) {
             void *ordered = capture_yuv_swap(c, src);
             if (ordered) {
                 capture_snapshot_tick(c, ordered);

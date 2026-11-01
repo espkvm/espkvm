@@ -174,6 +174,7 @@ void capture_thumb_idle(capture_ctx_t *c);
 /* A screenshot asked for while H.264 runs is encoded from this frame. Capture
  * task only; costs nothing unless one is waiting. See capture_snapshot.c. */
 void capture_snapshot_tick(capture_ctx_t *c, const void *frame);
+bool capture_vnc_snapshot_wanted(void);
 
 /** Is a still picture waiting to be taken from the next frame? */
 bool capture_snapshot_wanted(void);
