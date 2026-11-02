@@ -26,10 +26,15 @@
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/x509_crt.h"
 
 #include "capture.h"
 #include "kvm_auth.h"
 #include "kvm_settings.h"
+#include "kvm_tls.h"
 #include "usb_hid.h"
 #include "video_frame.h"
 #include "wifi.h"
@@ -45,6 +50,18 @@ static const char *TAG = "vnc";
 
 static volatile uint32_t s_generation;
 static TaskHandle_t s_task;
+
+typedef struct {
+    mbedtls_ssl_context ssl;
+    mbedtls_ssl_config config;
+    mbedtls_x509_crt cert;
+    mbedtls_pk_context key;
+} vnc_tls_t;
+
+typedef struct {
+    int fd;
+    vnc_tls_t *tls;
+} vnc_conn_t;
 
 static uint16_t be16(const uint8_t *p)
 {
@@ -71,7 +88,30 @@ static void put_be32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)v;
 }
 
-static bool recv_exact_until(int fd, void *data, size_t len, uint32_t generation,
+static int tls_send(void *ctx, const unsigned char *buf, size_t len)
+{
+    const int fd = *(const int *)ctx;
+    const int n = send(fd, buf, len, 0);
+    if (n >= 0) return n;
+    if (errno == EINTR) {
+        return MBEDTLS_ERR_SSL_WANT_WRITE;
+    }
+    return MBEDTLS_ERR_NET_SEND_FAILED;
+}
+
+static int tls_recv(void *ctx, unsigned char *buf, size_t len)
+{
+    const int fd = *(const int *)ctx;
+    const int n = recv(fd, buf, len, 0);
+    if (n > 0) return n;
+    if (n == 0) return MBEDTLS_ERR_SSL_CONN_EOF;
+    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+        return MBEDTLS_ERR_SSL_WANT_READ;
+    }
+    return MBEDTLS_ERR_NET_RECV_FAILED;
+}
+
+static bool recv_exact_until(vnc_conn_t *conn, void *data, size_t len, uint32_t generation,
                              int64_t deadline_us)
 {
     uint8_t *p = data;
@@ -79,51 +119,61 @@ static bool recv_exact_until(int fd, void *data, size_t len, uint32_t generation
         if (deadline_us && esp_timer_get_time() >= deadline_us) {
             return false;
         }
-        const int n = recv(fd, p, len, 0);
+        const int n = conn->tls ? mbedtls_ssl_read(&conn->tls->ssl, p, len)
+                                : recv(conn->fd, p, len, 0);
         if (n > 0) {
             p += n;
             len -= (size_t)n;
             continue;
         }
-        if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
+        if (n == 0 || (conn->tls
+                           ? (n != MBEDTLS_ERR_SSL_WANT_READ && n != MBEDTLS_ERR_SSL_WANT_WRITE)
+                           : (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR))) {
             return false;
         }
         if (generation != s_generation) {
             return false;
         }
+        vTaskDelay(1);
     }
     return generation == s_generation;
 }
 
-static bool recv_exact(int fd, void *data, size_t len, uint32_t generation)
+static bool recv_exact(vnc_conn_t *conn, void *data, size_t len, uint32_t generation)
 {
-    return recv_exact_until(fd, data, len, generation, 0);
+    return recv_exact_until(conn, data, len, generation, 0);
 }
 
-static bool send_all(int fd, const void *data, size_t len, uint32_t generation)
+static bool send_all(vnc_conn_t *conn, const void *data, size_t len, uint32_t generation)
 {
     const uint8_t *p = data;
     while (len) {
-        const int n = send(fd, p, len, 0);
+        const size_t chunk = conn->tls && len > 4096 ? 4096 : len;
+        const int n = conn->tls ? mbedtls_ssl_write(&conn->tls->ssl, p, chunk)
+                                : send(conn->fd, p, len, 0);
         if (n > 0) {
             p += n;
             len -= (size_t)n;
             continue;
         }
-        if (n < 0 && errno == EINTR) {
+        if (conn->tls && (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE)) {
+            if (generation != s_generation) return false;
+            vTaskDelay(1);
             continue;
         }
-        (void)generation;
+        if (!conn->tls && n < 0 && errno == EINTR) {
+            continue;
+        }
         return false;
     }
     return generation == s_generation;
 }
 
-static bool send_u32(int fd, uint32_t value, uint32_t generation)
+static bool send_u32(vnc_conn_t *conn, uint32_t value, uint32_t generation)
 {
     uint8_t b[4];
     put_be32(b, value);
-    return send_all(fd, b, sizeof(b), generation);
+    return send_all(conn, b, sizeof(b), generation);
 }
 
 /* DES tables are the bit positions from FIPS 46-3, numbered from the MSB. */
@@ -231,6 +281,89 @@ static uint8_t reverse_bits(uint8_t v)
     return (uint8_t)((v << 4) | (v >> 4));
 }
 
+static int tls_random(void *ctx, unsigned char *out, size_t len)
+{
+    (void)ctx;
+    esp_fill_random(out, len);
+    return 0;
+}
+
+static void vnc_tls_free(vnc_conn_t *conn)
+{
+    if (!conn->tls) return;
+    mbedtls_ssl_free(&conn->tls->ssl);
+    mbedtls_ssl_config_free(&conn->tls->config);
+    mbedtls_x509_crt_free(&conn->tls->cert);
+    mbedtls_pk_free(&conn->tls->key);
+    free(conn->tls);
+    conn->tls = NULL;
+}
+
+static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadline_us)
+{
+    kvm_tls_identity_t identity;
+    if (kvm_tls_identity_get(&identity, true) != ESP_OK) {
+        ESP_LOGE(TAG, "could not load the device TLS identity for VeNCrypt");
+        return false;
+    }
+
+    vnc_tls_t *tls = calloc(1, sizeof(*tls));
+    if (!tls) {
+        kvm_tls_identity_free(&identity);
+        return false;
+    }
+    mbedtls_ssl_init(&tls->ssl);
+    mbedtls_ssl_config_init(&tls->config);
+    mbedtls_x509_crt_init(&tls->cert);
+    mbedtls_pk_init(&tls->key);
+
+    int rc = mbedtls_x509_crt_parse(&tls->cert, (const unsigned char *)identity.cert_pem,
+                                    identity.cert_len);
+    if (rc == 0) {
+        rc = mbedtls_pk_parse_key(&tls->key, (const unsigned char *)identity.key_pem,
+                                  identity.key_len, NULL, 0);
+    }
+    if (rc == 0) {
+        rc = mbedtls_ssl_config_defaults(&tls->config, MBEDTLS_SSL_IS_SERVER,
+                                         MBEDTLS_SSL_TRANSPORT_STREAM,
+                                         MBEDTLS_SSL_PRESET_DEFAULT);
+    }
+    if (rc == 0) {
+        mbedtls_ssl_conf_rng(&tls->config, tls_random, NULL);
+        rc = mbedtls_ssl_conf_own_cert(&tls->config, &tls->cert, &tls->key);
+    }
+    if (rc == 0) {
+        rc = mbedtls_ssl_setup(&tls->ssl, &tls->config);
+    }
+    kvm_tls_identity_free(&identity);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "VeNCrypt TLS setup failed (-0x%04x)", (unsigned)-rc);
+        conn->tls = tls;
+        vnc_tls_free(conn);
+        return false;
+    }
+
+    conn->tls = tls;
+    mbedtls_ssl_set_bio(&tls->ssl, &conn->fd, tls_send, tls_recv, NULL);
+    do {
+        rc = mbedtls_ssl_handshake(&tls->ssl);
+        if (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            if (generation != s_generation || esp_timer_get_time() >= deadline_us) {
+                rc = MBEDTLS_ERR_SSL_TIMEOUT;
+                break;
+            }
+            vTaskDelay(1);
+        }
+    } while (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE);
+
+    if (rc != 0) {
+        ESP_LOGW(TAG, "VeNCrypt TLS handshake failed (-0x%04x)", (unsigned)-rc);
+        vnc_tls_free(conn);
+        return false;
+    }
+    return generation == s_generation;
+}
+
 typedef enum {
     VNC_AUTH_IO_ERROR,
     VNC_AUTH_BAD_PASSWORD,
@@ -274,7 +407,7 @@ static bool vnc_response_matches(const char *password, const uint8_t challenge[1
     return diff == 0;
 }
 
-static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_us)
+static vnc_auth_result_t vnc_auth(vnc_conn_t *conn, uint32_t generation, int64_t deadline_us)
 {
     const char *password = kvm_setting_str("vnc_pass");
     if (!password || !password[0] || strlen(password) > 8) {
@@ -283,8 +416,8 @@ static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_
     uint8_t challenge[16], response[16];
     esp_fill_random(challenge, sizeof(challenge));
     kvm_auth_attempt_wait();
-    if (!send_all(fd, challenge, sizeof(challenge), generation) ||
-        !recv_exact_until(fd, response, sizeof(response), generation, deadline_us)) {
+    if (!send_all(conn, challenge, sizeof(challenge), generation) ||
+        !recv_exact_until(conn, response, sizeof(response), generation, deadline_us)) {
         return VNC_AUTH_IO_ERROR;
     }
 
@@ -306,39 +439,72 @@ static vnc_auth_result_t vnc_auth(int fd, uint32_t generation, int64_t deadline_
                                                            : VNC_AUTH_BAD_PASSWORD;
 }
 
-static bool rfb_handshake(int fd, uint32_t generation, int64_t deadline_us,
+static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadline_us,
                           uint16_t *width, uint16_t *height)
 {
     static const uint8_t version[] = "RFB 003.008\n";
     uint8_t client_version[12];
-    if (!send_all(fd, version, 12, generation) ||
-        !recv_exact_until(fd, client_version, sizeof(client_version), generation, deadline_us)) {
+    if (!send_all(conn, version, 12, generation) ||
+        !recv_exact_until(conn, client_version, sizeof(client_version), generation, deadline_us)) {
         return false;
     }
     (void)client_version;
-    static const uint8_t security_types[] = {1, 2}; /* one type: VNC Authentication */
+    static const uint8_t security_types[] = {2, 19, 2}; /* Prefer VeNCrypt; keep legacy clients working. */
     uint8_t selected;
-    if (!send_all(fd, security_types, sizeof(security_types), generation) ||
-        !recv_exact_until(fd, &selected, 1, generation, deadline_us) || selected != 2) {
+    if (!send_all(conn, security_types, sizeof(security_types), generation) ||
+        !recv_exact_until(conn, &selected, 1, generation, deadline_us) ||
+        (selected != 2 && selected != 19)) {
         return false;
     }
-    const vnc_auth_result_t auth = vnc_auth(fd, generation, deadline_us);
+
+    if (selected == 19) {
+        /* VeNCrypt 0.2 offers certificate-authenticated X509Vnc first, then
+           TLSVnc for viewers that do not validate the server certificate. */
+        const uint8_t server_version[2] = {0, 2};
+        uint8_t client_vencrypt_version[2];
+        if (!send_all(conn, server_version, sizeof(server_version), generation) ||
+            !recv_exact_until(conn, client_vencrypt_version, sizeof(client_vencrypt_version),
+                              generation, deadline_us)) {
+            return false;
+        }
+        if (client_vencrypt_version[0] != 0 || client_vencrypt_version[1] != 2) {
+            const uint8_t version_rejected = 1;
+            (void)send_all(conn, &version_rejected, sizeof(version_rejected), generation);
+            return false;
+        }
+        const uint8_t version_ok = 0;
+        const uint8_t subtype_count = 2;
+        const uint8_t x509_vnc[4] = {0, 0, 1, 5};
+        const uint8_t tls_vnc[4] = {0, 0, 1, 2};
+        uint8_t subtype[4];
+        if (!send_all(conn, &version_ok, sizeof(version_ok), generation) ||
+            !send_all(conn, &subtype_count, sizeof(subtype_count), generation) ||
+            !send_all(conn, x509_vnc, sizeof(x509_vnc), generation) ||
+            !send_all(conn, tls_vnc, sizeof(tls_vnc), generation) ||
+            !recv_exact_until(conn, subtype, sizeof(subtype), generation, deadline_us) ||
+            (be32(subtype) != 258 && be32(subtype) != 261) ||
+            !vnc_tls_start(conn, generation, deadline_us)) {
+            return false;
+        }
+    }
+
+    const vnc_auth_result_t auth = vnc_auth(conn, generation, deadline_us);
     if (auth != VNC_AUTH_OK) {
         if (auth == VNC_AUTH_BAD_PASSWORD) {
             kvm_auth_attempt_failed();
         }
-        (void)send_u32(fd, 1, generation);
+        (void)send_u32(conn, 1, generation);
         static const char reason[] = "VNC password is invalid or authentication failed";
-        (void)send_u32(fd, sizeof(reason) - 1, generation);
-        (void)send_all(fd, reason, sizeof(reason) - 1, generation);
+        (void)send_u32(conn, sizeof(reason) - 1, generation);
+        (void)send_all(conn, reason, sizeof(reason) - 1, generation);
         return false;
     }
     kvm_auth_attempt_succeeded();
-    if (!send_u32(fd, 0, generation)) {
+    if (!send_u32(conn, 0, generation)) {
         return false;
     }
     uint8_t shared;
-    if (!recv_exact_until(fd, &shared, 1, generation, deadline_us)) {
+    if (!recv_exact_until(conn, &shared, 1, generation, deadline_us)) {
         return false;
     }
     (void)shared;
@@ -362,23 +528,23 @@ static bool rfb_handshake(int fd, uint32_t generation, int64_t deadline_us,
     init[15] = 8;
     init[16] = 0;
     put_be32(init + 20, 12);
-    return send_all(fd, init, sizeof(init), generation) &&
-           send_all(fd, "ESP-KVM VNC", 12, generation);
+    return send_all(conn, init, sizeof(init), generation) &&
+           send_all(conn, "ESP-KVM VNC", 12, generation);
 }
 
-static bool send_empty_update(int fd, uint32_t generation)
+static bool send_empty_update(vnc_conn_t *conn, uint32_t generation)
 {
     const uint8_t empty[] = {0, 0, 0, 0};
-    return send_all(fd, empty, sizeof(empty), generation);
+    return send_all(conn, empty, sizeof(empty), generation);
 }
 
-static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16_t *height,
+static bool rfb_send_update(vnc_conn_t *conn, uint32_t generation, uint16_t *width, uint16_t *height,
                             bool desktop_size, bool incremental, bool *has_frame,
                             uint32_t *last_seq, bool *stream_open)
 {
     if (incremental && *has_frame &&
         !video_frame_wait_new(*last_seq, VNC_READ_TIMEOUT_MS)) {
-        return send_empty_update(fd, generation);
+        return send_empty_update(conn, generation);
     }
 
     const uint8_t *jpeg = NULL;
@@ -391,14 +557,14 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
         if (!video_frame_acquire(&ref)) {
             const uint32_t seen = video_frame_seq();
             if (!video_frame_wait_new(seen, 1800) || !video_frame_acquire(&ref)) {
-                return send_empty_update(fd, generation);
+                return send_empty_update(conn, generation);
             }
         }
         held = true;
         if (ref.payload != VIDEO_PAYLOAD_JPEG ||
             (incremental && *has_frame && ref.seq == *last_seq)) {
             video_frame_release(&ref);
-            return send_empty_update(fd, generation);
+            return send_empty_update(conn, generation);
         }
         jpeg = ref.data;
         jpeg_len = ref.len;
@@ -410,19 +576,19 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
     } else {
         if (!*stream_open) {
             if (capture_vnc_snapshot_begin() != ESP_OK) {
-                return send_empty_update(fd, generation);
+                return send_empty_update(conn, generation);
             }
             *stream_open = true;
         }
         const esp_err_t err = capture_vnc_snapshot_next(&jpeg, &jpeg_len, 1800);
         if (err != ESP_OK || !jpeg || !jpeg_len) {
-            return send_empty_update(fd, generation);
+            return send_empty_update(conn, generation);
         }
         seq = video_frame_seq();
     }
     if (!jpeg || !jpeg_len || jpeg_len > 0x3fffffu) {
         if (held) video_frame_release(&ref);
-        return send_empty_update(fd, generation);
+        return send_empty_update(conn, generation);
     }
 
     kvm_video_status_t status;
@@ -438,14 +604,14 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
             put_be16(rect + 4, w);
             put_be16(rect + 6, h);
             put_be32(rect + 8, (uint32_t)-223); /* DesktopSize pseudo-encoding */
-            ok = send_all(fd, update, sizeof(update), generation) &&
-                 send_all(fd, rect, sizeof(rect), generation);
+            ok = send_all(conn, update, sizeof(update), generation) &&
+                 send_all(conn, rect, sizeof(rect), generation);
             if (ok) {
                 *width = w;
                 *height = h;
             }
         } else {
-            ok = send_empty_update(fd, generation);
+            ok = send_empty_update(conn, generation);
         }
         if (held) video_frame_release(&ref);
         if (ok) {
@@ -456,15 +622,15 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
     }
 
     const uint8_t update[] = {0, 0, 0, 1};
-    bool ok = send_all(fd, update, sizeof(update), generation);
+    bool ok = send_all(conn, update, sizeof(update), generation);
     if (ok) {
         uint8_t rect[12] = {0};
         put_be16(rect + 4, w ? w : *width);
         put_be16(rect + 6, h ? h : *height);
         put_be32(rect + 8, 7); /* Tight encoding */
         const uint8_t jpeg_subencoding = 0x90; /* JPEG rectangle */
-        ok = send_all(fd, rect, sizeof(rect), generation) &&
-             send_all(fd, &jpeg_subencoding, 1, generation);
+        ok = send_all(conn, rect, sizeof(rect), generation) &&
+             send_all(conn, &jpeg_subencoding, 1, generation);
     }
     if (ok) {
         uint8_t compact[3];
@@ -482,7 +648,7 @@ static bool rfb_send_update(int fd, uint32_t generation, uint16_t *width, uint16
             compact[2] = (uint8_t)(jpeg_len >> 14);
             n = 3;
         }
-        ok = send_all(fd, compact, n, generation) && send_all(fd, jpeg, jpeg_len, generation);
+        ok = send_all(conn, compact, n, generation) && send_all(conn, jpeg, jpeg_len, generation);
     }
     if (held) video_frame_release(&ref);
     if (ok) {
@@ -611,12 +777,12 @@ static void client_pointer(client_state_t *state, uint8_t mask, uint16_t x, uint
                           (uint16_t)((uint32_t)y * 32767u / (h > 1 ? h - 1 : 1)), wheel, pan);
 }
 
-static bool discard_bytes(int fd, uint32_t len, uint32_t generation)
+static bool discard_bytes(vnc_conn_t *conn, uint32_t len, uint32_t generation)
 {
     uint8_t buf[128];
     while (len) {
         const size_t n = len > sizeof(buf) ? sizeof(buf) : len;
-        if (!recv_exact(fd, buf, n, generation)) return false;
+        if (!recv_exact(conn, buf, n, generation)) return false;
         len -= (uint32_t)n;
     }
     return true;
@@ -624,10 +790,14 @@ static bool discard_bytes(int fd, uint32_t len, uint32_t generation)
 
 static bool client_loop(int fd, uint32_t generation)
 {
+    vnc_conn_t conn = {.fd = fd};
     uint16_t width, height;
     const int64_t handshake_deadline = esp_timer_get_time() +
                                        (int64_t)VNC_HANDSHAKE_TIMEOUT_MS * 1000;
-    if (!rfb_handshake(fd, generation, handshake_deadline, &width, &height)) return false;
+    if (!rfb_handshake(&conn, generation, handshake_deadline, &width, &height)) {
+        vnc_tls_free(&conn);
+        return false;
+    }
     client_state_t state = {0};
     video_frame_viewer_enter();
     bool has_frame = false;
@@ -636,30 +806,30 @@ static bool client_loop(int fd, uint32_t generation)
     bool alive = true;
     while (alive && generation == s_generation) {
         uint8_t type;
-        if (!recv_exact(fd, &type, 1, generation)) break;
+        if (!recv_exact(&conn, &type, 1, generation)) break;
         switch (type) {
         case 0: { /* SetPixelFormat */
             uint8_t rest[19];
-            alive = recv_exact(fd, rest, sizeof(rest), generation);
+            alive = recv_exact(&conn, rest, sizeof(rest), generation);
             break;
         }
         case 1: { /* SetColourMapEntries */
             uint8_t rest[5];
-            if (!recv_exact(fd, rest, sizeof(rest), generation)) { alive = false; break; }
+            if (!recv_exact(&conn, rest, sizeof(rest), generation)) { alive = false; break; }
             const uint32_t bytes = (uint32_t)be16(rest + 3) * 6u;
-            alive = discard_bytes(fd, bytes, generation);
+            alive = discard_bytes(&conn, bytes, generation);
             break;
         }
         case 2: { /* SetEncodings */
             uint8_t header[3];
-            if (!recv_exact(fd, header, sizeof(header), generation)) { alive = false; break; }
+            if (!recv_exact(&conn, header, sizeof(header), generation)) { alive = false; break; }
             const uint16_t count = be16(header + 1);
             if (count > 64) { alive = false; break; }
             state.tight = false;
             state.desktop_size = false;
             for (unsigned i = 0; i < count; i++) {
                 uint8_t enc[4];
-                if (!recv_exact(fd, enc, sizeof(enc), generation)) { alive = false; break; }
+                if (!recv_exact(&conn, enc, sizeof(enc), generation)) { alive = false; break; }
                 const uint32_t value = be32(enc);
                 if (value == 7) state.tight = true;
                 if (value == (uint32_t)-223) state.desktop_size = true;
@@ -669,33 +839,33 @@ static bool client_loop(int fd, uint32_t generation)
         }
         case 3: { /* FramebufferUpdateRequest */
             uint8_t request[9];
-            if (!recv_exact(fd, request, sizeof(request), generation)) { alive = false; break; }
+            if (!recv_exact(&conn, request, sizeof(request), generation)) { alive = false; break; }
             if (state.tight) {
-                alive = rfb_send_update(fd, generation, &width, &height, state.desktop_size,
+                alive = rfb_send_update(&conn, generation, &width, &height, state.desktop_size,
                                         request[0] != 0, &has_frame, &last_seq, &stream_open);
             } else {
                 const uint8_t empty[] = {0, 0, 0, 0};
-                alive = send_all(fd, empty, sizeof(empty), generation);
+                alive = send_all(&conn, empty, sizeof(empty), generation);
             }
             break;
         }
         case 4: { /* KeyEvent */
             uint8_t event[7];
-            if (!recv_exact(fd, event, sizeof(event), generation)) { alive = false; break; }
+            if (!recv_exact(&conn, event, sizeof(event), generation)) { alive = false; break; }
             client_key(&state, event[0] != 0, be32(event + 3));
             break;
         }
         case 5: { /* PointerEvent */
             uint8_t event[5];
-            if (!recv_exact(fd, event, sizeof(event), generation)) { alive = false; break; }
+            if (!recv_exact(&conn, event, sizeof(event), generation)) { alive = false; break; }
             client_pointer(&state, event[0], be16(event + 1), be16(event + 3));
             break;
         }
         case 6: { /* ClientCutText: consume but do not put clipboard data on the target. */
             uint8_t header[7];
-            if (!recv_exact(fd, header, sizeof(header), generation)) { alive = false; break; }
+            if (!recv_exact(&conn, header, sizeof(header), generation)) { alive = false; break; }
             const uint32_t len = be32(header + 3);
-            alive = len <= VNC_CLIENT_TEXT_MAX && discard_bytes(fd, len, generation);
+            alive = len <= VNC_CLIENT_TEXT_MAX && discard_bytes(&conn, len, generation);
             break;
         }
         default:
@@ -708,6 +878,7 @@ static bool client_loop(int fd, uint32_t generation)
         capture_vnc_snapshot_end();
     }
     video_frame_viewer_leave();
+    vnc_tls_free(&conn);
     return alive;
 }
 
@@ -765,7 +936,7 @@ static void vnc_task(void *arg)
                     const int port = (int)kvm_setting_int("vnc_port");
                     listener = open_listener((uint16_t)port);
                     if (listener >= 0) {
-                        ESP_LOGI(TAG, "listening on TCP port %d (VNC authentication enabled)", port);
+                        ESP_LOGI(TAG, "listening on TCP port %d (VNC authentication and VeNCrypt enabled)", port);
                     } else {
                         ESP_LOGE(TAG, "could not listen on TCP port %d", port);
                         retry_at_us = esp_timer_get_time() + 5000000;
