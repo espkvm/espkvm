@@ -553,10 +553,12 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
     kvm_auth_attempt_succeeded();
     ESP_LOGI(TAG, "VNC authentication succeeded");
     if (!send_u32(conn, 0, generation)) {
+        ESP_LOGW(TAG, "could not send successful RFB SecurityResult");
         return false;
     }
     uint8_t shared;
     if (!recv_exact_until(conn, &shared, 1, generation, deadline_us)) {
+        ESP_LOGW(TAG, "client closed before RFB ClientInit");
         return false;
     }
     (void)shared;
@@ -580,8 +582,13 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
     init[15] = 8;
     init[16] = 0;
     put_be32(init + 20, 12);
-    return send_all(conn, init, sizeof(init), generation) &&
-           send_all(conn, "ESP-KVM VNC", 12, generation);
+    if (!send_all(conn, init, sizeof(init), generation) ||
+        !send_all(conn, "ESP-KVM VNC", 12, generation)) {
+        ESP_LOGW(TAG, "failed to send RFB ServerInit");
+        return false;
+    }
+    ESP_LOGI(TAG, "RFB ServerInit sent (%ux%u)", (unsigned)*width, (unsigned)*height);
+    return true;
 }
 
 static bool send_empty_update(vnc_conn_t *conn, uint32_t generation)
@@ -858,7 +865,10 @@ static bool client_loop(int fd, uint32_t generation)
     bool alive = true;
     while (alive && generation == s_generation) {
         uint8_t type;
-        if (!recv_exact(&conn, &type, 1, generation)) break;
+        if (!recv_exact(&conn, &type, 1, generation)) {
+            ESP_LOGD(TAG, "client closed while waiting for an RFB message");
+            break;
+        }
         switch (type) {
         case 0: { /* SetPixelFormat */
             uint8_t rest[19];
@@ -876,7 +886,11 @@ static bool client_loop(int fd, uint32_t generation)
             uint8_t header[3];
             if (!recv_exact(&conn, header, sizeof(header), generation)) { alive = false; break; }
             const uint16_t count = be16(header + 1);
-            if (count > 64) { alive = false; break; }
+            if (count > 64) {
+                ESP_LOGW(TAG, "client sent invalid SetEncodings count %u", (unsigned)count);
+                alive = false;
+                break;
+            }
             state.tight = false;
             state.desktop_size = false;
             for (unsigned i = 0; i < count; i++) {
@@ -886,7 +900,13 @@ static bool client_loop(int fd, uint32_t generation)
                 if (value == 7) state.tight = true;
                 if (value == (uint32_t)-223) state.desktop_size = true;
             }
-            if (!state.tight) alive = false;
+            ESP_LOGI(TAG, "client SetEncodings: %u entries, Tight=%s, DesktopSize=%s",
+                     (unsigned)count, state.tight ? "yes" : "no",
+                     state.desktop_size ? "yes" : "no");
+            if (!state.tight) {
+                ESP_LOGW(TAG, "client did not negotiate Tight encoding; cannot send JPEG frames");
+                alive = false;
+            }
             break;
         }
         case 3: { /* FramebufferUpdateRequest */
@@ -921,6 +941,7 @@ static bool client_loop(int fd, uint32_t generation)
             break;
         }
         default:
+            ESP_LOGW(TAG, "unsupported RFB client message type %u", (unsigned)type);
             alive = false;
             break;
         }
