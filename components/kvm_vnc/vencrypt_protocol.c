@@ -81,5 +81,10 @@ vencrypt_result_t vencrypt_server_negotiate(const vencrypt_io_t *io, uint32_t *s
     if (*subtype != VENC_SUBTYPE_TLS_VNC && *subtype != VENC_SUBTYPE_X509_VNC) {
         return VENC_RESULT_BAD_SUBTYPE;
     }
+
+    const uint8_t status = 0;
+    if (!send_exact(io, &status, sizeof(status))) {
+        return VENC_RESULT_IO_ERROR;
+    }
     return VENC_RESULT_OK;
 }

@@ -28,6 +28,7 @@ typedef struct {
     size_t output_len;
     unsigned reads, writes, waits;
     bool stop_wait;
+    bool fail_status;
 } fake_io_t;
 
 static int fake_send(void *ctx, const uint8_t *data, size_t len)
@@ -36,6 +37,7 @@ static int fake_send(void *ctx, const uint8_t *data, size_t len)
     f->writes++;
     if (f->writes == 1) return VENC_IO_INTERRUPTED;
     if (f->writes == 2) return VENC_IO_WANT_WRITE;
+    if (f->fail_status && len == 1 && data[0] == 0) return VENC_IO_ERROR;
     const size_t n = len > 2 ? 2 : len;
     if (f->output_len + n > sizeof(f->output)) return VENC_IO_ERROR;
     memcpy(f->output + f->output_len, data, n);
@@ -102,7 +104,7 @@ static void test_tlsvnc_fragmented_and_clienthello_boundary(void)
     CHECK(f.input_len - f.input_pos == sizeof(hello));
     CHECK(memcmp(f.input + f.input_pos, hello, sizeof(hello)) == 0);
 
-    static const uint8_t offer[] = {0, 2, 0, 2, 0, 0, 1, 5, 0, 0, 1, 2};
+    static const uint8_t offer[] = {0, 2, 0, 2, 0, 0, 1, 5, 0, 0, 1, 2, 0};
     CHECK(f.output_len == sizeof(offer));
     CHECK(memcmp(f.output, offer, sizeof(offer)) == 0);
 }
@@ -137,12 +139,23 @@ static void test_wait_failure(void)
     CHECK(negotiate(&f, &subtype) == VENC_RESULT_IO_ERROR);
 }
 
+static void test_status_send_failure(void)
+{
+    fake_io_t f;
+    uint32_t subtype = 0;
+    init(&f, 0, 2, VENC_SUBTYPE_TLS_VNC, NULL, 0);
+    f.fail_status = true;
+    CHECK(negotiate(&f, &subtype) == VENC_RESULT_IO_ERROR);
+    CHECK(f.output_len == 12);
+}
+
 int main(void)
 {
     test_tlsvnc_fragmented_and_clienthello_boundary();
     test_x509vnc();
     test_invalid_version_and_subtype();
     test_wait_failure();
+    test_status_send_failure();
     if (failures) {
         printf("%d check(s) failed\n", failures);
         return 1;

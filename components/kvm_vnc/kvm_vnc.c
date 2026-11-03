@@ -359,6 +359,7 @@ static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
     vnc_tls_t *tls = calloc(1, sizeof(*tls));
     if (!tls) {
         kvm_tls_identity_free(&identity);
+        ESP_LOGE(TAG, "VeNCrypt TLS context allocation failed");
         return false;
     }
     mbedtls_ssl_init(&tls->ssl);
@@ -393,6 +394,8 @@ static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
 
     conn->tls = tls;
     mbedtls_ssl_set_bio(&tls->ssl, &conn->fd, tls_send, tls_recv, NULL);
+    ESP_LOGI(TAG, "VeNCrypt TLS context initialized");
+    ESP_LOGI(TAG, "VeNCrypt TLS handshake starting");
     do {
         rc = mbedtls_ssl_handshake(&tls->ssl);
         if (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -527,6 +530,7 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
             return false;
         }
         ESP_LOGI(TAG, "client selected VeNCrypt subtype %u", (unsigned)subtype_id);
+        ESP_LOGI(TAG, "VeNCrypt success status sent; starting TLS");
         if (!vnc_tls_start(conn, generation, deadline_us)) {
             return false;
         }
