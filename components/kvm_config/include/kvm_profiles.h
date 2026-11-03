@@ -68,6 +68,8 @@ void kvm_profiles_welcome(void);
 
 /**
  * The console's questions, answered: {"welcome": true} ends the first-run one,
+ * {"tour": "<version>"} the overview of features, closed on that firmware
+ * version ("tourSeen" in the JSON, "" when never),
  * {"preset": id} stops "suggest" offering that preset again.
  */
 esp_err_t kvm_profiles_dismiss(const char *json, char *err, size_t err_len);

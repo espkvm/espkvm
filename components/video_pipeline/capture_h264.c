@@ -915,7 +915,7 @@ static void follow_settings(void)
  * in his fork (ac90156). */
 static size_t h264_idr_add_restriction(uint8_t *dst, size_t len, size_t cap)
 {
-    len = h264_sps_add_restriction(dst, len, cap);
+    len = h264_sps_patch(dst, len, cap, capture_pixfmt()->full_range);
     (void)esp_cache_msync(dst, len, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     return len;
 }
@@ -1152,7 +1152,8 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
                 .pic_w = padded_w,
                 .pic_h = padded_h,
                 .srm_cm = PPA_SRM_COLOR_MODE_YUV420,
-                .yuv_range = PPA_COLOR_RANGE_LIMIT,
+                /* Full range, as the SPS says (h264_sps.c). */
+                .yuv_range = PPA_COLOR_RANGE_FULL,
                 .yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601},
         .scale_x = 1.0f,
         .scale_y = 1.0f,

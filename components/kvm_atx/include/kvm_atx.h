@@ -27,6 +27,8 @@ typedef struct {
     bool enabled;   /**< ATX is enabled and the power/reset pins are valid. */
     bool have_led;  /**< A power-LED sense pin is configured. */
     bool power_on;  /**< Last read of the power LED; only meaningful with have_led. */
+    bool have_hdd;  /**< An HDD-LED sense pin is configured. */
+    bool hdd_busy;  /**< The HDD LED is lit or blinked in the last moment; only with have_hdd. */
 } kvm_atx_status_t;
 
 /** One-time setup. Configures nothing until kvm_atx_apply() runs. */

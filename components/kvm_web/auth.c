@@ -52,6 +52,10 @@
 /* The live sessions, as SHA-256 of each token: a restart (an update, say) no
  * longer signs everyone out, and a copy of the flash holds no usable cookie. */
 #define NVS_KEY_SESSIONS "sessions"
+/* The view-only sign-in: user "viewer", its own password, hashed the same way. */
+#define NVS_KEY_VSALT "vsalt"
+#define NVS_KEY_VHASH "vhash"
+#define VIEWER_USER "viewer"
 
 #define SALT_LEN 16
 #define HASH_LEN 32
@@ -96,6 +100,8 @@ typedef struct {
     int64_t used_us;
     /** The password in use is the default one; nothing else may proceed. */
     bool must_change;
+    /** Signed in as the viewer: may watch, never act. See view_allowed(). */
+    bool view_only;
 } session_t;
 
 static session_t s_sessions[MAX_SESSIONS];
@@ -106,6 +112,10 @@ static uint8_t s_hash[HASH_LEN];
 static uint32_t s_iterations;
 /** False when no password has ever been set. */
 static bool s_have_password;
+/* The viewer's password, when one is set. Same iteration count as the main one. */
+static uint8_t s_vsalt[SALT_LEN];
+static uint8_t s_vhash[HASH_LEN];
+static bool s_have_viewer;
 
 /* Failed attempts slow every further attempt down. One operator, one counter:
  * a KVM has no legitimate reason to see a burst of logins. */
@@ -428,6 +438,70 @@ static bool password_matches(const char *password)
     return equal_ct(candidate, s_hash, HASH_LEN);
 }
 
+/* The viewer's password: stored like the main one under its own keys, or
+ * removed when @p password is NULL. */
+static esp_err_t store_viewer(const char *password)
+{
+    uint8_t salt[SALT_LEN];
+    uint8_t hash[HASH_LEN];
+    esp_err_t err = ESP_OK;
+    if (password) {
+        esp_fill_random(salt, sizeof(salt));
+        err = kvm_auth_pbkdf2(password, salt, sizeof(salt), PBKDF2_ITERATIONS, hash, sizeof(hash));
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    nvs_handle_t nvs;
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (password) {
+        err = nvs_set_blob(nvs, NVS_KEY_VSALT, salt, sizeof(salt));
+        if (err == ESP_OK) {
+            err = nvs_set_blob(nvs, NVS_KEY_VHASH, hash, sizeof(hash));
+        }
+    } else {
+        (void)nvs_erase_key(nvs, NVS_KEY_VSALT);
+        err = nvs_erase_key(nvs, NVS_KEY_VHASH);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+    lock();
+    if (password) {
+        memcpy(s_vsalt, salt, sizeof(salt));
+        memcpy(s_vhash, hash, sizeof(hash));
+    } else {
+        memset(s_vsalt, 0, sizeof(s_vsalt));
+        memset(s_vhash, 0, sizeof(s_vhash));
+    }
+    s_have_viewer = password != NULL;
+    unlock();
+    return ESP_OK;
+}
+
+static bool viewer_matches(const char *password)
+{
+    if (!s_have_viewer || !s_have_password) {
+        return false;
+    }
+    uint8_t candidate[HASH_LEN];
+    if (kvm_auth_pbkdf2(password, s_vsalt, SALT_LEN, PBKDF2_ITERATIONS, candidate,
+                        sizeof(candidate)) != ESP_OK) {
+        return false;
+    }
+    return equal_ct(candidate, s_vhash, HASH_LEN);
+}
+
 static void sessions_save_locked(void);
 
 static void session_clear_all(void)
@@ -446,7 +520,9 @@ static void session_clear_all(void)
  * boot, so a restored session simply starts a fresh TTL. */
 typedef struct {
     uint8_t hash[32];
-    uint8_t must_change;
+    /* Bit 0 must_change, bit 1 view_only. Older firmware wrote 0 or 1 here,
+       which reads the same. */
+    uint8_t flags;
 } saved_session_t;
 
 /* Call with the lock held: copies the live sessions, then writes them. */
@@ -458,7 +534,8 @@ static void sessions_save_locked(void)
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (s_sessions[i].expires_us > now) {
             memcpy(out[n].hash, s_sessions[i].hash, sizeof(out[n].hash));
-            out[n].must_change = s_sessions[i].must_change;
+            out[n].flags = (uint8_t)((s_sessions[i].must_change ? 1 : 0) |
+                                     (s_sessions[i].view_only ? 2 : 0));
             n++;
         }
     }
@@ -487,7 +564,8 @@ static void sessions_load(nvs_handle_t nvs)
     const size_t n = len / sizeof(in[0]);
     for (size_t i = 0; i < n && i < MAX_SESSIONS; i++) {
         memcpy(s_sessions[i].hash, in[i].hash, sizeof(s_sessions[i].hash));
-        s_sessions[i].must_change = in[i].must_change != 0;
+        s_sessions[i].must_change = (in[i].flags & 1) != 0;
+        s_sessions[i].view_only = (in[i].flags & 2) != 0;
         s_sessions[i].expires_us = now + SESSION_TTL_US;
         s_sessions[i].used_us = 0;
     }
@@ -495,7 +573,7 @@ static void sessions_load(nvs_handle_t nvs)
 }
 
 /* A new session; its token goes into @p token, which must hold TOKEN_CHARS+1. */
-static void session_create(bool must_change, char *token)
+static void session_create(bool must_change, bool view_only, char *token)
 {
     uint8_t raw[TOKEN_BYTES];
     esp_fill_random(raw, sizeof(raw));
@@ -531,6 +609,7 @@ static void session_create(bool must_change, char *token)
     s_sessions[slot].expires_us = now + SESSION_TTL_US;
     s_sessions[slot].used_us = now;
     s_sessions[slot].must_change = must_change;
+    s_sessions[slot].view_only = view_only;
     sessions_save_locked();
     unlock();
 }
@@ -836,6 +915,88 @@ bool kvm_auth_session_alive(const uint8_t hash[32])
     return ok;
 }
 
+/*
+ * What a view-only sign-in may reach: reading, never acting. A list of what is
+ * allowed rather than of what is not, so an endpoint added later stays closed
+ * to it until someone decides otherwise. Left out on purpose: the target's
+ * clipboard (agent), the crash dump and the device log, and the pin probe,
+ * which drives pins although it is a GET.
+ */
+static const char *const k_view_get[] = {
+    "/api/capabilities",          "/api/v1/auth/session",      "/api/v1/video/status",
+    "/api/v1/video/frame.jpg",    "/api/v1/system/info",       "/api/v1/system/memory",
+    "/api/v1/system/usbprobe",    "/api/v1/system/install",    "/api/v1/settings",
+    "/api/v1/settings/schema",    "/api/v1/profiles",          "/api/v1/record/status",
+    "/api/v1/captures",           "/api/v1/captures/file",     "/api/v1/captures/search",
+    "/api/v1/screen/text",        "/api/v1/audio",             "/api/v1/audio/clip.wav",
+    "/api/v1/cec",                "/api/v1/storage/images",    "/api/v1/storage/fetch",
+    "/api/v1/regions",            "/api/v1/runbooks/status",   "/api/v1/schedules/status",
+    "/api/v1/notify/status",      "/api/v1/serial",            "/api/v1/serial/log",
+    "/api/v1/netlog",             "/api/v1/netlog/log",        "/api/v1/agent",
+    "/api/v1/agent/info",         "/api/v1/tls",               "/api/v1/pins",
+    "/api/v1/wifi/scan",          "/api/v1/viewers",
+    /* The streams. Input over /ws and typing into /serial are dropped there. */
+    "/ws",                        "/video",                    "/audio",
+    "/serial",                    "/stream",
+};
+
+/* The path of @p uri, without the query, equals @p path. */
+static bool path_is(const char *uri, const char *path)
+{
+    const size_t n = strlen(path);
+    return strncmp(uri, path, n) == 0 && (uri[n] == '\0' || uri[n] == '?');
+}
+
+static bool view_allowed(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) {
+        for (size_t i = 0; i < sizeof(k_view_get) / sizeof(k_view_get[0]); i++) {
+            if (path_is(req->uri, k_view_get[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+    /* Signing out, and the WebRTC offer that carries the picture. */
+    return req->method == HTTP_POST &&
+           (path_is(req->uri, "/api/v1/auth/logout") || strncmp(req->uri, "/api/v1/webrtc", 14) == 0);
+}
+
+/* The request comes from a live view-only sign-in. */
+static bool request_view_only(httpd_req_t *req)
+{
+    char token[TOKEN_CHARS + 1] = {0};
+    if (!kvm_auth_required() || !cookie_token(req, token, sizeof(token))) {
+        return false;
+    }
+    lock();
+    const session_t *s = session_find(token);
+    const bool v = s && s->view_only;
+    unlock();
+    return v;
+}
+
+bool kvm_auth_session_view_only(const uint8_t hash[32])
+{
+    const int64_t now = esp_timer_get_time();
+    bool v = false;
+    lock();
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (s_sessions[i].expires_us > now && equal_ct(s_sessions[i].hash, hash, 32)) {
+            v = s_sessions[i].view_only;
+            break;
+        }
+    }
+    unlock();
+    return v;
+}
+
+bool kvm_auth_socket_view_only(int fd)
+{
+    uint8_t hash[32];
+    return kvm_auth_required() && kvm_auth_socket_session(fd, hash) && kvm_auth_session_view_only(hash);
+}
+
 bool kvm_auth_check(httpd_req_t *req)
 {
     if (!intentional_write(req)) {
@@ -853,6 +1014,7 @@ bool kvm_auth_check(httpd_req_t *req)
     const session_t *s = session_find(token);
     const bool ok = s != NULL;
     const bool must_change = ok && s->must_change;
+    const bool view_only = ok && s->view_only;
     unlock();
     if (!ok) {
         return false;
@@ -866,6 +1028,10 @@ bool kvm_auth_check(httpd_req_t *req)
      * runs through here - cannot skip it.
      */
     if (must_change && strncmp(req->uri, "/api/v1/auth/", 13) != 0) {
+        return false;
+    }
+    if (view_only && !view_allowed(req)) {
+        ESP_LOGW(TAG, "%s refused: this sign-in can only watch", req->uri);
         return false;
     }
     return true;
@@ -914,6 +1080,13 @@ esp_err_t kvm_auth_challenge(httpd_req_t *req)
                                HTTPD_RESP_USE_STRLEN);
     case WRITE_MEANT:
         break;
+    }
+    /* Signed in, just not allowed: a 401 would send the console to its sign-in
+       form, which would only sign the viewer in again. */
+    if (request_view_only(req)) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        return httpd_resp_send(req, "{\"error\":\"this sign-in can only watch\",\"viewOnly\":true}",
+                               HTTPD_RESP_USE_STRLEN);
     }
     httpd_resp_set_status(req, "401 Unauthorized");
     return httpd_resp_send(req, "{\"error\":\"authentication required\"}", HTTPD_RESP_USE_STRLEN);
@@ -1164,6 +1337,7 @@ static esp_err_t auth_session_get(httpd_req_t *req)
     char token[TOKEN_CHARS + 1] = {0};
     bool authenticated = false;
     bool must_change = false;
+    bool view_only = false;
 
     const bool had_cookie = cookie_token(req, token, sizeof(token));
     if (had_cookie) {
@@ -1172,6 +1346,7 @@ static esp_err_t auth_session_get(httpd_req_t *req)
         if (s) {
             authenticated = true;
             must_change = s->must_change;
+            view_only = s->view_only;
         }
         unlock();
     }
@@ -1187,13 +1362,16 @@ static esp_err_t auth_session_get(httpd_req_t *req)
                                                       : "no cookie sent");
     }
 
-    char body[320];
+    char body[384];
     snprintf(body, sizeof(body),
              "{\"required\":%s,\"authenticated\":%s,\"mustChange\":%s,\"user\":\"%s\","
+             /* Signed in as the viewer, and whether a viewer password is set. */
+             "\"viewOnly\":%s,\"viewer\":%s,"
              /* Whether a viewing token exists, never what it is. */
              "\"viewToken\":%s,\"twoFactor\":%s,\"setupNetwork\":%s}",
              kvm_auth_required() ? "true" : "false", authenticated ? "true" : "false",
-             must_change ? "true" : "false", kvm_setting_str("sec_user"),
+             must_change ? "true" : "false", view_only ? VIEWER_USER : kvm_setting_str("sec_user"),
+             view_only ? "true" : "false", s_have_viewer ? "true" : "false",
              kvm_auth_token_exists() ? "true" : "false", s_totp_on ? "true" : "false",
              !setup_net_needed() ? "null"
 #if CONFIG_KVM_ETH_ENABLE
@@ -1240,8 +1418,10 @@ static esp_err_t auth_login_post(httpd_req_t *req)
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
 
-    const bool user_ok = strcmp(user, kvm_setting_str("sec_user")) == 0;
-    if (!user_ok || !password_matches(password)) {
+    /* The owner, or else the viewer: a separate password that can only watch. */
+    const bool owner = strcmp(user, kvm_setting_str("sec_user")) == 0 && password_matches(password);
+    const bool viewer = !owner && strcmp(user, VIEWER_USER) == 0 && viewer_matches(password);
+    if (!owner && !viewer) {
         lock();
         const uint32_t count = ++s_failures;
         unlock();
@@ -1250,7 +1430,9 @@ static esp_err_t auth_login_post(httpd_req_t *req)
         return send_json(req, "401 Unauthorized", "{\"error\":\"wrong username or password\"}");
     }
     memset(password, 0, sizeof(password));
-    if (s_totp_on && s_have_password) {
+    /* The authenticator belongs to the owner. The viewer has no code: what it
+       can do is watch, and the owner chose to hand that out with a password. */
+    if (owner && s_totp_on && s_have_password) {
         if (!code[0]) {
             /* Not a failure: the password was right, the code is the next step. */
             return send_json(req, "401 Unauthorized",
@@ -1270,14 +1452,15 @@ static esp_err_t auth_login_post(httpd_req_t *req)
     /* Signed in, so the time it brought can be trusted as far as a clock goes. */
     kvm_web_clock_from_browser(browser_time);
 
-    const bool must_change = !s_have_password;
+    const bool must_change = owner && !s_have_password;
     char token[TOKEN_CHARS + 1];
-    session_create(must_change, token);
+    session_create(must_change, viewer, token);
     char cookie[192];
     set_session_cookie(req, cookie, sizeof(cookie), token, false);
     char out[64];
     snprintf(out, sizeof(out), "{\"mustChange\":%s}", must_change ? "true" : "false");
-    ESP_LOGI(TAG, "logged in as '%s'%s", user, must_change ? " with the default password" : "");
+    ESP_LOGI(TAG, "logged in as '%s'%s%s", user, must_change ? " with the default password" : "",
+             viewer ? " (view only)" : "");
     return send_json(req, "200 OK", out);
 }
 
@@ -1427,6 +1610,70 @@ static esp_err_t auth_password_post(httpd_req_t *req)
         return send_json(req, "200 OK", "{\"status\":\"changed\",\"restart\":true}");
     }
     return send_json(req, "200 OK", "{\"status\":\"changed\"}");
+}
+
+/*
+ * The viewer's password: set, changed or removed ("next" empty) by the owner,
+ * with the owner's current password. Every view-only sign-in ends with it, so
+ * removing it shuts the viewers out at once.
+ */
+static esp_err_t auth_viewer_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (!s_have_password) {
+        return send_json(req, "409 Conflict", "{\"error\":\"set your own password first\"}");
+    }
+    char body[256];
+    if (read_body(req, body, sizeof(body)) != ESP_OK) {
+        return send_json(req, "400 Bad Request", "{\"error\":\"malformed request\"}");
+    }
+    char current[80] = {0};
+    char next[80] = {0};
+    cJSON *j = cJSON_Parse(body);
+    memset(body, 0, sizeof(body));
+    const bool fields_ok = j && json_str_field(j, "current", current, sizeof(current)) &&
+                           json_str_field(j, "next", next, sizeof(next));
+    cJSON_Delete(j);
+    if (!fields_ok) {
+        return send_json(req, "400 Bad Request", "{\"error\":\"current and next are required\"}");
+    }
+    if (next[0] && strlen(next) < 8) {
+        memset(current, 0, sizeof(current));
+        memset(next, 0, sizeof(next));
+        return send_json(req, "400 Bad Request",
+                         "{\"error\":\"the viewer password must be at least 8 characters\"}");
+    }
+    if (!password_matches(current)) {
+        memset(current, 0, sizeof(current));
+        memset(next, 0, sizeof(next));
+        return send_json(req, "403 Forbidden", "{\"error\":\"your current password is wrong\"}");
+    }
+    if (next[0] && password_matches(next)) {
+        memset(current, 0, sizeof(current));
+        memset(next, 0, sizeof(next));
+        return send_json(req, "400 Bad Request",
+                         "{\"error\":\"the viewer password must differ from yours\"}");
+    }
+    const esp_err_t err = store_viewer(next[0] ? next : NULL);
+    const bool removed = !next[0];
+    memset(current, 0, sizeof(current));
+    memset(next, 0, sizeof(next));
+    if (err != ESP_OK) {
+        return send_json(req, "500 Internal Server Error",
+                         "{\"error\":\"the viewer password could not be stored\"}");
+    }
+    lock();
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (s_sessions[i].view_only) {
+            memset(&s_sessions[i], 0, sizeof(s_sessions[i]));
+        }
+    }
+    sessions_save_locked();
+    unlock();
+    ESP_LOGI(TAG, "viewer password %s; view-only sign-ins ended", removed ? "removed" : "set");
+    return send_json(req, "200 OK", removed ? "{\"viewer\":false}" : "{\"viewer\":true}");
 }
 
 /* Start setting up two-factor: a new secret, as text and as a QR code. */
@@ -1629,6 +1876,7 @@ void kvm_auth_register(httpd_handle_t server)
         {.uri = "/api/v1/auth/login", .method = HTTP_POST, .handler = auth_login_post},
         {.uri = "/api/v1/auth/logout", .method = HTTP_POST, .handler = auth_logout_post},
         {.uri = "/api/v1/auth/password", .method = HTTP_POST, .handler = auth_password_post},
+        {.uri = "/api/v1/auth/viewer", .method = HTTP_POST, .handler = auth_viewer_post},
         {.uri = "/api/v1/auth/2fa/begin", .method = HTTP_POST, .handler = auth_2fa_begin_post},
         {.uri = "/api/v1/auth/2fa/enable", .method = HTTP_POST, .handler = auth_2fa_enable_post},
         {.uri = "/api/v1/auth/2fa/disable", .method = HTTP_POST, .handler = auth_2fa_disable_post},
@@ -1703,6 +1951,9 @@ static esp_err_t auth_clear(void)
     memset(s_hash, 0, sizeof(s_hash));
     memset(s_salt, 0, sizeof(s_salt));
     s_have_password = false;
+    memset(s_vhash, 0, sizeof(s_vhash));
+    memset(s_vsalt, 0, sizeof(s_vsalt));
+    s_have_viewer = false;
     s_failures = 0;
     memset(s_sessions, 0, sizeof(s_sessions));
     s_totp_on = false;
@@ -1931,6 +2182,13 @@ esp_err_t kvm_auth_init(void)
         s_have_password = true;
     } else {
         ESP_LOGW(TAG, "no password set; the default one works until it is changed");
+    }
+    size_t vsalt_len = sizeof(s_vsalt);
+    size_t vhash_len = sizeof(s_vhash);
+    if (nvs_get_blob(nvs, NVS_KEY_VSALT, s_vsalt, &vsalt_len) == ESP_OK &&
+        nvs_get_blob(nvs, NVS_KEY_VHASH, s_vhash, &vhash_len) == ESP_OK && vsalt_len == SALT_LEN &&
+        vhash_len == HASH_LEN) {
+        s_have_viewer = true;
     }
     size_t totp_len = sizeof(s_totp_secret);
     size_t rc_len = sizeof(s_rcodes);

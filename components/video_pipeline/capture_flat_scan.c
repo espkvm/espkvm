@@ -21,7 +21,8 @@
 #define FLAT_SAMPLES 512
 #define FLAT_TOLERANCE 12
 #define FLAT_MIN_PERCENT 92
-/* A flat colour this dark is a blanked screen. Limited-range black is 16. */
+/* A flat colour this dark is a blanked screen. Black is 0, or 16 from a
+   bridge sending limited range. */
 #define FLAT_DARK_MAX 40
 
 /** One pixel's three components, whatever the capture format calls them. */

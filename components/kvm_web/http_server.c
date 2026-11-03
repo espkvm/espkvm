@@ -27,6 +27,7 @@
 #include "freertos/task.h"
 
 #include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "esp_ota_ops.h"
 #include "kvm_ota_trial.h"
 #include "esp_partition.h"
@@ -639,6 +640,9 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
      * - that is what /api/v1/screen/text answers - only that asking is worth it. */
     const bool text_mode = st.signal && screentext_mode_supported(st.hres, st.vres);
 
+    kvm_atx_status_t atx;
+    kvm_atx_status(&atx);
+
     kvm_record_status_t rec;
     kvm_record_status(&rec);
     /* Blocked reasons are fixed strings from the firmware: no quoting needed. */
@@ -650,7 +654,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
         snprintf(age, sizeof(age), "%u", (unsigned)st.frame_age_ms);
     }
 
-    /* Worst case with every string field full is about 1450. */
+    /* Worst case with every string field full is about 1460. */
     char body[1600];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
@@ -681,7 +685,9 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      "\"screenshotBlocked\":%s%s%s,"
                      /* The device may switch profiles by itself: the console
                         reloads the settings when this moves. */
-                     "\"profile\":%u}",
+                     "\"profile\":%u,"
+                     /* The target's HDD LED, null when it is not wired. */
+                     "\"hdd\":%s}",
                      capture_source_power_known() ? "true" : "false",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
                      st.interlaced ? "true" : "false", (unsigned)st.input_hz,
@@ -707,7 +713,8 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)rec.timelapse_every, (unsigned)rec.clip_seconds_left,
                      (unsigned)rec.clips_converting, rec.last_clip, shot_blocked ? "\"" : "",
                      shot_blocked ? shot_blocked : "null", shot_blocked ? "\"" : "",
-                     (unsigned)kvm_profiles_active());
+                     (unsigned)kvm_profiles_active(),
+                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false");
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
     }
@@ -923,6 +930,10 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     kvm_agent_status_t agent;
     kvm_agent_status(&agent);
 
+    /* The P4's silicon revision, major * 100 + minor: 301 is v3.1. */
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+
     char body[3072];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
@@ -945,7 +956,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"jiggler\":{\"everyS\":%d,\"nudges\":%u},\"usbPad\":\"%s\","
                      "\"agent\":{\"port\":%s,\"connected\":%s},"
                      "\"coproc\":%s,\"rtc\":%s,\"rtcChip\":\"%s\",\"boardTempC\":%s,"
-                     "\"crashDumpBytes\":%u,\"installId\":\"%s\"}",
+                     "\"crashDumpBytes\":%u,\"installId\":\"%s\",\"chipRev\":%u}",
                      app->project_name, app->version, app->date, app->time, kvm_board_id(),
                      app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false", ota_json,
@@ -973,7 +984,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      agent.port ? "true" : "false", agent.connected ? "true" : "false",
                      coproc_json,
                      kvm_rtc_present() ? "true" : "false", kvm_rtc_name(), board_temp, dump_bytes,
-                     install_id);
+                     install_id, (unsigned)chip.revision);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }
@@ -3384,6 +3395,18 @@ static esp_err_t ws_input_handler(httpd_req_t *req)
     const int my_fd = httpd_req_to_sockfd(req);
     ctrl_client_add(my_fd);
     const uint8_t op = pkt.len ? buf[0] : 0;
+
+    /* A view-only sign-in watches: it hears the state and the pong, and its
+     * input, takeover included, goes nowhere. Checked before the control logic
+     * so it can never claim control that happens to be free. */
+    if (kvm_auth_socket_view_only(my_fd)) {
+        ws_send_control(my_fd, CTRL_VIEW_ONLY);
+        if (op == WS_C2D_PING) {
+            ws_send_pong(my_fd);
+            ws_send_status_to(my_fd);
+        }
+        return ESP_OK;
+    }
     const bool is_input = (op >= WS_C2D_MOUSE_ABS && op <= WS_C2D_RELEASE_ALL) || op == WS_C2D_PAD;
 
     /*
@@ -3537,6 +3560,80 @@ void kvm_web_webrtc_input(const uint8_t owner[32], const uint8_t *msg, size_t le
         const int16_t dy = (int16_t)((uint16_t)msg[4] | ((uint16_t)msg[5] << 8));
         usb_hid_mouse_rel(buttons, dx, dy, 0, 0);
     }
+}
+
+/* The peer's address as text: IPv4 also when it came in mapped into IPv6. */
+static void peer_ip(int fd, char *out, size_t cap)
+{
+    snprintf(out, cap, "?");
+    struct sockaddr_storage ss;
+    socklen_t len = sizeof(ss);
+    if (getpeername(fd, (struct sockaddr *)&ss, &len) != 0) {
+        return;
+    }
+    if (ss.ss_family == AF_INET) {
+        inet_ntop(AF_INET, &((struct sockaddr_in *)&ss)->sin_addr, out, cap);
+    } else if (ss.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *a6 = (const struct sockaddr_in6 *)&ss;
+        const uint8_t *b = (const uint8_t *)&a6->sin6_addr;
+        static const uint8_t v4map[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        if (memcmp(b, v4map, sizeof(v4map)) == 0) {
+            snprintf(out, cap, "%u.%u.%u.%u", b[12], b[13], b[14], b[15]);
+        } else {
+            inet_ntop(AF_INET6, &a6->sin6_addr, out, cap);
+        }
+    }
+}
+
+/*
+ * Who has the console open: one entry for each open console tab (its control
+ * socket), with its address, whether it is in control, whether it signed in
+ * as the viewer, and whether it is the asker's own sign-in.
+ */
+static esp_err_t api_viewers_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    uint8_t mine[32];
+    const bool know_mine = kvm_auth_required() && kvm_auth_session_of(req, mine);
+
+    int fds[TX_MAX_SOCKETS];
+    int holder = -1;
+    if (!s_ws_mu || xSemaphoreTake(s_ws_mu, pdMS_TO_TICKS(200)) != pdTRUE) {
+        return send_json_error(req, "503 Service Unavailable", "busy");
+    }
+    memcpy(fds, s_ctrl_fds, sizeof(fds));
+    holder = s_ws_fd;
+    xSemaphoreGive(s_ws_mu);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *list = cJSON_AddArrayToObject(root, "viewers");
+    for (int i = 0; i < TX_MAX_SOCKETS; i++) {
+        if (fds[i] <= 0) {
+            continue;
+        }
+        char ip[48];
+        peer_ip(fds[i], ip, sizeof(ip));
+        uint8_t theirs[32];
+        const bool known = kvm_auth_socket_session(fds[i], theirs);
+        cJSON *v = cJSON_CreateObject();
+        cJSON_AddStringToObject(v, "ip", ip);
+        cJSON_AddBoolToObject(v, "control", fds[i] == holder);
+        cJSON_AddBoolToObject(v, "viewOnly", known && kvm_auth_session_view_only(theirs));
+        cJSON_AddBoolToObject(v, "you", know_mine && known && memcmp(mine, theirs, 32) == 0);
+        cJSON_AddItemToArray(list, v);
+    }
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!body) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t r = httpd_resp_sendstr(req, body);
+    free(body);
+    return r;
 }
 
 static esp_err_t root_get(httpd_req_t *req)
@@ -5316,6 +5413,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/settings/schema", .method = HTTP_GET, .handler = api_settings_schema_get},
         {.uri = "/api/v1/pins", .method = HTTP_GET, .handler = api_pins_get},
         {.uri = "/api/v1/video/status", .method = HTTP_GET, .handler = api_video_status_get},
+        {.uri = "/api/v1/viewers", .method = HTTP_GET, .handler = api_viewers_get},
         {.uri = "/api/v1/system/info", .method = HTTP_GET, .handler = api_system_info_get},
         {.uri = "/api/v1/system/usbprobe", .method = HTTP_GET, .handler = api_system_usbprobe_get},
         {.uri = "/api/v1/wifi/scan", .method = HTTP_POST, .handler = api_wifi_scan_post},

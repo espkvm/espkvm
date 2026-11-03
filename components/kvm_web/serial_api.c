@@ -171,7 +171,8 @@ static esp_err_t serial_ws_handler(httpd_req_t *req)
             if (!add_client(fd)) {
                 ESP_LOGW(TAG, "serial console: already %d viewers", SER_MAX_CLIENTS);
             }
-        } else if (data[0] == SER_WS_INPUT && pkt.len > 1) {
+        } else if (data[0] == SER_WS_INPUT && pkt.len > 1 && !kvm_auth_socket_view_only(fd)) {
+            /* A view-only sign-in reads the console but does not type into it. */
             (void)kvm_serial_write(data + 1, pkt.len - 1);
         }
     }

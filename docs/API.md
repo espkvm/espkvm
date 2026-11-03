@@ -54,11 +54,11 @@ be given a URL.
 | `GET /api/v1/settings/schema` | title, range and help text for every setting; `profile: true` on the ones a device profile can hold |
 | `GET /api/v1/regions` | screen areas: each one's rectangle (parts of the frame, 0..1), mode (`change`, `still`, `like`, `unlike`, `colour`), threshold (% of the area that must differ), hold (seconds), colour, `notify`, `clip`, and `live`: whether it is on, how far off it is, its main colour, how many times it fired |
 | `POST /api/v1/regions`, `/remember` | replace all the areas (`{"regions": [...]}`, up to 8, names unique), or save what area `{"id"}` shows now for `like` / `unlike` |
-| `GET /api/v1/profiles` | device profiles: the list, the active one, whether it was picked by hand, the presets, and what is attached now (`seen`: CEC name and vendor, USB OS). `welcome: true` on a device whose first password was just set (the console asks what it will see), `suggest`: a preset id for the attached device when it names itself over CEC and no profile fits it |
+| `GET /api/v1/profiles` | device profiles: the list, the active one, whether it was picked by hand, the presets, and what is attached now (`seen`: CEC name and vendor, USB OS). `welcome: true` on a device whose first password was just set (the console asks what it will see), `tourSeen`: the firmware version the console's overview of features was last closed on (`""`: never), `suggest`: a preset id for the attached device when it names itself over CEC and no profile fits it |
 | `POST /api/v1/profiles`, `/update`, `/delete`, `/select` | make one (`{"name", "from": "current"\|"empty"\|<preset>, "match", "set", "select"}`), change one (`{"id", "name", "match", "set", "unset"}`), delete one, or pick one by hand (`{"id"}`). Default (id 0) cannot be deleted. Each answers with the list, plus `"reboot": true` when the gamepad or the EDID moved and a restart applies it. Settings read and written through `/api/v1/settings` are the active profile's |
-| `POST /api/v1/profiles/dismiss` | `{"welcome": true}` ends the first-run question, `{"preset": "<id>"}` stops `suggest` offering that preset. Answers with the list |
+| `POST /api/v1/profiles/dismiss` | `{"welcome": true}` ends the first-run question, `{"tour": "<version>"}` closes the overview on that version, `{"preset": "<id>"}` stops `suggest` offering that preset. Answers with the list |
 | `POST /api/v1/settings/reset` | put every setting back to its default |
-| `GET /api/v1/system/info` | version, uptime, free memory, chip temperature, thermal state, network, ATX power state |
+| `GET /api/v1/system/info` | version, uptime, free memory, chip temperature and revision (`chipRev`, 301 = v3.1), thermal state, network, ATX power state |
 | `GET /api/v1/system/memory` | each heap (internal, DMA, PSRAM) with its largest free piece and the lowest it has been, and every task's stack: where it is, its size and how close it has come to the end |
 | `GET /api/v1/system/log` | the device's own log, as a file |
 | `GET /api/v1/system/coredump`, `DELETE` | the crash dump a panic left in flash, as a file, or throw it away |
@@ -77,8 +77,9 @@ be given a URL.
 
 | | |
 |---|---|
-| `GET /api/v1/auth/session` | whether a login is required, who is signed in, whether two-factor is on and a viewing token exists |
+| `GET /api/v1/auth/session` | whether a login is required, who is signed in, whether two-factor is on and a viewing token exists, `viewOnly` (signed in as the viewer) and `viewer` (a viewer password is set) |
 | `POST /api/v1/auth/login`, `/logout`, `/password` | the session, and changing the password. On the setup hotspot the first password also takes `network` (`ethernet`, `wifi` with `ssid` and `wifiPass`, or `ap` with `apPass`) - the choices are in the session's `setupNetwork` - and the device restarts |
+| `POST /api/v1/auth/viewer` | the view-only sign-in: `current` (your password) and `next` (the viewer's password, or empty to turn it off). The viewer signs in as user `viewer`, with no two-factor code. Every view-only session ends on a change |
 | `POST /api/v1/auth/2fa/begin`, `/enable`, `/disable`, `/recovery` | set up two-factor sign-in (a secret and its QR code), confirm it with a code, turn it off, or make new recovery codes; the last three take `password` and `code` |
 | `POST /api/v1/auth/token`, `DELETE` | the viewing token, above |
 | `GET /api/v1/tls`, `PUT`/`DELETE /api/v1/tls/cert` | install your own certificate and key, or go back to the device's own |
@@ -89,7 +90,8 @@ be given a URL.
 
 | | |
 |---|---|
-| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), and `profile` (the active device profile's id) |
+| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), and `hdd` (the target's HDD LED is lit or blinking; null when it is not wired) |
+| `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in) |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
 | `GET /api/v1/video/frame.jpg` | one frame as a JPEG, on either codec |
 | `GET /api/v1/screen/text` | the screen as characters when the target is in a text mode; 204 when it is showing a picture |
@@ -185,7 +187,7 @@ Binary; the first byte is the message.
 |---|---|
 | `0x81` status | flags u8 (bit 0: a target is attached), keyboard LEDs u8 |
 | `0x82` pong | |
-| `0x83` control | 0 held by another client, 1 you hold it, 2 free |
+| `0x83` control | 0 held by another client, 1 you hold it, 2 free, 3 view-only sign-in (control can never be taken) |
 | `0x84` update | phase, then percent |
 
 Input from a client that does not hold control is ignored. The console pings

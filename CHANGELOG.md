@@ -7,6 +7,59 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.76.0] - 2026-11-03
+
+### Added
+- A page that lists what the device can do: each feature with its state (On,
+  Off), a button to its settings or panel, and a link to its docs. It comes
+  once after the first-run question, once on a device updated from an older
+  version, and again after an update that adds a feature, with that one marked
+  New. Settings, System opens it any time. Settings opened from it scroll to
+  the right group and have a button back. It also says when a feature's
+  buttons are hidden in the console. At the bottom there is a link to GitHub
+  Discussions, for something missing.
+- Keyboard shortcuts for the console: F for full screen, I, M, A and R for the
+  panels, and ? for a list of them, with how to send Esc, Ctrl+Alt+Del and the
+  Windows key.
+- A box under Paste text to type text into, for when the browser will not
+  read the clipboard. A long paste shows its progress and can be stopped.
+- On a phone, a long press on a button in a bar shows what it is.
+- The browser tab has the device's name, and says "No signal" or "Unreachable"
+  in front.
+- A view-only sign-in: user `viewer` with its own password, set in Settings,
+  Security. It sees the picture, the sound and the recordings, and cannot
+  type, click, touch the power or change a setting. The device enforces it.
+- The status bar shows how many other consoles are open. A click lists their
+  addresses, who is in control and who only watches.
+- The dot next to Online pulses while frames arrive, and turns amber when the
+  device sends frames that stop reaching the tab.
+- "Show the keys sent" (Settings, UI): the last keys that went to the target,
+  in the bottom bar.
+- Your own cursor over the picture can be a small dot, or hidden (Settings,
+  Input, Pointer).
+- Scroll speed (Settings, Input, Pointer), for the wheel and the touchpad.
+- "Find this screen" now also fixes a target that puts black borders round a
+  smaller desktop, such as 4:3 in a 16:9 mode. Clicks used to land short of
+  the pointer there.
+- The target's HDD LED can be wired like the power LED (`atx_hdd_gpio`). The
+  power button on the rail then blinks while the disk works.
+
+### Changed
+- The device count from the update check now includes the chip revision
+  (3.1, 1.3), so I can see which silicon is out there. The firmware reports it
+  in `/api/v1/system/info` as `chipRev`.
+- The Waveshare ESP32-P4-Module-DEV-KIT is marked tested now. Someone runs
+  the rev 3.x image on one.
+
+### Fixed
+- Scrolling with a touchpad often did nothing, and so did a mouse wheel in a
+  browser that reports small steps, like Firefox. Small steps now add up, and
+  every notch of a wheel is at least one click on the target.
+- MJPEG on rev 3.x boards was washed out: black came out dark grey, white a
+  little dim. The HDMI bridge sent black as 16 and white as 235, and a browser
+  reads a JPEG as 0 to 255. It sends the full range now, and H.264 says in its
+  stream which range it uses.
+
 ## [0.75.0] - 2026-10-30
 
 ### Added

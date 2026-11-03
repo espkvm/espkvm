@@ -126,6 +126,12 @@ bool kvm_auth_socket_ok(int fd);
 /** The sign-in a marked socket was opened under; false for an unknown one. */
 bool kvm_auth_socket_session(int fd, uint8_t out[32]);
 
+/** The socket was opened under a view-only sign-in: it may watch, not act. */
+bool kvm_auth_socket_view_only(int fd);
+
+/** The sign-in with this session hash (kvm_auth_session_of) is view-only. */
+bool kvm_auth_session_view_only(const uint8_t hash[32]);
+
 /**
  * The sign-in a request was made under, as the SHA-256 the device keeps of it,
  * for something that outlives the request and must end with the sign-in.

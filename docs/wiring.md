@@ -97,11 +97,17 @@ the optional wire:
 | Power button output | `atx_pwr_gpio` | 46 |
 | Reset button output | `atx_rst_gpio` | 47 |
 | Power LED input | `atx_led_gpio` | unassigned - 48 is free for it (3 on the Guition) |
+| HDD LED input (optional) | `atx_hdd_gpio` | unassigned |
 
 The LED is left unassigned on purpose. Its input is biased toward "off", so a
 pin that nobody wired would report the target as powered down for ever, and no
 reading is better than a wrong one. Set it when the third wire is actually
 there.
+
+The HDD LED is wired the same way, through another optocoupler channel, from
+the case's HDD LED header. With it set, the power button on the rail gets a
+second dot that blinks while the target's disk works: a machine that looks
+frozen but is busy says so.
 
 Any other free pin does as well - the console's Pins tab draws the header of the
 board it is running on, so you can see where the wire actually goes.
@@ -126,10 +132,11 @@ Under **Settings -> Power**:
 | `atx_pwr_gpio` | Power button GPIO | 46 |
 | `atx_rst_gpio` | Reset button GPIO | 47 |
 | `atx_led_gpio` | Power LED sense GPIO | -1 (no sensing) |
+| `atx_hdd_gpio` | HDD LED sense GPIO, read like the power LED | -1 (no sensing) |
 | `atx_short_ms` | Normal press length | 200 ms |
 | `atx_long_ms` | Hard-off hold length | 5000 ms |
 | `atx_active_high` | Drive high to press (high-level-trigger module) | on |
-| `atx_led_ah` | LED reads high when the target is on | on |
+| `atx_led_ah` | LED reads high when the target is on (both LEDs) | on |
 
 Set the pins and turn `atx_enable` on; the power button at the bottom of the
 console's side rail lights up.

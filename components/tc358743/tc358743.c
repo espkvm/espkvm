@@ -225,6 +225,7 @@ static const char *TAG = "tc358743";
 #define VI_REP 0x8576
 #define MASK_VOUT_COLOR_SEL 0xe0
 #define MASK_VOUT_COLOR_RGB_FULL 0x00
+#define MASK_VOUT_COLOR_601_YCBCR_FULL 0x40
 #define MASK_VOUT_COLOR_601_YCBCR_LIMITED 0x60
 #define MASK_VOUT_COLOR_709_YCBCR_LIMITED 0xa0
 
@@ -618,7 +619,11 @@ static void set_csi_color_space_uyvy422_regs(tc358743_t *d)
 {
     wr8_and_or(d, VOUT_SET2, (uint8_t) ~(MASK_SEL422 | MASK_VOUT_422FIL_100),
                (uint8_t)(MASK_SEL422 | MASK_VOUT_422FIL_100));
-    wr8_and_or(d, VI_REP, (uint8_t)~MASK_VOUT_COLOR_SEL, MASK_VOUT_COLOR_601_YCBCR_LIMITED);
+    /* Full range, 0-255: the JPEG engine takes these bytes as they are, and a
+     * browser reads a JPEG as full range. Limited range (black at 16, white at
+     * 235) came out grey and washed out in MJPEG. H.264 says full range in its
+     * SPS (h264_sps.c). */
+    wr8_and_or(d, VI_REP, (uint8_t)~MASK_VOUT_COLOR_SEL, MASK_VOUT_COLOR_601_YCBCR_FULL);
     wr16_and_or(d, CONFCTL, (uint16_t)~MASK_YCBCRFMT, MASK_YCBCRFMT_422_8_BIT);
 }
 

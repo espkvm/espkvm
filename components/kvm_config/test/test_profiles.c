@@ -364,11 +364,33 @@ static bool welcome_on(void)
     return on;
 }
 
+/* The version the overview was last closed on, "" never. */
+static bool tour_seen(const char *want)
+{
+    cJSON *p = profiles();
+    const cJSON *v = cJSON_GetObjectItem(p, "tourSeen");
+    const bool same = cJSON_IsString(v) && strcmp(v->valuestring, want) == 0;
+    cJSON_Delete(p);
+    return same;
+}
+
 /* The first-run question and the offer for an attached device. */
 static void asks(void)
 {
     CHECK(!welcome_on());
     kvm_profiles_welcome();
+    CHECK(welcome_on());
+
+    /* The overview is owed until the console says it was shown, on a device
+       that never had the question as well. */
+    char tour_err[96];
+    CHECK(tour_seen(""));
+    CHECK(kvm_profiles_dismiss("{\"tour\":\"0.76.0\"}", tour_err, sizeof(tour_err)) == ESP_OK);
+    CHECK(tour_seen("0.76.0"));
+    CHECK(kvm_profiles_dismiss("{\"tour\":true}", tour_err, sizeof(tour_err)) == ESP_ERR_INVALID_ARG);
+    CHECK(kvm_profiles_dismiss("{\"tour\":\"0123456789012345678901234\"}", tour_err, sizeof(tour_err)) ==
+          ESP_ERR_INVALID_ARG);
+    CHECK(tour_seen("0.76.0"));
     CHECK(welcome_on());
 
     const kvm_prof_seen_t deck = {"Steam Deck", "e0319e", "linux"};
@@ -406,7 +428,7 @@ static void asks(void)
     cJSON_Delete(p);
 }
 
-/* Both answers survive a restart; a reset forgets them. */
+/* The answers survive a restart; a reset forgets them. */
 static void asks_after(void)
 {
     CHECK(welcome_on());
@@ -418,10 +440,12 @@ static void asks_after(void)
     char err[96];
     CHECK(kvm_profiles_dismiss("{\"welcome\":true}", err, sizeof(err)) == ESP_OK);
     CHECK(!welcome_on());
+    CHECK(tour_seen("0.76.0"));
 
     kvm_profiles_welcome();
     CHECK(kvm_settings_reset() == ESP_OK);
     CHECK(!welcome_on());
+    CHECK(tour_seen(""));
     p = profiles();
     CHECK(strcmp(suggested(p), "steamdeck") == 0);
     cJSON_Delete(p);

@@ -276,15 +276,6 @@ the target's end reboots the KVM.
 </tr>
 </table>
 
-## Boards built from a schematic, never run
-
-:warning: **Nobody has run this firmware on any of these.** Their pins were read
-off the vendor's schematic or published pin table, the images build and CI
-publishes them, and that is the whole claim. Flashing one cannot damage it: the
-worst case is an image that does not start, and a reflash undoes that. If you
-have one, please say how it went - that is what moves a board into the list
-above.
-
 <table>
 <tr>
 <td width="50%"><img src="board-module-devkit.webp" alt="Waveshare ESP32-P4-Module-DEV-KIT board"></td>
@@ -312,23 +303,9 @@ to the target must be an A-to-A cable with the 5 V wire cut.
 
 <table>
 <tr>
-<td width="50%"><img src="board-funcev-c5.webp" alt="Espressif ESP32-P4X-C5-Function-EV-Board"></td>
 <td width="50%"><img src="board-wifi6-db.webp" alt="Waveshare ESP32-P4-WIFI6-DB board"></td>
 </tr>
 <tr>
-<td valign="top">
-
-**[Espressif ESP32-P4X-C5-Function-EV-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4x-c5-function-ev-board/user_guide.html)**
-
-The Function EV with a dual-band **ESP32-C5** in place of the C6, and a rev 3.x
-chip: Ethernet, microSD, the same 40-pin header and camera connector, 16 MB
-flash, 32 MB PSRAM. The C5 sits on the pins the C6 used, which is what
-esp-hosted's preset for this board says, so the build is the Function EV's with
-the co-processor swapped: `boards/funcev_p4.defaults` +
-`boards/funcev_c5_p4.defaults`. The HS OTG goes to a Type-C and a Type-A that
-cannot be used at once - the target goes on the Type-C.
-
-</td>
 <td valign="top">
 
 **[Waveshare ESP32-P4-WIFI6-DB](https://www.waveshare.com/esp32-p4-wifi6-db.htm)**
@@ -342,6 +319,36 @@ One difference to plan for: its camera connector is the 22-pin 0.5 mm (Pi 5)
 kind, not the WIFI6's 15-pin: use the 22-pin ribbon that comes with the C790.
 Tested on hardware: Wi-Fi through the C5, a 1080p30 picture from a C792,
 keyboard and mouse.
+
+</td>
+</tr>
+</table>
+
+## Boards built from a schematic, never run
+
+:warning: **Nobody has run this firmware on any of these.** Their pins were read
+off the vendor's schematic or published pin table, the images build and CI
+publishes them, and that is the whole claim. Flashing one cannot damage it: the
+worst case is an image that does not start, and a reflash undoes that. If you
+have one, please say how it went - that is what moves a board into the list
+above.
+
+<table>
+<tr>
+<td width="50%"><img src="board-funcev-c5.webp" alt="Espressif ESP32-P4X-C5-Function-EV-Board"></td>
+</tr>
+<tr>
+<td valign="top">
+
+**[Espressif ESP32-P4X-C5-Function-EV-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32p4/esp32-p4x-c5-function-ev-board/user_guide.html)**
+
+The Function EV with a dual-band **ESP32-C5** in place of the C6, and a rev 3.x
+chip: Ethernet, microSD, the same 40-pin header and camera connector, 16 MB
+flash, 32 MB PSRAM. The C5 sits on the pins the C6 used, which is what
+esp-hosted's preset for this board says, so the build is the Function EV's with
+the co-processor swapped: `boards/funcev_p4.defaults` +
+`boards/funcev_c5_p4.defaults`. The HS OTG goes to a Type-C and a Type-A that
+cannot be used at once - the target goes on the Type-C.
 
 </td>
 </tr>

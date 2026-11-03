@@ -148,7 +148,15 @@ mouse and part of the picture aims at the screen you cannot see. Settings ->
 Input -> Several screens -> "Find this screen" fixes that: the console sweeps the
 pointer across the desktop, sees where it lands in the picture and saves where
 this screen sits, so a click lands where you click. Relative mode is the other
-way out - it sends movement, not position.
+way out - it sends movement, not position. The same sweep fixes a target that
+draws black borders round a smaller desktop, a 4:3 one in a 16:9 mode say: there
+the desktop sits inside the picture, and the clicks would land short of the
+pointer without it.
+
+Settings -> Input -> Pointer also has the scroll speed (a wheel notch and a
+touchpad swipe alike) and what your own cursor looks like over the picture
+while you have control: the arrow, a small dot so the target's cursor is easy
+to see, or nothing.
 
 ## How long it takes
 
@@ -456,6 +464,16 @@ to. Hold it *after* the reset, not through it: on boards where that button is
 also the ROM's download strap, holding it through a reset drops the chip into
 firmware-download mode instead.
 
+A second sign-in can watch and do nothing else. Settings -> Security -> View-only
+sign-in sets a password for the user `viewer`: it sees the picture, hears the
+sound, opens the recordings and reads the screen as text, and cannot type, click,
+touch the power, mount media or change a setting. The device enforces that, not
+the console: a view-only session reaches a fixed list of read-only endpoints,
+and its keyboard, mouse and serial input are dropped. It asks for no two-factor
+code. Changing or removing its password signs every viewer out. The status bar
+shows how many other consoles are open, and a click lists their addresses, who
+is in control and who signed in as the viewer.
+
 Physical presence is the credential here, because whoever can hold that button
 can also unplug the machine this device is attached to. The same gesture puts the
 network back somewhere reachable - DHCP, the wired link, no operator certificate
@@ -488,3 +506,17 @@ fetching - the device never reaches the internet on its own.
 A Vue 3 console served from the device as a single gzipped file of about 70 KB,
 with no external fonts, scripts or requests: the device has to work on a network
 with no way out.
+
+Keys for the console itself work while the target does not have control: F for
+full screen, I, M, A and R for the panels, and ? for the list. With control,
+every key goes to the target and Esc gives it back. On a phone, a long press on
+a button in a bar shows its name. The browser tab is named after the device and
+says "No signal" or "Unreachable" in front when that is the case.
+
+The dot next to "Online" in the status bar also says whether frames are
+coming. It pulses while they are drawn, stays green and still while the
+target's screen does not change (the device then sends next to nothing), and
+turns amber when the device sends frames that stop reaching this tab. Red is
+a device that does not answer at all. Settings -> UI -> "Show the
+keys sent" adds a strip to the bottom bar with the last keys and combinations
+that went to the target.

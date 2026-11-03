@@ -26,6 +26,8 @@ static const capture_pixfmt_t k_rgb888 = {
     .jpeg_src = JPEG_ENCODE_IN_FORMAT_RGB888,
     /* RGB in: the engine converts and can subsample to 4:2:0. */
     .jpeg_subsample = JPEG_DOWN_SAMPLING_YUV420,
+    /* The PPA pass is set to full range for H.264. JPEG converts RGB itself. */
+    .full_range = true,
 };
 #endif
 
@@ -57,6 +59,8 @@ static const capture_pixfmt_t k_direct = {
      * output subsampling must stay 4:2:2 or the chroma corrupts (acid colours,
      * vertical banding). */
     .jpeg_subsample = JPEG_DOWN_SAMPLING_YUV422,
+    /* The TC358743 is told to send full range (tc358743.c). */
+    .full_range = true,
 };
 #endif
 
@@ -84,6 +88,9 @@ static const capture_pixfmt_t k_yuv422_swap = {
     .h264_pic = ESP_H264_RAW_FMT_O_UYY_E_VYY, /* never reached: no H.264 here */
     .jpeg_src = JPEG_ENCODE_IN_FORMAT_YUV422,
     .jpeg_subsample = JPEG_DOWN_SAMPLING_YUV422,
+    /* The LT6911D's own firmware picks the range, and there is no register map
+     * to ask it. Bridges send limited range by default. */
+    .full_range = false,
 };
 #endif
 

@@ -33,6 +33,7 @@ typedef struct {
     int jpeg_src;        /* jpeg_enc_input_format_t fed to the JPEG encoder    */
     bool swap_bytes;     /* reorder the captured bytes before the encoder?     */
     bool luma_first;     /* packed 4:2:2 with Y in the even bytes (YUYV)?      */
+    bool full_range;     /* YUV to the encoders in 0-255 rather than 16-235?   */
     int jpeg_subsample;  /* jpeg_down_sampling_type_t: must match the input's
                           * chroma - the P4 JPEG engine can't resample a packed
                           * YUV422 input down to 4:2:0, so UYVY needs 4:2:2 out  */

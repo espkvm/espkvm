@@ -8,7 +8,10 @@
  * plus "active" and "manual". Nothing is written there until the first profile
  * is made, and an older firmware never reads it. Two keys there are for the
  * console, not for a profile: "welcome" (the first password is set, ask which
- * devices it will see) and "declined" (presets not to offer again).
+ * devices it will see), "tour_ver" (the firmware version the console's
+ * overview of features was last closed on) and "declined" (presets not to
+ * offer again). "tour_ver" is absent on a device updated from before it, so
+ * the overview shows there once too.
  */
 #include "kvm_profiles.h"
 
@@ -83,6 +86,8 @@ static char s_seen_name[16], s_seen_vendor[8], s_seen_os[12];
 #define FP_LEN 48
 static char s_seen_fp[FP_LEN];
 static bool s_welcome;
+#define TOUR_VER_LEN 24
+static char s_tour_ver[TOUR_VER_LEN];
 static uint8_t s_declined;
 #define N_PRESETS (sizeof(k_presets) / sizeof(k_presets[0]))
 
@@ -189,6 +194,7 @@ static void write_asks(nvs_handle_t nvs, void *arg)
 {
     (void)arg;
     (void)nvs_set_u8(nvs, "welcome", s_welcome ? 1 : 0);
+    (void)nvs_set_str(nvs, "tour_ver", s_tour_ver);
     (void)nvs_set_u8(nvs, "declined", s_declined);
 }
 
@@ -281,6 +287,10 @@ void profiles_init(void)
     (void)nvs_get_u8(nvs, "active", &active);
     (void)nvs_get_u8(nvs, "manual", &manual);
     (void)nvs_get_u8(nvs, "welcome", &welcome);
+    size_t tour_len = sizeof(s_tour_ver);
+    if (nvs_get_str(nvs, "tour_ver", s_tour_ver, &tour_len) != ESP_OK) {
+        s_tour_ver[0] = '\0';
+    }
     (void)nvs_get_u8(nvs, "declined", &s_declined);
     nvs_close(nvs);
     s_welcome = welcome != 0;
@@ -323,6 +333,7 @@ void profiles_reset(void)
     s_active = KVM_PROFILE_DEFAULT;
     s_manual = false;
     s_welcome = false;
+    s_tour_ver[0] = '\0';
     s_declined = 0;
     (void)nvs_write(erase_all, NULL);
     unlock();
@@ -421,6 +432,7 @@ char *kvm_profiles_json(void)
     cJSON_AddNumberToObject(root, "max", KVM_PROFILES_MAX);
     cJSON_AddItemToObject(root, "seen", match_json(s_seen_name, s_seen_vendor, s_seen_os));
     cJSON_AddBoolToObject(root, "welcome", s_welcome);
+    cJSON_AddStringToObject(root, "tourSeen", s_tour_ver);
     const preset_t *sug = suggestion();
     if (sug) {
         cJSON_AddStringToObject(root, "suggest", sug->id);
@@ -718,6 +730,7 @@ esp_err_t kvm_profiles_dismiss(const char *json, char *err, size_t err_len)
         return res;
     }
     const cJSON *w = cJSON_GetObjectItemCaseSensitive(body, "welcome");
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(body, "tour");
     const cJSON *pre = cJSON_GetObjectItemCaseSensitive(body, "preset");
     const preset_t *k = cJSON_IsString(pre) ? find_preset(pre->valuestring) : NULL;
     if (pre && !k) {
@@ -725,9 +738,17 @@ esp_err_t kvm_profiles_dismiss(const char *json, char *err, size_t err_len)
         cJSON_Delete(body);
         return ESP_ERR_INVALID_ARG;
     }
+    if (t && (!cJSON_IsString(t) || strlen(t->valuestring) >= TOUR_VER_LEN)) {
+        snprintf(err, err_len, "tour: a version string");
+        cJSON_Delete(body);
+        return ESP_ERR_INVALID_ARG;
+    }
     lock();
     if (cJSON_IsTrue(w)) {
         s_welcome = false;
+    }
+    if (t) {
+        strlcpy(s_tour_ver, t->valuestring, sizeof(s_tour_ver));
     }
     if (k) {
         s_declined |= (uint8_t)(1u << (k - k_presets));

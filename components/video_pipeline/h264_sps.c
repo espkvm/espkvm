@@ -109,7 +109,7 @@ static size_t escape(const uint8_t *in, size_t n, uint8_t *out, size_t cap)
 
 /* The patched SPS payload (after the NAL header byte), escaped, into @p out;
  * 0 when it should be left alone. */
-static size_t patch(const uint8_t *nal, size_t n, uint8_t *out, size_t cap)
+static size_t patch(const uint8_t *nal, size_t n, uint8_t *out, size_t cap, bool full_range)
 {
     uint8_t rbsp[SPS_MAX];
     const size_t rlen = unescape(nal, n, rbsp, sizeof(rbsp));
@@ -150,12 +150,14 @@ static size_t patch(const uint8_t *nal, size_t n, uint8_t *out, size_t cap)
     if (rd(&r, 1)) {
         rd(&r, 1);
     }
+    const size_t signal_at = r.pos;
     if (rd(&r, 1)) {
         rd(&r, 4);
         if (rd(&r, 1)) {
             rd(&r, 24);
         }
     }
+    const size_t signal_end = r.pos;
     if (rd(&r, 1)) {
         rd_ue(&r);
         rd_ue(&r);
@@ -176,7 +178,21 @@ static size_t patch(const uint8_t *nal, size_t n, uint8_t *out, size_t cap)
 
     writer_t w = {0};
     reader_t c = {.b = rbsp, .len = rlen};
-    for (size_t i = 0; i < flag_at; i++) {
+    for (size_t i = 0; i < signal_at; i++) {
+        wr(&w, 1, rd(&c, 1));
+    }
+    /* The signal type, in place of whatever the encoder wrote. */
+    wr(&w, 1, 1);                 /* video_signal_type_present_flag */
+    wr(&w, 3, 5);                 /* video_format: unspecified */
+    wr(&w, 1, full_range ? 1 : 0); /* video_full_range_flag */
+    wr(&w, 1, 1);                 /* colour_description_present_flag */
+    wr(&w, 8, 1);                 /* colour_primaries: BT.709, as sRGB */
+    wr(&w, 8, 13);                /* transfer_characteristics: sRGB */
+    wr(&w, 8, 6);                 /* matrix_coefficients: BT.601 */
+    for (size_t i = signal_at; i < signal_end; i++) {
+        rd(&c, 1);
+    }
+    for (size_t i = signal_end; i < flag_at; i++) {
         wr(&w, 1, rd(&c, 1));
     }
     wr(&w, 1, 1);   /* bitstream_restriction_flag */
@@ -194,7 +210,7 @@ static size_t patch(const uint8_t *nal, size_t n, uint8_t *out, size_t cap)
     return escape(w.b, (w.pos + 7) / 8, out, cap);
 }
 
-size_t h264_sps_add_restriction(uint8_t *buf, size_t len, size_t cap)
+size_t h264_sps_patch(uint8_t *buf, size_t len, size_t cap, bool full_range)
 {
     /* Find the SPS NAL: after a start code, type 7, up to the next start code. */
     size_t begin = 0;
@@ -215,7 +231,7 @@ size_t h264_sps_add_restriction(uint8_t *buf, size_t len, size_t cap)
         }
     }
     uint8_t fixed[SPS_MAX];
-    const size_t n = patch(buf + begin, end - begin, fixed, sizeof(fixed));
+    const size_t n = patch(buf + begin, end - begin, fixed, sizeof(fixed), full_range);
     if (!n) {
         return len;
     }

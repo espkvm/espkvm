@@ -18,7 +18,9 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -40,6 +42,7 @@ typedef struct {
     int pwr_gpio;
     int rst_gpio;
     int led_gpio;         /* -1 when no LED sense is wired */
+    int hdd_gpio;         /* -1 when no HDD LED sense is wired */
     int short_ms;
     int long_ms;
     bool active_high;     /* drive high to "press" the button */
@@ -55,6 +58,19 @@ static SemaphoreHandle_t s_cfg_mtx;
  * order where both are taken: op before cfg. */
 static SemaphoreHandle_t s_op_mtx;
 static QueueHandle_t s_cmd_q;
+
+/* The HDD LED blinks for each burst of disk work, far too briefly for a status
+ * poll once a second to see the level. An edge interrupt notes when it last
+ * changed, and the status calls the disk busy for a moment after. Milliseconds
+ * since boot, 32 bits so the ISR's store is one instruction. */
+static volatile uint32_t s_hdd_edge_ms;
+static bool s_isr_service;
+
+static void IRAM_ATTR hdd_edge(void *arg)
+{
+    (void)arg;
+    s_hdd_edge_ms = (uint32_t)(esp_timer_get_time() / 1000);
+}
 
 /* Idle level of a button output: whichever level does NOT press it. */
 static inline int idle_level(bool active_high) { return active_high ? 0 : 1; }
@@ -124,7 +140,7 @@ esp_err_t kvm_atx_init(void)
         return ESP_ERR_NO_MEM;
     }
     memset(&s_cfg, 0, sizeof(s_cfg));
-    s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = -1;
+    s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = s_cfg.hdd_gpio = -1;
     if (xTaskCreate(atx_task, "atx", 2048, NULL, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
@@ -170,6 +186,36 @@ static esp_err_t configure_led(int gpio, bool active_high)
     return gpio_config(&io);
 }
 
+/* Same wiring as the power LED, with an interrupt on every change. */
+static esp_err_t configure_hdd(int gpio, bool active_high)
+{
+    esp_err_t err = configure_led(gpio, active_high);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (!s_isr_service) {
+        err = gpio_install_isr_service(0);
+        /* Another driver may have installed it first; that one serves us too. */
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            return err;
+        }
+        s_isr_service = true;
+    }
+    err = gpio_set_intr_type(gpio, GPIO_INTR_ANYEDGE);
+    if (err == ESP_OK) {
+        err = gpio_isr_handler_add(gpio, hdd_edge, NULL);
+    }
+    return err;
+}
+
+static void release_hdd(int gpio)
+{
+    if (gpio >= 0) {
+        gpio_isr_handler_remove(gpio);
+        gpio_reset_pin(gpio);
+    }
+}
+
 esp_err_t kvm_atx_apply(void)
 {
     if (!s_cfg_mtx) {
@@ -180,6 +226,7 @@ esp_err_t kvm_atx_apply(void)
     const int pwr = (int)kvm_setting_int("atx_pwr_gpio");
     const int rst = (int)kvm_setting_int("atx_rst_gpio");
     const int led = (int)kvm_setting_int("atx_led_gpio");
+    const int hdd = (int)kvm_setting_int("atx_hdd_gpio");
     const int short_ms = (int)kvm_setting_int("atx_short_ms");
     const int long_ms = (int)kvm_setting_int("atx_long_ms");
     const bool active_high = kvm_setting_bool("atx_active_high");
@@ -198,8 +245,9 @@ esp_err_t kvm_atx_apply(void)
     release_pin(s_cfg.pwr_gpio);
     release_pin(s_cfg.rst_gpio);
     release_pin(s_cfg.led_gpio);
+    release_hdd(s_cfg.hdd_gpio);
     s_cfg.enabled = false;
-    s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = -1;
+    s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = s_cfg.hdd_gpio = -1;
 
     esp_err_t err = ESP_OK;
     if (want_hw) {
@@ -210,11 +258,15 @@ esp_err_t kvm_atx_apply(void)
         if (err == ESP_OK && led >= 0) {
             err = configure_led(led, led_active_high);
         }
+        if (err == ESP_OK && hdd >= 0) {
+            err = configure_hdd(hdd, led_active_high);
+        }
         if (err == ESP_OK) {
             s_cfg.enabled = true;
             s_cfg.pwr_gpio = pwr;
             s_cfg.rst_gpio = rst;
             s_cfg.led_gpio = led;
+            s_cfg.hdd_gpio = hdd;
             s_cfg.short_ms = short_ms;
             s_cfg.long_ms = long_ms;
             s_cfg.active_high = active_high;
@@ -224,6 +276,7 @@ esp_err_t kvm_atx_apply(void)
             release_pin(pwr);
             release_pin(rst);
             release_pin(led);
+            release_hdd(hdd);
         }
     }
 
@@ -258,6 +311,14 @@ void kvm_atx_status(kvm_atx_status_t *out)
     if (out->have_led) {
         const int level = gpio_get_level(s_cfg.led_gpio);
         out->power_on = s_cfg.led_active_high ? (level != 0) : (level == 0);
+    }
+    out->have_hdd = s_cfg.enabled && s_cfg.hdd_gpio >= 0;
+    if (out->have_hdd) {
+        const int level = gpio_get_level(s_cfg.hdd_gpio);
+        const bool lit = s_cfg.led_active_high ? (level != 0) : (level == 0);
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        /* Lit now, or blinked within the last poll and a half. */
+        out->hdd_busy = lit || (s_hdd_edge_ms != 0 && now_ms - s_hdd_edge_ms < 1500);
     }
     xSemaphoreGive(s_cfg_mtx);
 }

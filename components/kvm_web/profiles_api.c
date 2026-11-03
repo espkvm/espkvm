@@ -10,7 +10,7 @@
  *   POST /api/v1/profiles/update   {"id", "name", "match", "set", "unset"}
  *   POST /api/v1/profiles/delete   {"id"}
  *   POST /api/v1/profiles/select   {"id"}
- *   POST /api/v1/profiles/dismiss  {"welcome": true} or {"preset": id}
+ *   POST /api/v1/profiles/dismiss  {"welcome": true}, {"tour": version} or {"preset": id}
  *
  * Every POST answers with the list as GET does, plus "reboot": true when a
  * value that needs a restart moved.

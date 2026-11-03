@@ -52,6 +52,7 @@ static const char *const s_rec_subs_choices[] = {"off", "keys", "everything"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "720p", "1024x768", "480p", "1080p50"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
 static const char *const s_engage_choices[] = {"click", "hover"};
+static const char *const s_cursor_choices[] = {"arrow", "dot", "hidden"};
 /* Must match the layout ids in web/src/layouts.ts. New ones go on the end:
    the value is stored as an index, so reordering would move everyone's setting. */
 static const char *const s_layout_choices[] = {"en_us", "ru_ru", "cs_cz", "uk_ua", "lt_lt"};
@@ -342,16 +343,29 @@ static const kvm_setting_t s_settings[] = {
         .min = 0, .max = ENUM_MAX(s_engage_choices), .def = 0, .choices = s_engage_choices, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
     },
+    {
+        .key = "ptr_cursor", .section = "input", .group = "Pointer", .type = KVM_VT_ENUM,
+        .title = "Your cursor over the picture",
+        .help = "Your own cursor over the picture, while you have control in absolute "
+                "mode. \"arrow\" is the usual one. \"dot\" is a small dot, so the "
+                "target's own cursor is easy to see and you still know where you point. "
+                "\"hidden\" leaves only the target's cursor, which trails yours a little.",
+        .min = 0, .max = ENUM_MAX(s_cursor_choices), .def = 0, .choices = s_cursor_choices,
+        .requires_cap = KVM_CAP_HID, .flags = KVM_SF_PROFILE,
+    },
     /* A target with several screens: an absolute pointer addresses the whole
        desktop, not the one screen captured. Read by the console only. */
     {
         .key = "ptr_desk_w", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
         .title = "Whole desktop width (px)",
-        .help = "Only for a target with more than one screen. The absolute pointer covers "
-                "the whole desktop, not just the screen shown here, so the cursor runs off "
-                "onto the other screen. Give the size of the whole desktop and where this "
-                "screen sits in it, in the target's pixels - for two 1920x1080 screens side "
-                "by side with this one on the right: 3840, 1080, 1920, 0. 0 here turns it off.",
+        .help = "For a target with more than one screen, or one that puts black borders "
+                "round its picture. The absolute pointer covers the whole desktop, so with "
+                "two screens the cursor runs off onto the other one, and with borders it "
+                "lands short of where you click. \"Find this screen\" fills in these four. "
+                "By hand, in the picture's pixels: for two 1920x1080 screens side by side "
+                "with this one on the right, 3840, 1080, 1920, 0. For a 1440x1080 desktop "
+                "in the middle of a 1920x1080 picture, 1440, 1080, -240, 0. 0 here turns it "
+                "off.",
         .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
     },
@@ -365,15 +379,17 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ptr_scr_x", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
         .title = "This screen's left edge (px)",
-        .help = "Where this screen starts, from the left of the whole desktop.",
-        .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
+        .help = "Where this screen starts, from the left of the whole desktop. Below 0 "
+                "when the desktop starts to the right of the picture's left edge (black borders).",
+        .min = -32767, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
     },
     {
         .key = "ptr_scr_y", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
         .title = "This screen's top edge (px)",
-        .help = "Where this screen starts, from the top of the whole desktop.",
-        .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
+        .help = "Where this screen starts, from the top of the whole desktop. Below 0 "
+                "when the desktop starts below the picture's top edge (black borders).",
+        .min = -32767, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
     },
     {
@@ -421,6 +437,14 @@ static const kvm_setting_t s_settings[] = {
         .key = "scroll_inv", .section = "input", .group = "Pointer", .type = KVM_VT_BOOL,
         .title = "Invert scroll wheel",
         .def = 0, .requires_cap = KVM_CAP_HID,
+        .flags = KVM_SF_PROFILE,
+    },
+    {
+        .key = "scroll_speed", .section = "input", .group = "Pointer", .type = KVM_VT_INT,
+        .title = "Scroll speed (%)",
+        .help = "How far the target scrolls for a turn of the wheel or a swipe on a "
+                "touchpad. 100 sends one wheel click per notch, 50 one per two notches.",
+        .min = 25, .max = 400, .def = 100, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
     },
     {
@@ -678,6 +702,15 @@ static const kvm_setting_t s_settings[] = {
                 "power LED, not the HDD LED, which only blinks on disk activity. -1 if "
                 "you are not sensing the LED.",
         .min = -1, .max = 54, .def = CONFIG_KVM_ATX_LED_GPIO, .requires_cap = -1,
+        .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+    },
+    {
+        .key = "atx_hdd_gpio", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
+        .title = "HDD LED sense GPIO",
+        .help = "Reads the target's HDD LED the same way as the power LED, and with the "
+                "same active-high setting. The power button in the console then blinks "
+                "while the disk works. -1 if you are not sensing it.",
+        .min = -1, .max = 54, .def = -1, .requires_cap = -1,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
     },
     {
@@ -1224,8 +1257,8 @@ static const kvm_setting_t s_settings[] = {
         .title = "Offer firmware updates",
         .help = "The browser asks the address below whether a newer build exists and offers to "
                 "install it. With the project's own address it also tells check.espkvm.io, at "
-                "most once a day, this device's random id, its board and its version, so the "
-                "author can count the devices in use. The id is not taken from the hardware; "
+                "most once a day, this device's random id, its board, its version and the chip revision, so "
+                "the author can count the devices in use. The id is not taken from the hardware; "
                 "a settings reset makes a new one. The device never reaches out on its own - a "
                 "KVM that phones home is not what belongs in an isolated network.",
         .def = 0, .requires_cap = KVM_CAP_OTA,
@@ -1287,6 +1320,14 @@ static const kvm_setting_t s_settings[] = {
         .title = "Panel side",
         .help = "Which side of the screen the button rail and its panels sit on.",
         .min = 0, .max = ENUM_MAX(s_side_choices), .def = 0, .choices = s_side_choices, .requires_cap = -1,
+    },
+    {
+        .key = "ui_keys", .section = "ui", .group = "Layout", .type = KVM_VT_BOOL,
+        .title = "Show the keys sent",
+        .help = "The last few keys and key combinations that went to the target, in the "
+                "bottom bar. Handy when the target seems to ignore a key, or to show "
+                "someone what you press.",
+        .def = 0, .requires_cap = -1,
     },
     {
         .key = "ui_fs_hide", .section = "ui", .group = "Full screen", .type = KVM_VT_BOOL,

@@ -67,6 +67,7 @@ enum {
     CTRL_HELD_OTHER = 0, /* another client is in control; input here is ignored */
     CTRL_YOU = 1,        /* this client holds control */
     CTRL_FREE = 2,       /* nobody holds control; interacting takes it */
+    CTRL_VIEW_ONLY = 3,  /* this client signed in as the viewer: it can never take control */
 };
 
 #define KVM_ABS_MAX 32767

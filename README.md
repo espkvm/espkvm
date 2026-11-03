@@ -72,13 +72,13 @@ Useful for what it does today, and honest about the rest.
 | Video: follows the target's resolution, MJPEG and H.264 | works; H.264 needs HTTPS |
 | Keyboard, mouse, media keys, pasting text in a layout | works |
 | From a phone or a tablet | works; touch trackpad, pointer stick, pinch zoom and on-screen keyboard |
-| Several viewers, one in control | works |
+| Several viewers, one in control | works; plus a view-only sign-in for others |
 | Virtual media: boot the target from an image | works; from microSD or the device's flash |
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |
 | Notifications to Telegram or a webhook | works |
-| Power, reset and Wake-on-LAN | works; power needs an optocoupler or a relay |
+| Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |
 | HDMI-CEC remote | works; on TC358743 boards |
 | A gamepad for a console | works on a Switch |
 | Device profiles: pointer, gamepad and video settings for each target | new, the device picks one from HDMI-CEC or the USB guess |
@@ -136,7 +136,7 @@ The M5Stack Unit PoE-P4 takes its own [Add-on Display In](https://shop.m5stack.c
 | [DFRobot FireBeetle 2 ESP32-P4](https://espkvm.io/boards/firebeetle2-p4/) | Wi-Fi only | 1.x | tested |
 | [M5Stack Unit PoE-P4](https://espkvm.io/boards/m5-poe-p4/) | Ethernet with PoE | 1.x | tested |
 | [Waveshare ESP32-P4-NANO-WIFI6-DB](https://espkvm.io/boards/p4-nano-wifi6-db/) | Ethernet, 5 GHz Wi-Fi | 3.x | tested |
-| [Waveshare ESP32-P4-Module-DEV-KIT](https://espkvm.io/boards/p4-module-devkit/) | Ethernet, Wi-Fi | 1.x or 3.x | untested |
+| [Waveshare ESP32-P4-Module-DEV-KIT](https://espkvm.io/boards/p4-module-devkit/) | Ethernet, Wi-Fi | 1.x or 3.x | tested |
 | [Espressif ESP32-P4X-C5-Function-EV](https://espkvm.io/boards/funcev-c5/) | Ethernet, 5 GHz Wi-Fi | 3.x | untested |
 | [Waveshare ESP32-P4-WIFI6-DB](https://espkvm.io/boards/p4-wifi6-db/) | 5 GHz Wi-Fi only | 3.x | tested |
 | [VIEWE ESP32-P4-Pi](https://espkvm.io/boards/viewe-p4-pi/) | Ethernet, Wi-Fi | 1.x | untested |
@@ -307,6 +307,7 @@ docs/             what the hardware actually does
 - [私人定制 Blog](https://jinbel.cn/post/1487.html) - *GitHub 开源 ESP-KVM：$45 把 ESP32-P4 变成 IP 远程控制卡* (in Chinese)
 - [log8.kr](https://log8.kr/library/esp32-ip-kvm-out-of-band-recovery-2026/) - *ESP32 IP-KVM 홈랩 원격 복구 설계* (in Korean; a recovery-and-security checklist built around the device rather than a review of it)
 - [BearBlogtech](https://bearblogtech.ca/espkvm.html) - *ESPKVM an Open Source Kvm with IP and an ESp32* (a build log written after the author's own datacentre KVM died)
+- [Wiki4What](https://blog.wiki4what.com/e7u9umv0nmm/) - *ESP-KVM: Give Your AI a Spare Keyboard* (a field guide to letting an AI agent watch a spare computer through the device on an M5Stack Unit PoE-P4, and what to keep it from doing; also [on video](https://www.youtube.com/watch?v=E7U9UMV0NmM))
 
 Also on video in [5 Minutos de Miercoles #22](https://youtu.be/nw-8a1GmJLE?t=342)
 (Spanish, with dubbed tracks), and the origin story on
@@ -369,8 +370,8 @@ Running one? Tell me what works for you and what gets in your way in the
 [feedback thread](https://github.com/orgs/espkvm/discussions/65), and how many you
 run in the [poll](https://github.com/orgs/espkvm/discussions/60). The firmware
 itself sends nothing. If you turn on the update check, your browser also reports
-a random id of the device, its board and its version once a day, so I can count
-the devices in use (see [SETUP](docs/SETUP.md)).
+a random id of the device, its board, its version and the chip revision once a
+day, so I can count the devices in use (see [SETUP](docs/SETUP.md)).
 Questions, ideas and things people built go in
 [Discussions](https://github.com/orgs/espkvm/discussions).
 
