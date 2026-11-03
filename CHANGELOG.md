@@ -248,6 +248,8 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 - MJPEG on rev 3.x boards was washed out: black came out dark grey, white a little dim. The HDMI bridge sent black as 16 and white as 235, and a browser reads a JPEG as 0 to 255. It sends the full range now, and H.264 says in its stream which range it uses.
 
 ### Fixed
+- VeNCrypt now handles retryable TLS socket I/O and fragmented subtype negotiation
+  without consuming the TLS ClientHello before the TLS layer starts.
 - VNC reuses its H.264 JPEG encoder and output buffer for a connected viewer,
   waits for new frames on incremental requests, times out stalled handshakes,
   shares the web login throttle, and keeps VNC input independent from console

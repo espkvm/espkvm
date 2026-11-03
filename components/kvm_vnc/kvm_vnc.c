@@ -35,6 +35,7 @@
 #include "kvm_auth.h"
 #include "kvm_settings.h"
 #include "kvm_tls.h"
+#include "vencrypt_protocol.h"
 #include "usb_hid.h"
 #include "video_frame.h"
 #include "wifi.h"
@@ -92,8 +93,8 @@ static int tls_send(void *ctx, const unsigned char *buf, size_t len)
 {
     const int fd = *(const int *)ctx;
     const int n = send(fd, buf, len, 0);
-    if (n >= 0) return n;
-    if (errno == EINTR) {
+    if (n > 0) return n;
+    if (n == 0 || errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
         return MBEDTLS_ERR_SSL_WANT_WRITE;
     }
     return MBEDTLS_ERR_NET_SEND_FAILED;
@@ -104,7 +105,7 @@ static int tls_recv(void *ctx, unsigned char *buf, size_t len)
     const int fd = *(const int *)ctx;
     const int n = recv(fd, buf, len, 0);
     if (n > 0) return n;
-    if (n == 0) return MBEDTLS_ERR_SSL_CONN_EOF;
+    if (n == 0) return 0;
     if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
         return MBEDTLS_ERR_SSL_WANT_READ;
     }
@@ -147,6 +148,7 @@ static bool recv_exact(vnc_conn_t *conn, void *data, size_t len, uint32_t genera
 static bool send_all(vnc_conn_t *conn, const void *data, size_t len, uint32_t generation)
 {
     const uint8_t *p = data;
+    int64_t last_progress_us = esp_timer_get_time();
     while (len) {
         const size_t chunk = conn->tls && len > 4096 ? 4096 : len;
         const int n = conn->tls ? mbedtls_ssl_write(&conn->tls->ssl, p, chunk)
@@ -154,10 +156,15 @@ static bool send_all(vnc_conn_t *conn, const void *data, size_t len, uint32_t ge
         if (n > 0) {
             p += n;
             len -= (size_t)n;
+            last_progress_us = esp_timer_get_time();
             continue;
         }
         if (conn->tls && (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE)) {
-            if (generation != s_generation) return false;
+            if (generation != s_generation ||
+                esp_timer_get_time() - last_progress_us >=
+                    (int64_t)VNC_SEND_TIMEOUT_MS * 1000) {
+                return false;
+            }
             vTaskDelay(1);
             continue;
         }
@@ -292,6 +299,55 @@ static void vnc_tls_free(vnc_conn_t *conn)
     conn->tls = NULL;
 }
 
+typedef struct {
+    vnc_conn_t *conn;
+    uint32_t generation;
+    int64_t deadline_us;
+} vencrypt_socket_t;
+
+static int vencrypt_socket_send(void *ctx, const uint8_t *data, size_t len)
+{
+    vencrypt_socket_t *s = ctx;
+    const int n = send(s->conn->fd, data, len, 0);
+    if (n > 0) return n;
+    if (n == 0) return VENC_IO_WANT_WRITE;
+    if (errno == EINTR) return VENC_IO_INTERRUPTED;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return VENC_IO_WANT_WRITE;
+    return VENC_IO_ERROR;
+}
+
+static int vencrypt_socket_recv(void *ctx, uint8_t *data, size_t len)
+{
+    vencrypt_socket_t *s = ctx;
+    const int n = recv(s->conn->fd, data, len, 0);
+    if (n > 0) return n;
+    if (n == 0) return VENC_IO_CLOSED;
+    if (errno == EINTR) return VENC_IO_INTERRUPTED;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return VENC_IO_WANT_READ;
+    return VENC_IO_ERROR;
+}
+
+static bool vencrypt_socket_wait(void *ctx, bool writing)
+{
+    vencrypt_socket_t *s = ctx;
+    for (;;) {
+        if (s->generation != s_generation || esp_timer_get_time() >= s->deadline_us) {
+            return false;
+        }
+        fd_set ready;
+        FD_ZERO(&ready);
+        FD_SET(s->conn->fd, &ready);
+        const int64_t remaining_us = s->deadline_us - esp_timer_get_time();
+        const int64_t wait_us = remaining_us < 100000 ? remaining_us : 100000;
+        struct timeval wait = {.tv_sec = (long)(wait_us / 1000000),
+                               .tv_usec = (long)(wait_us % 1000000)};
+        const int selected = select(s->conn->fd + 1, writing ? NULL : &ready,
+                                    writing ? &ready : NULL, NULL, &wait);
+        if (selected > 0) return s->generation == s_generation;
+        if (selected < 0 && errno != EINTR) return false;
+    }
+}
+
 static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadline_us)
 {
     kvm_tls_identity_t identity;
@@ -353,6 +409,7 @@ static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
         vnc_tls_free(conn);
         return false;
     }
+    ESP_LOGI(TAG, "VeNCrypt TLS handshake complete");
     return generation == s_generation;
 }
 
@@ -444,38 +501,33 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
     static const uint8_t security_types[] = {2, 19, 2}; /* Prefer VeNCrypt; keep legacy clients working. */
     uint8_t selected;
     if (!send_all(conn, security_types, sizeof(security_types), generation) ||
-        !recv_exact_until(conn, &selected, 1, generation, deadline_us) ||
-        (selected != 2 && selected != 19)) {
+        !recv_exact_until(conn, &selected, 1, generation, deadline_us)) {
         return false;
     }
+    if (selected != 2 && selected != 19) {
+        ESP_LOGW(TAG, "client selected unsupported RFB security type %u", (unsigned)selected);
+        return false;
+    }
+    ESP_LOGI(TAG, "client selected RFB security type %u%s", (unsigned)selected,
+             selected == 19 ? " (VeNCrypt)" : " (legacy VNC auth)");
 
     if (selected == 19) {
         /* VeNCrypt 0.2 offers certificate-authenticated X509Vnc first, then
            TLSVnc for viewers that do not validate the server certificate. */
-        const uint8_t server_version[2] = {0, 2};
-        uint8_t client_vencrypt_version[2];
-        if (!send_all(conn, server_version, sizeof(server_version), generation) ||
-            !recv_exact_until(conn, client_vencrypt_version, sizeof(client_vencrypt_version),
-                              generation, deadline_us)) {
+        vencrypt_socket_t socket = {.conn = conn, .generation = generation,
+                                    .deadline_us = deadline_us};
+        const vencrypt_io_t io = {.ctx = &socket, .send = vencrypt_socket_send,
+                                  .recv = vencrypt_socket_recv, .wait = vencrypt_socket_wait};
+        uint32_t subtype_id;
+        const vencrypt_result_t result = vencrypt_server_negotiate(&io, &subtype_id);
+        if (result != VENC_RESULT_OK) {
+            ESP_LOGW(TAG, "VeNCrypt negotiation failed (%s)",
+                     result == VENC_RESULT_BAD_VERSION ? "unsupported version" :
+                     result == VENC_RESULT_BAD_SUBTYPE ? "unsupported subtype" : "I/O error");
             return false;
         }
-        if (client_vencrypt_version[0] != 0 || client_vencrypt_version[1] != 2) {
-            const uint8_t version_rejected = 1;
-            (void)send_all(conn, &version_rejected, sizeof(version_rejected), generation);
-            return false;
-        }
-        const uint8_t version_ok = 0;
-        const uint8_t subtype_count = 2;
-        const uint8_t x509_vnc[4] = {0, 0, 1, 5};
-        const uint8_t tls_vnc[4] = {0, 0, 1, 2};
-        uint8_t subtype[4];
-        if (!send_all(conn, &version_ok, sizeof(version_ok), generation) ||
-            !send_all(conn, &subtype_count, sizeof(subtype_count), generation) ||
-            !send_all(conn, x509_vnc, sizeof(x509_vnc), generation) ||
-            !send_all(conn, tls_vnc, sizeof(tls_vnc), generation) ||
-            !recv_exact_until(conn, subtype, sizeof(subtype), generation, deadline_us) ||
-            (be32(subtype) != 258 && be32(subtype) != 261) ||
-            !vnc_tls_start(conn, generation, deadline_us)) {
+        ESP_LOGI(TAG, "client selected VeNCrypt subtype %u", (unsigned)subtype_id);
+        if (!vnc_tls_start(conn, generation, deadline_us)) {
             return false;
         }
     }
@@ -483,7 +535,10 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
     const vnc_auth_result_t auth = vnc_auth(conn, generation, deadline_us);
     if (auth != VNC_AUTH_OK) {
         if (auth == VNC_AUTH_BAD_PASSWORD) {
+            ESP_LOGW(TAG, "VNC password authentication rejected");
             kvm_auth_attempt_failed();
+        } else {
+            ESP_LOGW(TAG, "VNC authentication exchange failed");
         }
         (void)send_u32(conn, 1, generation);
         static const char reason[] = "VNC password is invalid or authentication failed";
@@ -492,6 +547,7 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
         return false;
     }
     kvm_auth_attempt_succeeded();
+    ESP_LOGI(TAG, "VNC authentication succeeded");
     if (!send_u32(conn, 0, generation)) {
         return false;
     }

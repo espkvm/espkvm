@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "kvm_vnc.c"
+    SRCS "kvm_vnc.c" "vencrypt_protocol.c"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES
         lwip

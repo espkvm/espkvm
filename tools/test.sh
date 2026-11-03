@@ -54,6 +54,9 @@ if [ "$what" = all ] || [ "$what" = host ]; then
     echo "== WebRTC: SRTP, STUN, H.264 over RTP, SDP =="
     sh "$here/components/kvm_webrtc/test/run.sh"
     echo
+    echo "== VeNCrypt: version and TLS subtype negotiation =="
+    sh "$here/components/kvm_vnc/test/run.sh"
+    echo
 fi
 
 if [ "$what" = all ] || [ "$what" = web ]; then
