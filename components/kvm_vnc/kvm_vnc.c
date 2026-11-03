@@ -281,13 +281,6 @@ static uint8_t reverse_bits(uint8_t v)
     return (uint8_t)((v << 4) | (v >> 4));
 }
 
-static int tls_random(void *ctx, unsigned char *out, size_t len)
-{
-    (void)ctx;
-    esp_fill_random(out, len);
-    return 0;
-}
-
 static void vnc_tls_free(vnc_conn_t *conn)
 {
     if (!conn->tls) return;
@@ -329,7 +322,6 @@ static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
                                          MBEDTLS_SSL_PRESET_DEFAULT);
     }
     if (rc == 0) {
-        mbedtls_ssl_conf_rng(&tls->config, tls_random, NULL);
         rc = mbedtls_ssl_conf_own_cert(&tls->config, &tls->cert, &tls->key);
     }
     if (rc == 0) {
