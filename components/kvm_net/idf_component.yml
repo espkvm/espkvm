@@ -1,6 +1,6 @@
 dependencies:
   espressif/mdns:
-    version: "^1.8.0"
+    version: "~1.12.0" # 1.15.0 fails to build here (-Werror=stringop-truncation)
   # WiFi via an onboard ESP32-C6 (esp-hosted slave over SDIO). Pulled in ONLY when
   # CONFIG_KVM_WIFI is set (the funcev board overlay), so the Waveshare build - which
   # has no C6 - never fetches or links these. See espkvm-wifi-plan / boards/README.

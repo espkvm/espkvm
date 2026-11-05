@@ -2,8 +2,8 @@
 
 The device can say something happened while nobody was watching: a watched
 phrase appeared on the screen, the screen went blank, a dashcam clip was saved,
-the tailnet key is about to run out. It sends that to Telegram, to a webhook, or
-to both. Everything here is set in the console under Settings &rarr;
+the tailnet key is about to run out. It sends that to Telegram, to a webhook,
+and to browsers (Web Push), in any mix. Everything here is set in the console under Settings &rarr;
 Notifications; `POST /api/v1/notify/test` sends a test one and
 `GET /api/v1/notify/status` says how the last one went.
 
@@ -15,6 +15,30 @@ With the MJPEG codec a screenshot is attached; with H.264 the frame cannot be
 handed over as a JPEG, so the message goes without one. A dashcam clip under
 50 MB is uploaded as a video that plays in the chat; a bigger one is named
 instead.
+
+## Browsers (Web Push)
+
+**Send them to this browser** in Settings &rarr; Notifications asks the browser
+for permission and subscribes it. From then on alerts show up like any app's,
+also with the console closed. Chrome, Edge, Firefox and Safari do it. On an
+iPhone or iPad the console has to be added to the Home Screen first and opened
+from there. The console must be on HTTPS with a certificate the browser trusts.
+
+Nothing has to be registered anywhere. The device makes its own VAPID key on
+first use and signs each message with it. The message is encrypted for that
+one browser and goes to the browser's push service (Google's for Chrome and
+Edge, Mozilla's for Firefox, Apple's for Safari), which wakes the browser. So
+the device needs a way out to the internet, the same as for Telegram.
+
+Up to 8 browsers. The list under the button has a **Remove** for each. A
+browser that unsubscribed on its own is dropped at the next send. No
+screenshot or log goes this way: a push message is a few hundred bytes.
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/v1/push` | the VAPID public key and the browsers |
+| `POST /api/v1/push/subscribe` | `{endpoint, keys: {p256dh, auth}, name}`, as `PushSubscription.toJSON()` gives it |
+| `POST /api/v1/push/remove` | `{id}` or `{endpoint}` |
 
 ## Webhook
 

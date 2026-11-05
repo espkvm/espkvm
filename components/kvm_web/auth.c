@@ -33,6 +33,7 @@
 #include "wifi.h" /* kvm_net_mode_t: AP mode serves the console plain */
 #include "web_priv.h" /* kvm_web_clock_from_browser */
 #include "totp.h"
+#include "kvm_ts.h"
 
 #define TAG "auth"
 
@@ -1332,6 +1333,69 @@ static esp_err_t send_json(httpd_req_t *req, const char *status, const char *bod
 
 static bool setup_net_needed(void);
 
+/* @p login is one of the names in @p list (commas or spaces between them). */
+static bool login_listed(const char *list, const char *login)
+{
+    if (!list || !login || !login[0]) {
+        return false;
+    }
+    const size_t n = strlen(login);
+    const char *p = list;
+    while (*p) {
+        while (*p == ',' || *p == ' ') {
+            p++;
+        }
+        const char *e = p;
+        while (*e && *e != ',' && *e != ' ') {
+            e++;
+        }
+        if ((size_t)(e - p) == n && strncasecmp(p, login, n) == 0) {
+            return true;
+        }
+        p = e;
+    }
+    return false;
+}
+
+/*
+ * A browser on a tailnet device whose owner is listed in ts_trust (or
+ * ts_trust_view) is signed in without a password: Tailscale has already
+ * said who it is, and WireGuard ties the 100.x source address to that
+ * device's key. Only once a real password is set, so the default one
+ * still has to be changed first; two-factor is skipped for these, which
+ * is the point. Returns true when a session was made.
+ */
+static bool tailnet_sign_in(httpd_req_t *req, bool *view_only)
+{
+    if (!s_have_password || !kvm_setting_bool("ts_enable")) {
+        return false;
+    }
+    const char *owners = kvm_setting_str("ts_trust");
+    const char *viewers = kvm_setting_str("ts_trust_view");
+    if ((!owners || !owners[0]) && (!viewers || !viewers[0])) {
+        return false;
+    }
+    char ip[48];
+    kvm_web_peer_ip(httpd_req_to_sockfd(req), ip, sizeof(ip));
+    kvm_ts_peer_t peer;
+    if (!kvm_ts_peer_by_ip(ip, &peer) || !peer.user[0]) {
+        return false;
+    }
+    const bool owner = login_listed(owners, peer.user);
+    const bool viewer = !owner && login_listed(viewers, peer.user);
+    if (!owner && !viewer) {
+        return false;
+    }
+    char token[TOKEN_CHARS + 1];
+    session_create(false, viewer, token);
+    char cookie[192];
+    set_session_cookie(req, cookie, sizeof(cookie), token, false);
+    *view_only = viewer;
+    ESP_LOGI(TAG, "signed in %s from %s (%s) over Tailscale%s", peer.user, peer.name, ip,
+             viewer ? ", view only" : "");
+    return true;
+}
+
 static esp_err_t auth_session_get(httpd_req_t *req)
 {
     char token[TOKEN_CHARS + 1] = {0};
@@ -1357,6 +1421,9 @@ static esp_err_t auth_session_get(httpd_req_t *req)
      * cookie from a session the device no longer has (#31). The console asks
      * this at start-up and after a 401, not on a timer, so it cannot flood.
      */
+    if (!authenticated && kvm_auth_required() && tailnet_sign_in(req, &view_only)) {
+        authenticated = true;
+    }
     if (!authenticated && kvm_auth_required()) {
         ESP_LOGI(TAG, "session check: %s", had_cookie ? "cookie holds no session I know"
                                                       : "no cookie sent");

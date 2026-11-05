@@ -24,6 +24,7 @@
 #include "soc/lp_clkrst_reg.h"
 #include "soc/soc.h"
 
+#include "kvm_board_header.h"
 #include "kvm_caps.h"
 #include "kvm_ipv6.h"
 #include "kvm_settings.h"
@@ -275,7 +276,8 @@ void kvm_net_advertise(const char *hostname)
      * ever log in. A firmware version in a TXT record would hand out exactly
      * which known bugs apply, for free, to anyone listening. The hostname is
      * already public here (it is the .local name) and is the operator's own
-     * word, so it discloses nothing they did not choose to.
+     * word, so it discloses nothing they did not choose to. net_mdns_ident
+     * adds the product and the board, still never the version.
      */
     mdns_err = mdns_instance_name_set((hostname && hostname[0]) ? hostname : "ESP-KVM");
     if (mdns_err != ESP_OK) {
@@ -286,13 +288,28 @@ void kvm_net_advertise(const char *hostname)
      * so advertise the port that actually answers there. */
     const bool ap_mode = (kvm_setting_int("net_mode") == KVM_NET_WIFI_AP);
     const bool tls = kvm_setting_bool("sec_https") && !ap_mode;
+    const bool ident = kvm_setting_bool("net_mdns_ident");
     mdns_txt_item_t http_txt[] = {
         {"path", "/"},
+        {"product", "ESP-KVM"},
+        {"board", kvm_board_id()},
     };
+    const size_t txt_n = ident ? 3 : 1;
     /* Advertised under the service the device really answers, so a browser or a
      * discovery tool lands on the working port. */
     mdns_err = mdns_service_add(NULL, tls ? "_https" : "_http", "_tcp", tls ? 443 : 80, http_txt,
-                                1);
+                                txt_n);
+    if (mdns_err == ESP_OK && ident) {
+        /* A service of its own, so "every ESP-KVM here" is one query. */
+        mdns_txt_item_t kvm_txt[] = {
+            {"board", kvm_board_id()},
+            {"scheme", tls ? "https" : "http"},
+        };
+        esp_err_t e = mdns_service_add(NULL, "_espkvm", "_tcp", tls ? 443 : 80, kvm_txt, 2);
+        if (e != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS _espkvm: %s", esp_err_to_name(e));
+        }
+    }
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS service: %s", esp_err_to_name(mdns_err));
     } else {

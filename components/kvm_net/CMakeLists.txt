@@ -43,11 +43,13 @@ idf_component_register(
          "kvm_wg.c"
          "wifi.c"
          "coproc.c"
+         "ecc_wait.c"
     INCLUDE_DIRS "include"
     # esp_netif is public rather than private: kvm_ipv6.h names esp_netif_t, so
     # anything including it needs esp_netif's headers too.
     REQUIRES esp_netif
     PRIV_REQUIRES
+        kvm_board
         kvm_config
         kvm_notify
         kvm_storage
@@ -58,6 +60,9 @@ idf_component_register(
         microlink
         wireguard_lwip
         mbedtls
+        esp_security
+        esp_hal_security
+        esp_timer
         lwip
         ${wifi_reqs}
     EMBED_FILES ${coproc_embed}
@@ -70,6 +75,11 @@ idf_component_register(
 
 # ethernet.c resets the EMAC on the way into every restart (esp-idf #19085).
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_restart_noos")
+
+# ecc_wait.c puts a time limit on IDF's wait for the ECC accelerator.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_ecc_point_multiply"
+                                                 "-Wl,--wrap=esp_ecc_point_verify"
+                                                 "-u __wrap_esp_ecc_point_multiply")
 
 # wifi.c moves esp-hosted's SDIO packet buffers out of internal RAM, and makes
 # its long waits for the co-processor sleep instead of spin.

@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,6 +22,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -934,6 +936,10 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     esp_chip_info_t chip;
     esp_chip_info(&chip);
 
+    /* Settings, keys and certificates all live in NVS; a full one loses writes. */
+    nvs_stats_t nvs = {0};
+    (void)nvs_get_stats(NULL, &nvs);
+
     char body[3072];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
@@ -941,7 +947,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
                      "\"trialSeconds\":%u,"
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,\"psramLargest\":%u,"
-                     "\"internalFree\":%u,\"internalLargest\":%u,"
+                     "\"internalFree\":%u,\"internalLargest\":%u,\"internalMin\":%u,\"dmaFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
                      "\"net\":{\"up\":%s,\"mbps\":%d,\"mode\":\"%s\",\"active\":\"%s\","
                      "\"hasEth\":%s,\"wifiUp\":%s,"
@@ -956,7 +962,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      "\"jiggler\":{\"everyS\":%d,\"nudges\":%u},\"usbPad\":\"%s\","
                      "\"agent\":{\"port\":%s,\"connected\":%s},"
                      "\"coproc\":%s,\"rtc\":%s,\"rtcChip\":\"%s\",\"boardTempC\":%s,"
-                     "\"crashDumpBytes\":%u,\"installId\":\"%s\",\"chipRev\":%u}",
+                     "\"crashDumpBytes\":%u,\"installId\":\"%s\",\"chipRev\":%u,"
+                     "\"nvs\":{\"used\":%u,\"free\":%u,\"total\":%u}}",
                      app->project_name, app->version, app->date, app->time, kvm_board_id(),
                      app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false", ota_json,
@@ -966,7 +973,9 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (int)temp_c,
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL), (int)temp_c,
                      (unsigned)((temp_c < 0 ? -temp_c : temp_c) * 10.0f) % 10u,
                      kvm_thermal_state_name(kvm_thermal_state()),
                      net_up ? "true" : "false", net_mbps, net_mode, net_active,
@@ -984,7 +993,8 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      agent.port ? "true" : "false", agent.connected ? "true" : "false",
                      coproc_json,
                      kvm_rtc_present() ? "true" : "false", kvm_rtc_name(), board_temp, dump_bytes,
-                     install_id, (unsigned)chip.revision);
+                     install_id, (unsigned)chip.revision, (unsigned)nvs.used_entries,
+                     (unsigned)nvs.free_entries, (unsigned)nvs.total_entries);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "system info too long");
     }
@@ -3251,8 +3261,51 @@ static void on_hid_leds(uint8_t leds, void *user)
  * but the web interface is gone for good.
  */
 /** A new session may be written to from now on. See s_tx_fds. */
+/*
+ * ts_only: while the device is on the tailnet, answer only over it. The
+ * setup hotspot stays open as the way back in, and so does every link while
+ * Tailscale is down: a console that can be reached from nowhere is worse
+ * than one that can be reached from the LAN.
+ */
+static void peer_ip(int fd, char *out, size_t cap);
+
+static bool tailnet_gate_ok(int sockfd)
+{
+    if (!kvm_setting_bool("ts_only") || !kvm_setting_bool("ts_enable")) {
+        return true;
+    }
+    char ip[48];
+    peer_ip(sockfd, ip, sizeof(ip));
+    unsigned a = 0, b = 0;
+    if (sscanf(ip, "%u.%u.", &a, &b) == 2) {
+        if (a == 100 && b >= 64 && b <= 127) {
+            return true; /* 100.64.0.0/10, the tailnet */
+        }
+        if (a == 127) {
+            return true;
+        }
+        if (kvm_wifi_setup_ap_active() || kvm_setting_int("net_mode") == KVM_NET_WIFI_AP) {
+            if (strncmp(ip, "192.168.4.", 10) == 0) {
+                return true; /* the hotspot */
+            }
+        }
+    } else if (strncasecmp(ip, "fd7a:115c:a1e0:", 15) == 0) {
+        return true; /* the tailnet's IPv6 range */
+    }
+    kvm_ts_status_t st;
+    kvm_ts_status(&st);
+    if (!st.up) {
+        return true;
+    }
+    ESP_LOGW(TAG, "refused %s: the console answers only over Tailscale", ip);
+    return false;
+}
+
 static esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
 {
+    if (sockfd >= 0 && !tailnet_gate_ok(sockfd)) {
+        return ESP_FAIL;
+    }
     /* No Nagle: a pong, an input echo or the tail of a frame otherwise waits
      * for the ACK of what went before, and the viewer delays that ACK - a
      * steady 200-450 ms on every small message. */
@@ -3585,6 +3638,11 @@ static void peer_ip(int fd, char *out, size_t cap)
     }
 }
 
+void kvm_web_peer_ip(int fd, char *out, size_t cap)
+{
+    peer_ip(fd, out, cap);
+}
+
 /*
  * Who has the console open: one entry for each open console tab (its control
  * socket), with its address, whether it is in control, whether it signed in
@@ -3622,6 +3680,14 @@ static esp_err_t api_viewers_get(httpd_req_t *req)
         cJSON_AddBoolToObject(v, "control", fds[i] == holder);
         cJSON_AddBoolToObject(v, "viewOnly", known && kvm_auth_session_view_only(theirs));
         cJSON_AddBoolToObject(v, "you", know_mine && known && memcmp(mine, theirs, 32) == 0);
+        /* Over the tailnet the address names a device and its owner. */
+        kvm_ts_peer_t tp;
+        if (kvm_ts_peer_by_ip(ip, &tp)) {
+            cJSON *t = cJSON_AddObjectToObject(v, "tailnet");
+            cJSON_AddStringToObject(t, "name", tp.name);
+            cJSON_AddStringToObject(t, "user", tp.user);
+            cJSON_AddStringToObject(t, "userName", tp.user_display);
+        }
         cJSON_AddItemToArray(list, v);
     }
     char *body = cJSON_PrintUnformatted(root);
@@ -4026,7 +4092,7 @@ static void stream_worker_task(void *arg)
     if (server && fd >= 0) {
         (void)httpd_sess_trigger_close(server, fd);
     }
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 /*
@@ -4733,7 +4799,7 @@ static void video_sender_task(void *arg)
         }
     }
     free(packet);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 /*
@@ -4768,8 +4834,11 @@ static void video_sender_start(int index, int fd, uint32_t gen)
     video_sender_t *v = malloc(sizeof(*v));
     if (v) {
         *v = (video_sender_t){.server = s_httpd, .index = index, .fd = fd, .gen = gen};
-        /* The stack the single pump had: the TLS write is the deepest thing here. */
-        if (xTaskCreate(video_sender_task, "kvm_video", 4096, v, STREAM_WORKER_PRIO, NULL) == pdPASS) {
+        /* The stack the single pump had: the TLS write is the deepest thing here.
+           In PSRAM: one per viewer, and internal RAM is what SDIO to the
+           Wi-Fi chip and the AES/I2S DMA run out of first. */
+        if (xTaskCreateWithCaps(video_sender_task, "kvm_video", 4096, v, STREAM_WORKER_PRIO, NULL,
+                                MALLOC_CAP_SPIRAM) == pdPASS) {
             return;
         }
         free(v);
@@ -4959,8 +5028,9 @@ static esp_err_t stream_get(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "stream busy");
     }
 
-    BaseType_t created =
-        xTaskCreate(stream_worker_task, "kvm_stream", STREAM_WORKER_STACK, async_req, STREAM_WORKER_PRIO, NULL);
+    /* One per open stream: the stack goes to PSRAM (see video_sender_start). */
+    BaseType_t created = xTaskCreateWithCaps(stream_worker_task, "kvm_stream", STREAM_WORKER_STACK, async_req,
+                                             STREAM_WORKER_PRIO, NULL, MALLOC_CAP_SPIRAM);
     if (created != pdPASS) {
         httpd_req_async_handler_complete(async_req);
         return httpd_resp_send_custom_err(req, "503 Service Unavailable", "stream task");
@@ -5274,7 +5344,7 @@ httpd_handle_t http_server_start(void)
      * The check below now logs a failed registration rather than swallowing it, so
      * the next person gets a line instead of a mystery - but keep headroom anyway.
      */
-    cfg.max_uri_handlers = 136;
+    cfg.max_uri_handlers = 144;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -5483,6 +5553,16 @@ httpd_handle_t http_server_start(void)
     const httpd_uri_t *cec_uris = cec_api_routes(&n_cec);
     for (size_t i = 0; i < n_cec; i++) {
         register_route(h, &cec_uris[i]);
+    }
+    size_t n_ts = 0;
+    const httpd_uri_t *ts_uris = ts_api_routes(&n_ts);
+    for (size_t i = 0; i < n_ts; i++) {
+        register_route(h, &ts_uris[i]);
+    }
+    size_t n_push = 0;
+    const httpd_uri_t *push_uris = push_api_routes(&n_push);
+    for (size_t i = 0; i < n_push; i++) {
+        register_route(h, &push_uris[i]);
     }
     size_t n_prof = 0;
     const httpd_uri_t *prof_uris = profiles_api_routes(&n_prof);

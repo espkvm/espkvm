@@ -4,7 +4,8 @@
  *
  * One low-priority task does two things: it watches for events worth a
  * notification (a watched phrase appearing, the screen going flat) and it
- * delivers the queue to Telegram and a webhook. The delivery holds a TLS
+ * delivers the queue to Telegram, a webhook and the browsers that asked for
+ * Web Push (web_push.c). The delivery holds a TLS
  * session and a copy of the screen JPEG for a moment; both come from PSRAM, so
  * the internal RAM the H.264 encoder needs is never touched.
  *
@@ -16,6 +17,7 @@
  * the list survives a restart and its screenshots do not sit in PSRAM.
  */
 #include "kvm_notify.h"
+#include "kvm_push.h"
 #include "kvm_regions.h"
 
 #include "capture.h"
@@ -128,6 +130,7 @@ typedef struct {
     char *logtail;    /* PSRAM, or NULL */
     bool tg_left;     /* still to go to Telegram */
     bool hook_left;   /* still to go to the webhook */
+    uint32_t push_left; /* browsers (Web Push slots) it still has to reach */
     uint32_t id;      /* its files on the card are .notify/<id>.* (0 = memory only) */
     bool photo_file;  /* the screenshot is on the card, not in memory */
     bool log_file;
@@ -139,6 +142,7 @@ static int s_npending;
 static size_t s_pending_photo_bytes;
 static unsigned s_dropped;        /* pushed out of a full list, not yet reported */
 static int64_t s_next_retry_us;   /* 0 = try now */
+static int64_t s_last_try_us;     /* when the backlog was last tried */
 static uint32_t s_retry_ms = RETRY_FIRST_MS;
 static uint32_t s_next_id = 1;
 static bool s_card_loaded; /* the list on the card has been read back */
@@ -706,8 +710,9 @@ static void card_save_meta(const pending_t *p)
     }
     char buf[sizeof(event_t) * 2 + 160];
     size_t o = (size_t)snprintf(buf, sizeof(buf),
-                                "kind=%d\nat=%lld\ntg=%d\nhook=%d\nphoto=%d\nwant_photo=%d\nlog=%d\n",
+                                "kind=%d\nat=%lld\ntg=%d\nhook=%d\npush=%u\nphoto=%d\nwant_photo=%d\nlog=%d\n",
                                 (int)p->ev.kind, (long long)p->at, p->tg_left, p->hook_left,
+                                (unsigned)p->push_left,
                                 p->photo_file, p->ev.want_photo, p->log_file);
     put_field(buf, sizeof(buf), &o, "title", p->ev.title);
     put_field(buf, sizeof(buf), &o, "body", p->ev.body);
@@ -773,9 +778,10 @@ static void pending_add(const event_t *ev)
     }
     const bool tg = token[0] && chat[0] && !token_bad;
     const bool hook = url[0] != '\0';
-    if (!tg && !hook) {
+    const uint32_t push = kvm_push_mask();
+    if (!tg && !hook && !push) {
         set_result(token_bad ? "the Telegram token is not a bot token - paste it again"
-                             : "no channel configured (set a Telegram bot or a webhook URL)");
+                             : "no channel configured (set a Telegram bot, a webhook URL or a browser)");
         return;
     }
     if (ev->kind == EV_CLIP && !kvm_setting_bool("notify_clip")) {
@@ -795,6 +801,7 @@ static void pending_add(const event_t *ev)
     p->at_us = esp_timer_get_time();
     p->tg_left = tg;
     p->hook_left = hook;
+    p->push_left = push;
     if (ev->kind == EV_SEND) {
         if (ev->want_photo && kvm_setting_bool("notify_snap") &&
             s_pending_photo_bytes < PENDING_PHOTO_BYTES &&
@@ -901,6 +908,7 @@ static void card_load(void)
         p->at = (time_t)atoll(meta_get(meta, "at"));
         p->tg_left = atoi(meta_get(meta, "tg")) != 0;
         p->hook_left = atoi(meta_get(meta, "hook")) != 0;
+        p->push_left = (uint32_t)strtoul(meta_get(meta, "push"), NULL, 10);
         p->photo_file = atoi(meta_get(meta, "photo")) != 0;
         p->ev.want_photo = atoi(meta_get(meta, "want_photo")) != 0;
         p->log_file = atoi(meta_get(meta, "log")) != 0;
@@ -1080,7 +1088,18 @@ static bool try_front(void)
         }
     }
 
-    if (p->tg_left || p->hook_left) {
+    if (p->push_left) {
+        char text[BODY_MAX + 200];
+        if (p->ev.kind == EV_CLIP) {
+            snprintf(text, sizeof(text), "%.160s - saved on the card as %.80s", p->ev.body, p->ev.card_path);
+        } else {
+            snprintf(text, sizeof(text), "%s", p->ev.body);
+        }
+        refused |= kvm_push_send(p->ev.title, text, p->at, &p->push_left);
+        ESP_LOGI(TAG, "web push: %s", p->push_left ? "will retry" : "done");
+    }
+
+    if (p->tg_left || p->hook_left || p->push_left) {
         card_save_meta(p); /* a channel that got through is not tried again after a restart */
         char msg[96];
         snprintf(msg, sizeof(msg), "no network to send on - %d waiting, retrying", s_npending);
@@ -1101,6 +1120,7 @@ static void flush_pending(void)
         if (s_next_retry_us && esp_timer_get_time() < s_next_retry_us) {
             return;
         }
+        s_last_try_us = esp_timer_get_time();
         if (!try_front()) {
             s_next_retry_us = esp_timer_get_time() + (int64_t)s_retry_ms * 1000;
             s_retry_ms = s_retry_ms * 2 > RETRY_MAX_MS ? RETRY_MAX_MS : s_retry_ms * 2;
@@ -1203,7 +1223,12 @@ static void task(void *arg)
         }
         if (got) {
             pending_add(&ev);
-            s_next_retry_us = 0; /* something new: try the backlog now too */
+            /* Something new: try now, the network may be back. But not more
+               often than the first retry step, or a screen area that fires
+               every second hammers a dead server. */
+            if (esp_timer_get_time() - s_last_try_us >= (int64_t)RETRY_FIRST_MS * 1000) {
+                s_next_retry_us = 0;
+            }
         }
         flush_pending();
         poll_events();

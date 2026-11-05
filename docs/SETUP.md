@@ -123,3 +123,12 @@ on, the device also gets a Let's Encrypt certificate for its tailnet name
 imported. WireGuard is a split tunnel - it makes its
 own key on the device and shows the public half in the VPN tab, to register on
 your hub.
+
+Tailscale does not need an auth key. Turn it on with the key field empty and the VPN tab shows **Sign in to Tailscale**: the link opens Tailscale's page, you approve the device with your account, and it joins a few seconds later. An auth key still works the same way as before, for a device you set up without a browser. **Log out of the tailnet** makes the device forget its keys, so the next start asks again.
+
+The same tab lists the other devices on the tailnet: whose they are, whether traffic to each goes straight or through a Tailscale relay (and which one), and the last round trip. A slow console over Tailscale is usually a relay. The list of open consoles names a tailnet device and its owner instead of a 100.x address.
+
+Two settings use what Tailscale knows about who is connecting:
+
+- **Console only over Tailscale**: while the device is on the tailnet, the console answers only to tailnet addresses. The setup hotspot still works, and when Tailscale is down the console answers on the LAN again, so a broken tailnet does not lock you out.
+- **Sign in these tailnet users** and **Let these tailnet users watch**: Tailscale logins (`alice@example.com`), separated by commas. A browser on one of their devices is signed in as the owner, or as the viewer, with no password and no code. This works only after a password of your own is set.

@@ -51,3 +51,36 @@ self.addEventListener("fetch", (e) => {
     );
   }
 });
+
+/* Web Push from the device (Settings, Notifications, "This browser"). The
+ * device sends {title, body, device, at}; shown even with no console open. */
+self.addEventListener("push", (e) => {
+  let m = {};
+  try {
+    m = e.data ? e.data.json() : {};
+  } catch {
+    m = { body: e.data ? e.data.text() : "" };
+  }
+  const title = m.device ? `${m.device}: ${m.title || "ESP-KVM"}` : m.title || "ESP-KVM";
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body: m.body || "",
+      icon: "/icon-192.png",
+      timestamp: m.at ? m.at * 1000 : Date.now(),
+      data: { url: "/" },
+    }),
+  );
+});
+
+/* A click opens the console, or brings an open one to the front. */
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ("focus" in c) return c.focus();
+      }
+      return self.clients.openWindow("/");
+    }),
+  );
+});

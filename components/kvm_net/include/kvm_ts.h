@@ -43,7 +43,43 @@ typedef struct {
     /** The name the control plane will help certify (DNSConfig.CertDomains);
      *  "" when HTTPS certificates are off for the tailnet. */
     char cert_domain[128];
+    /** While the device waits for a person to approve it (no auth key): the
+     *  URL to open. "" otherwise. */
+    char login_url[160];
+    /** Why the control plane refused the device, "" if it did not. */
+    char error[96];
+    char derp[8];       /**< our home relay region, e.g. "fra"; "" before the map */
+    bool derp_up;       /**< the relay connection is up */
 } kvm_ts_status_t;
+
+/** One tailnet peer, as the console shows it. */
+typedef struct {
+    char ip[16];        /**< 100.x.y.z */
+    char name[64];      /**< MagicDNS name */
+    char user[64];      /**< owner's login, "" when unknown */
+    char user_display[48];
+    int  online;        /**< the netmap's view: 1, 0, -1 unknown */
+    bool direct;        /**< traffic goes straight, not through the relay */
+    char endpoint[24];  /**< the direct address in use, "" over the relay */
+    char derp[8];       /**< the peer's home relay region */
+    unsigned rtt_ms;    /**< last probe round trip, 0 = none yet */
+    bool rtt_direct;    /**< that probe went straight */
+} kvm_ts_peer_t;
+
+/** Number of peers kvm_ts_peer() can return. */
+int kvm_ts_peer_count(void);
+
+/** Fill @p out with peer @p index; false past the end or when not running. */
+bool kvm_ts_peer(int index, kvm_ts_peer_t *out);
+
+/** The peer with tailnet address @p ip, if any. */
+bool kvm_ts_peer_by_ip(const char *ip, kvm_ts_peer_t *out);
+
+/**
+ * Leave the tailnet: forget this device's keys and its auth key, so the next
+ * start registers as a new device (and with no key, asks for a login).
+ */
+esp_err_t kvm_ts_logout(void);
 
 /** Fill @p out with the tailnet client's current state. */
 void kvm_ts_status(kvm_ts_status_t *out);
@@ -64,6 +100,15 @@ esp_err_t kvm_ts_set_txt(const char *name, const char *value, char *err, size_t 
  */
 typedef bool (*kvm_ts_identity_cb_t)(const char *ip, const char *fqdn);
 void kvm_ts_set_identity_cb(kvm_ts_identity_cb_t cb);
+
+/**
+ * Handler for requests the control server sends to the device itself, such as
+ * the Tailscale admin console asking for the certificate's state. Gets the
+ * method and the path with its query, writes a JSON body, returns the HTTP
+ * status. Registered by the web component (same cycle as above).
+ */
+typedef int (*kvm_ts_c2n_cb_t)(const char *method, const char *path, char *body, size_t cap);
+void kvm_ts_set_c2n_cb(kvm_ts_c2n_cb_t cb);
 
 #ifdef __cplusplus
 }

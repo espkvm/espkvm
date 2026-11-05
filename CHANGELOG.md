@@ -7,6 +7,94 @@ bumps the patch).
 
 ## [Unreleased]
 
+## [0.77.0] - 2026-11-05
+
+### Added
+- Tailscale without an auth key. Leave the key empty and the VPN tab shows
+  Sign in to Tailscale: approve the device on Tailscale's page and it joins.
+  Log out of the tailnet makes it forget its keys.
+- The VPN tab shows Tailscale's state and every peer: whose it is, direct or
+  through which relay, and the last round trip.
+- The list of open consoles names a tailnet device and its owner instead of
+  its 100.x address.
+- Console only over Tailscale (`ts_only`): while the tailnet is up, the
+  console answers only to tailnet addresses. The hotspot still works, and so
+  does the LAN while Tailscale is down.
+- Sign in these tailnet users (`ts_trust`) and Let these tailnet users watch
+  (`ts_trust_view`): their browsers are signed in as the owner or the viewer
+  with no password. Only once a password of your own is set.
+- Say on the network that this is an ESP-KVM (`net_mdns_ident`, off by
+  default): mDNS adds the product and the board, and an `_espkvm._tcp`
+  service, so a script can find every ESP-KVM on the network. Never the
+  firmware version.
+- Notifications in the browser (Web Push). Settings, Notifications, Send
+  them to this browser: alerts show up like any app's, also with the console
+  closed. No account or bot. The device signs with its own key. Up to 8
+  browsers. On an iPhone, from the console added to the Home Screen.
+- The picture in a small window that stays on top of other apps (Chrome
+  and Edge on a desktop): a button next to Full screen, or P. Only the
+  picture, no input. While it is open the stream keeps going with the tab in
+  the background.
+
+### Changed
+- On/off settings are toggles now. Next to a tick box, "Off" read like
+  what a click would do.
+
+### Fixed
+- With three or four consoles open the device could restart every couple of
+  minutes: internal RAM ran out, and with it the link to the Wi-Fi chip.
+  WebRTC encrypted every video packet through the AES engine's DMA, which
+  took buffers from that RAM each time, and every viewer's sender kept its
+  stack there. Both are gone from it now.
+- The Tailscale admin console said "Could not retrieve status from machine"
+  for the device's Let's Encrypt certificate. The device now answers that
+  question, and the console shows how long the certificate is valid.
+- On a phone the row of settings sections did not scroll sideways, so the
+  ones past the edge (Notifications, Security...) could not be opened.
+- The VPN tab left out four Tailscale settings: the trusted certificate,
+  the key warning, the control server and its port. Only search found them.
+- A setting switched while the device could not save it (restarting, say)
+  stayed switched on screen, next to the old "Off". It goes back now.
+- With the network down, every new alert made the device try the backlog
+  again at once. A screen area that fires every second meant a send attempt
+  every second. Now a new alert waits for the retry step like the rest.
+- Tailscale missed the small updates the control server sends about peers:
+  a peer that went offline or came back, its new address, its relay, a peer
+  that left. They come as a list keyed by node ID, and only another format
+  was read. A peer that went offline stayed online for the device until the
+  next full update.
+- A machine renamed in the Tailscale admin console kept its old name on the
+  device until it reconnected, also in its certificate.
+- Tailscale notices at once when the control server closes the connection,
+  instead of up to two minutes later.
+- Every Tailscale restart leaked memory (the relay connection and the
+  WireGuard state), and a restart could free the client while one of its
+  tasks still ran.
+- Two packets sent at the same moment could get the same WireGuard counter.
+- A peer reachable at two addresses no longer flips between them, and answers
+  to Tailscale's probes go back one way instead of three.
+- Tailscale follows the device to a new address when Ethernet and Wi-Fi take
+  turns or the lease changes.
+- A self-hosted control server (Headscale) never worked: the device always
+  expected Tailscale's own server key. It now asks the server for its key, and
+  takes the netmap from the stream where Headscale 0.26 and newer send it. The
+  Control server field also takes a URL (`https://hs.example.com:8443`).
+- A big netmap could be lost or read from the middle: the parts of a message
+  that arrived in separate reads were not put back together.
+- The Tailscale relay gave up after three failed connects and stayed down
+  until the control connection restarted. It now keeps trying, and a relay
+  that went silent is reconnected after 90 seconds.
+- The relay's TLS certificate is now checked. Before, anyone on the path could
+  read who talks to whom (the WireGuard traffic itself stayed encrypted).
+- WireGuard follows the protocol more closely: the replay window, keys that
+  expire on their own clocks, a stale handshake, the timestamp after a reboot
+  before the clock is set.
+- A peer the netmap no longer lists is removed, also from the cache kept for
+  the next boot.
+- Less work per Tailscale probe (one key derivation per peer instead of one
+  per packet), one handshake at a time, and a direct handshake that was lost
+  is tried again every 30 seconds.
+
 ## [0.76.0] - 2026-11-03
 
 ### Added

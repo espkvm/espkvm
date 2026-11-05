@@ -199,6 +199,7 @@ static void stop_tunnel(void)
         netif_set_link_down(netif);
         netif_set_down(netif);
         netif_remove(netif);
+        wireguardif_free(netif); /* the device and its keys, not only the netif */
         wg_unlock();
         free(netif);
     }
@@ -435,6 +436,7 @@ static void stop_tunnel_netif(struct netif *netif)
     wireguardif_shutdown(netif);
     netif_set_down(netif);
     netif_remove(netif);
+    wireguardif_free(netif);
     wg_unlock();
     free(netif);
 }

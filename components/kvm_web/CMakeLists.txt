@@ -18,6 +18,8 @@ idf_component_register(
         "url_fetch.c"
         "pinprobe_api.c"
         "webrtc_api.c"
+        "ts_api.c"
+        "push_api.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES

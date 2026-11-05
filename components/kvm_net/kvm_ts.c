@@ -16,6 +16,7 @@
 #include "kvm_ts.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -43,7 +44,19 @@ static TaskHandle_t s_task;
 static microlink_t *s_ml;
 static bool s_started;
 static volatile bool s_net_up;
+static volatile bool s_rebind;      /* the device's address changed: move the tailnet to it */
+static volatile bool s_logout;      /* forget the keys before the next start */
+static volatile bool s_force;       /* restart the session even if nothing changed */
+static uint32_t s_local_ip;         /* the address the session started on */
 static kvm_ts_identity_cb_t s_identity_cb;
+static volatile kvm_ts_c2n_cb_t s_c2n_cb;
+
+static int c2n(const char *method, const char *path, char *body, size_t cap, void *arg)
+{
+    (void)arg;
+    kvm_ts_c2n_cb_t cb = s_c2n_cb;
+    return cb ? cb(method, path, body, cap) : 404;
+}
 
 /* The config strings must outlive the session: microlink_init copies the config
  * struct but keeps the pointers, so the auth key and hostname it uses are these
@@ -78,6 +91,17 @@ static bool net_is_up(void)
     return s_net_up;
 }
 
+/* The default link's IPv4 address now, 0 when it has none. */
+static uint32_t local_ip(void)
+{
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    esp_netif_ip_info_t ip;
+    if (netif && esp_netif_get_ip_info(netif, &ip) == ESP_OK) {
+        return ip.ip.addr;
+    }
+    return 0;
+}
+
 static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -85,6 +109,10 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     (void)id;
     (void)data;
     s_net_up = true;
+    /* Ethernet and Wi-Fi can take turns (net_mode "auto"), and a new lease can
+     * change the address. The session's sockets and the endpoints the peers
+     * know are tied to the old one, so the task moves it over. */
+    s_rebind = true;
     kvm_ts_apply(); /* nudge: settings may have wanted the tailnet before IP */
 }
 
@@ -118,6 +146,9 @@ esp_err_t kvm_ts_init(void)
     /* microlink must not start before the link has an address; a second GOT_IP
      * handler alongside the one in ethernet.c is fine (esp_event fans out). */
     esp_err_t err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL);
+    if (err == ESP_OK) {
+        err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL);
+    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "could not watch for GOT_IP: %s", esp_err_to_name(err));
     }
@@ -141,16 +172,11 @@ static void ts_reconcile(void)
         return;
     }
 
+    /* No auth key is fine: the control plane then hands out a login URL and
+     * the console shows it (or the device's keys are already approved). */
     const char *auth = kvm_setting_str("ts_auth_key");
-    if (!auth || !auth[0]) {
-        stop_session();
-        /* Enabled but no key yet: this is a state, not a lost capability. The cap
-         * stays AVAILABLE so the console keeps the auth-key field (and the enable
-         * toggle) editable - gating them on this cap is what would otherwise wedge
-         * the user, since the very field they need to fix it would be disabled.
-         * "Not connected" is surfaced through kvm_ts_status, not here. */
-        kvm_cap_report(KVM_CAP_TS, true, NULL);
-        return;
+    if (!auth) {
+        auth = "";
     }
 
     if (!net_is_up()) {
@@ -164,13 +190,40 @@ static void ts_reconcile(void)
     if (!name || !name[0]) {
         name = kvm_setting_str("net_hostname");
     }
-    const bool tls = kvm_setting_bool("ts_ctrl_tls");
-    /* Self-hosted control server (Headscale/Ionscale); empty = hosted Tailscale. */
+    bool tls = kvm_setting_bool("ts_ctrl_tls");
+    /* Self-hosted control server (Headscale/Ionscale); empty = hosted Tailscale.
+     * Taken as a host, or as a URL: https://hs.example.com:8443/ sets TLS and
+     * the port from the URL (after Csontikka cbdf160). */
+    char ctrl_buf[64];
     const char *ctrl = kvm_setting_str("ts_control_url");
-    const uint16_t ctrl_port = (uint16_t)kvm_setting_int("ts_control_port");
+    uint16_t ctrl_port = (uint16_t)kvm_setting_int("ts_control_port");
+    if (ctrl && ctrl[0]) {
+        const char *h = ctrl;
+        if (strncmp(h, "https://", 8) == 0) {
+            tls = true;
+            h += 8;
+        } else if (strncmp(h, "http://", 7) == 0) {
+            tls = false;
+            h += 7;
+        }
+        snprintf(ctrl_buf, sizeof(ctrl_buf), "%s", h);
+        char *slash = strchr(ctrl_buf, '/');
+        if (slash) {
+            *slash = '\0';
+        }
+        char *colon = strrchr(ctrl_buf, ':');
+        if (colon && !strchr(ctrl_buf, ']')) {
+            const int p = atoi(colon + 1);
+            if (p > 0 && p < 65536) {
+                ctrl_port = (uint16_t)p;
+            }
+            *colon = '\0';
+        }
+        ctrl = ctrl_buf;
+    }
 
     /* Already joined with these exact parameters? Nothing to do. */
-    if (s_started && strcmp(auth, s_auth) == 0 && strcmp(name ? name : "", s_name) == 0 &&
+    if (s_started && !s_force && !s_logout && strcmp(auth, s_auth) == 0 && strcmp(name ? name : "", s_name) == 0 &&
         tls == s_tls && strcmp(ctrl ? ctrl : "", s_ctrl_host) == 0 && ctrl_port == s_ctrl_port) {
         kvm_cap_report(KVM_CAP_TS, true, NULL);
         return;
@@ -178,6 +231,12 @@ static void ts_reconcile(void)
 
     /* A parameter changed (or first join): drop any old session, then join. */
     stop_session();
+    s_force = false;
+    if (s_logout) {
+        s_logout = false;
+        esp_err_t r = microlink_factory_reset();
+        ESP_LOGI(TAG, "logged out, keys forgotten: %s", esp_err_to_name(r));
+    }
 
     snprintf(s_auth, sizeof(s_auth), "%s", auth);
     snprintf(s_name, sizeof(s_name), "%s", name ? name : "");
@@ -205,6 +264,7 @@ static void ts_reconcile(void)
          * s_ctrl_host is a static buffer so it outlives the session, like s_auth. */
         .ctrl_host = s_ctrl_host[0] ? s_ctrl_host : NULL,
         .ctrl_port = s_ctrl_port,
+        .c2n_handler = c2n,
     };
 
     /* A failed init/start is a runtime error to log and retry on the next apply,
@@ -227,6 +287,8 @@ static void ts_reconcile(void)
     xSemaphoreTake(s_mtx, portMAX_DELAY);
     s_ml = ml;
     s_started = true;
+    s_local_ip = local_ip();
+    s_rebind = false;
     xSemaphoreGive(s_mtx);
 
     kvm_cap_report(KVM_CAP_TS, true, NULL);
@@ -303,7 +365,7 @@ static void check_key_expiry(void)
     if (st.key_expired) {
         snprintf(body, sizeof(body),
                  "The tailnet key has run out. The device is off the tailnet until it is "
-                 "authorised again: put a fresh auth key in Settings > VPN.");
+                 "authorised again: sign in under Settings > VPN, or put in a fresh auth key.");
     } else {
         const int64_t left = st.key_expiry - (int64_t)now;
         if (left > (int64_t)warn_days * 86400) {
@@ -340,6 +402,25 @@ static void ts_task(void *arg)
         } else if (kvm_setting_bool("ts_enable") && !s_started) {
             ts_reconcile();
         }
+        if (s_rebind) {
+            s_rebind = false;
+            const uint32_t now_ip = local_ip();
+            xSemaphoreTake(s_mtx, portMAX_DELAY);
+            microlink_t *ml = s_started ? s_ml : NULL;
+            const bool moved = ml && now_ip && now_ip != s_local_ip;
+            if (moved) {
+                s_local_ip = now_ip;
+            }
+            xSemaphoreGive(s_mtx);
+            if (moved) {
+                ESP_LOGI(TAG, "the device's address changed, moving the tailnet session");
+                if (microlink_rebind(ml) != ESP_OK) {
+                    /* Not far enough along to move: start over instead. */
+                    s_force = true;
+                    ts_reconcile();
+                }
+            }
+        }
         sync_tailnet_cert();
         check_key_expiry();
     }
@@ -352,6 +433,11 @@ esp_err_t kvm_ts_apply(void)
     }
     xSemaphoreGive(s_apply_sem); /* non-blocking: the task does the slow work */
     return ESP_OK;
+}
+
+void kvm_ts_set_c2n_cb(kvm_ts_c2n_cb_t cb)
+{
+    s_c2n_cb = cb;
 }
 
 void kvm_ts_set_identity_cb(kvm_ts_identity_cb_t cb)
@@ -386,8 +472,78 @@ void kvm_ts_status(kvm_ts_status_t *out)
         }
         snprintf(out->name, sizeof(out->name), "%s", microlink_get_self_name(ml));
         snprintf(out->cert_domain, sizeof(out->cert_domain), "%s", microlink_get_cert_domain(ml));
+        snprintf(out->login_url, sizeof(out->login_url), "%s", microlink_get_login_url(ml));
+        snprintf(out->error, sizeof(out->error), "%s", microlink_get_register_error(ml));
+        microlink_get_derp_home(ml, out->derp);
+        out->derp_up = microlink_derp_connected(ml);
     }
     xSemaphoreGive(s_mtx);
+}
+
+static void fill_peer(microlink_t *ml, const microlink_peer_info_t *pi, kvm_ts_peer_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    microlink_ip_to_str(pi->vpn_ip, out->ip);
+    snprintf(out->name, sizeof(out->name), "%s", pi->hostname);
+    snprintf(out->user, sizeof(out->user), "%s", pi->user);
+    snprintf(out->user_display, sizeof(out->user_display), "%s", pi->user_display);
+    out->online = pi->net_online;
+    out->direct = pi->direct_path && pi->endpoint_ip;
+    if (out->direct) {
+        char ip[16];
+        microlink_ip_to_str(pi->endpoint_ip, ip);
+        snprintf(out->endpoint, sizeof(out->endpoint), "%s:%u", ip, (unsigned)pi->endpoint_port);
+    }
+    microlink_get_derp_code(ml, pi->derp_region, out->derp);
+    out->rtt_ms = pi->rtt_ms;
+    out->rtt_direct = pi->rtt_direct;
+}
+
+int kvm_ts_peer_count(void)
+{
+    int n = 0;
+    if (s_mtx && xSemaphoreTake(s_mtx, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (s_started && s_ml) {
+            n = microlink_get_peer_count(s_ml);
+        }
+        xSemaphoreGive(s_mtx);
+    }
+    return n;
+}
+
+bool kvm_ts_peer(int index, kvm_ts_peer_t *out)
+{
+    bool ok = false;
+    if (s_mtx && xSemaphoreTake(s_mtx, pdMS_TO_TICKS(100)) == pdTRUE) {
+        microlink_peer_info_t pi;
+        if (s_started && s_ml && microlink_get_peer_info(s_ml, index, &pi) == ESP_OK && pi.online) {
+            fill_peer(s_ml, &pi, out);
+            ok = true;
+        }
+        xSemaphoreGive(s_mtx);
+    }
+    return ok;
+}
+
+bool kvm_ts_peer_by_ip(const char *ip, kvm_ts_peer_t *out)
+{
+    if (!ip || strncmp(ip, "100.", 4) != 0) {
+        return false; /* not a tailnet address: skip the lock */
+    }
+    const int n = kvm_ts_peer_count();
+    for (int i = 0; i < n; i++) {
+        if (kvm_ts_peer(i, out) && strcmp(out->ip, ip) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+esp_err_t kvm_ts_logout(void)
+{
+    kvm_setting_set_str("ts_auth_key", "");
+    s_logout = true;
+    return kvm_ts_apply();
 }
 
 esp_err_t kvm_ts_set_txt(const char *name, const char *value, char *err, size_t err_len)

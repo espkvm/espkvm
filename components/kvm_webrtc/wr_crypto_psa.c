@@ -13,6 +13,8 @@
 
 #include "psa/crypto.h"
 
+#define CTR_CHUNK 512
+
 struct wr_aes {
     psa_key_id_t id;
 };
@@ -60,9 +62,29 @@ int wr_aes_ctr(wr_aes_t *a, const uint8_t iv[16], const uint8_t *in, uint8_t *ou
     psa_cipher_operation_t op = PSA_CIPHER_OPERATION_INIT;
     size_t got = 0, tail = 0;
     if (psa_cipher_encrypt_setup(&op, a->id, PSA_ALG_CTR) != PSA_SUCCESS ||
-        psa_cipher_set_iv(&op, iv, 16) != PSA_SUCCESS ||
-        psa_cipher_update(&op, in, len, out, len, &got) != PSA_SUCCESS ||
-        psa_cipher_finish(&op, out + got, len - got, &tail) != PSA_SUCCESS) {
+        psa_cipher_set_iv(&op, iv, 16) != PSA_SUCCESS) {
+        psa_cipher_abort(&op);
+        return -1;
+    }
+    /*
+     * At most 512 bytes a call: the P4's AES driver does that much in block
+     * mode, and anything longer through DMA, which takes descriptors and
+     * bounce buffers from internal RAM for every call. One video packet per
+     * call, for every viewer, ran that RAM out (and with it SDIO to the
+     * Wi-Fi chip). 512 is a whole number of AES blocks, so the counter runs
+     * on unbroken.
+     */
+    for (size_t off = 0; off < len;) {
+        const size_t n = len - off > CTR_CHUNK ? CTR_CHUNK : len - off;
+        size_t done = 0;
+        if (psa_cipher_update(&op, in + off, n, out + got, len - got, &done) != PSA_SUCCESS) {
+            psa_cipher_abort(&op);
+            return -1;
+        }
+        got += done;
+        off += n;
+    }
+    if (psa_cipher_finish(&op, out + got, len - got, &tail) != PSA_SUCCESS) {
         psa_cipher_abort(&op);
         return -1;
     }

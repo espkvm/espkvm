@@ -899,6 +899,15 @@ static const kvm_setting_t s_settings[] = {
         .flags = KVM_SF_REBOOT,
     },
     {
+        .key = "net_mdns_ident", .section = "network", .group = "Address", .type = KVM_VT_BOOL,
+        .title = "Say on the network that this is an ESP-KVM",
+        .help = "Adds the product and the board to the mDNS announcement, and an "
+                "_espkvm._tcp service, so a discovery tool or a script can find every "
+                "ESP-KVM on the network. Off, only the hostname is announced. The "
+                "firmware version is never announced.",
+        .def = 0, .requires_cap = -1, .flags = KVM_SF_REBOOT,
+    },
+    {
         .key = "net_dhcp", .section = "network", .group = "Address", .type = KVM_VT_BOOL,
         .title = "Obtain address automatically",
         .def = 1, .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
@@ -1091,9 +1100,10 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ts_auth_key", .section = "vpn", .group = "Tailscale", .type = KVM_VT_STR,
         .title = "Auth key",
-        .help = "A Tailscale auth key (tskey-auth-...) that authorises this device "
-                "to join. Generate one in the Tailscale admin console; a reusable "
-                "key survives re-registration across reboots.",
+        .help = "Optional. A Tailscale auth key (tskey-auth-...) that authorises this "
+                "device to join. Empty, the device shows a link to sign in with your "
+                "Tailscale account instead. Generate a key in the Tailscale admin "
+                "console; a reusable key survives re-registration across reboots.",
         .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_TS,
     },
     {
@@ -1104,11 +1114,37 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_TS,
     },
     {
+        .key = "ts_only", .section = "vpn", .group = "Tailscale", .type = KVM_VT_BOOL,
+        .title = "Console only over Tailscale",
+        .help = "While the device is on the tailnet, the console answers only to "
+                "tailnet addresses (100.64.0.0/10). The setup hotspot still works, and "
+                "while Tailscale is down the console answers everywhere again, so a "
+                "broken tailnet cannot lock you out.",
+        .def = 0, .requires_cap = KVM_CAP_TS,
+    },
+    {
+        .key = "ts_trust", .section = "vpn", .group = "Tailscale", .type = KVM_VT_STR,
+        .title = "Sign in these tailnet users",
+        .help = "Tailscale logins, separated by commas (alice@example.com). A browser "
+                "on a device of one of these users is signed in as the owner without a "
+                "password or a code. Works once a password of your own is set. Signing "
+                "out there signs straight back in.",
+        .def_str = "", .max_len = 127, .requires_cap = KVM_CAP_TS,
+    },
+    {
+        .key = "ts_trust_view", .section = "vpn", .group = "Tailscale", .type = KVM_VT_STR,
+        .title = "Let these tailnet users watch",
+        .help = "Tailscale logins, separated by commas. These are signed in as the "
+                "viewer: they see the screen and cannot type, click or change anything.",
+        .def_str = "", .max_len = 127, .requires_cap = KVM_CAP_TS,
+    },
+    {
         .key = "ts_control_url", .section = "vpn", .group = "Tailscale", .type = KVM_VT_STR,
         .title = "Control server",
         .help = "Coordination server for a self-hosted control plane (Headscale, "
                 "Ionscale). Empty uses Tailscale's own (controlplane.tailscale.com). "
-                "Host only, no scheme - e.g. headscale.example.com.",
+                "A host (headscale.example.com) or a URL (https://headscale.example.com:8443), "
+                "which then sets TLS and the port too.",
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_TS,
     },
     {

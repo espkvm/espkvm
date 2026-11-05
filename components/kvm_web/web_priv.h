@@ -19,6 +19,12 @@ esp_err_t send_json_error(httpd_req_t *req, const char *status, const char *mess
 /** Recording, screenshots, and the files they leave on the card. See record_api.c. */
 const httpd_uri_t *record_api_routes(size_t *count);
 const httpd_uri_t *cec_api_routes(size_t *count);
+/** Tailscale state, peers and logout. See ts_api.c. */
+const httpd_uri_t *ts_api_routes(size_t *count);
+/** Web Push: the key and the subscribed browsers. See push_api.c. */
+const httpd_uri_t *push_api_routes(size_t *count);
+/** The client's address on socket @p fd as text ("?" when unknown). */
+void kvm_web_peer_ip(int fd, char *out, size_t cap);
 /** Device profiles. See profiles_api.c. */
 const httpd_uri_t *profiles_api_routes(size_t *count);
 

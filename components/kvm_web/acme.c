@@ -830,8 +830,69 @@ static void tick(void *arg)
     kvm_acme_run(false);
 }
 
+/* RFC 3339 in UTC, as Go prints it. */
+static void rfc3339(time_t t, char *out, size_t cap)
+{
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    strftime(out, cap, "%Y-%m-%dT%H:%M:%SZ", &tm);
+}
+
+/* The Tailscale admin console's "TLS certificate" box: GET /tls-cert-status
+ * ?domain=<name>, answered like tailscaled does (tailcfg.C2NTLSCertInfo). */
+static int c2n(const char *method, const char *path, char *body, size_t cap)
+{
+    const char *q = strncmp(path, "/tls-cert-status", 16) == 0 ? path + 16 : NULL;
+    if (!q || (*q != '?' && *q != '\0') || strcmp(method, "GET") != 0) {
+        return 404;
+    }
+    const char *d = strstr(q, "domain=");
+    char domain[128] = "";
+    if (d) {
+        d += 7;
+        size_t n = strcspn(d, "&");
+        if (n < sizeof(domain)) {
+            memcpy(domain, d, n);
+            domain[n] = '\0';
+        }
+    }
+    if (!domain[0]) {
+        snprintf(body, cap, "no 'domain'\n");
+        return 400;
+    }
+    cJSON *o = cJSON_CreateObject();
+    if (!o) {
+        return 500;
+    }
+    acme_pair_t *p = s_cur;
+    if (!p || strcasecmp(p->name, domain) != 0) {
+        cJSON_AddBoolToObject(o, "Missing", true);
+        cJSON_AddStringToObject(o, "Error", s_error[0] ? s_error : "no certificate");
+    } else {
+        char nb[32], na[32];
+        rfc3339(p->not_before, nb, sizeof(nb));
+        rfc3339(p->not_after, na, sizeof(na));
+        if (time(NULL) > p->not_after) {
+            cJSON_AddBoolToObject(o, "Expired", true);
+            cJSON_AddStringToObject(o, "Error", "cert expired");
+        } else if (p->staging) {
+            cJSON_AddStringToObject(o, "Error", "a Let's Encrypt test certificate");
+        } else {
+            cJSON_AddBoolToObject(o, "Valid", true);
+        }
+        cJSON_AddStringToObject(o, "NotBefore", nb);
+        cJSON_AddStringToObject(o, "NotAfter", na);
+    }
+    if (!cJSON_PrintPreallocated(o, body, (int)cap, false)) {
+        snprintf(body, cap, "{}");
+    }
+    cJSON_Delete(o);
+    return 200;
+}
+
 void kvm_acme_init(void)
 {
+    kvm_ts_set_c2n_cb(c2n);
     (void)psa_crypto_init();
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
