@@ -7,6 +7,43 @@ bumps the patch).
 
 ## [Unreleased]
 
+### Changed
+- Settings take less room: on a wide window each setting's control
+  stands to the right of its name, and the first sentence of its help sits
+  under the name. The rest opens on (i). On a phone they stay one under the
+  other, except toggles.
+- A setting that only matters while another one is on now hides until it is:
+  the static address while DHCP is on, the ATX pins while ATX is off, the
+  MQTT, dashcam, notification, netconsole and serial fields while those are
+  off.
+- Choices read as words: MJPEG and H.264, English (US), Detect, WiFi, Keep
+  trying. Numbers show their unit next to the box (ms, s, min, %, px, °C).
+- Network starts with the address; Netconsole moved to the end. The EDID
+  profile and Watch the screen have their own groups under Video, and the
+  dashcam settings lost their "Dashcam:" prefix.
+- A group the board cannot have at all, such as WiFi on a board without it,
+  says so once and folds up.
+- Settings that apply after a restart are listed in one bar at the top with
+  a Restart now button, instead of a question after each one.
+- The profile picker shows only in sections that have settings a profile can
+  hold. Password, two-factor, view-only sign-in, viewing token and the
+  certificate under Security fold to one line each.
+- Find a setting moved to the top of the section list, and `/` or Ctrl+F
+  goes to it. On a phone it is a button at the start of the tabs. Changed is
+  now a section of its own with a count: every setting that differs from the
+  factory value, from all sections.
+- The schema (`GET /api/v1/settings/schema`) adds `labels`, `unit` and
+  `showIf.ne`.
+
+## [0.77.1] - 2026-11-06
+
+### Fixed
+- Wi-Fi died a few seconds after boot on boards whose Wi-Fi chip still runs
+  its factory firmware, such as the ESP32-P4-NANO
+  ([#90](https://github.com/espkvm/espkvm/issues/90)). 0.77.0 was built with a
+  new Wi-Fi driver that drops data from that firmware. 0.77.1 goes back to the
+  driver from 0.76.0.
+
 ## [0.77.0] - 2026-11-05
 
 ### Added
