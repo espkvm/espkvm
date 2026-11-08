@@ -501,6 +501,16 @@ char *kvm_settings_schema_json(void)
             }
             cJSON_AddItemToObject(o, "choices", ch);
         }
+        if (d->type == KVM_VT_ENUM && d->labels) {
+            cJSON *lb = cJSON_CreateArray();
+            for (int32_t c = 0; c <= d->max; c++) {
+                cJSON_AddItemToArray(lb, cJSON_CreateString(d->labels[c]));
+            }
+            cJSON_AddItemToObject(o, "labels", lb);
+        }
+        if (d->unit) {
+            cJSON_AddStringToObject(o, "unit", d->unit);
+        }
         if (d->type == KVM_VT_STR) {
             cJSON_AddNumberToObject(o, "maxLength", d->max_len);
             cJSON_AddStringToObject(o, "default", d->def_str ? d->def_str : "");
@@ -528,7 +538,7 @@ char *kvm_settings_schema_json(void)
         if (d->visible_key) {
             cJSON *si = cJSON_CreateObject();
             cJSON_AddStringToObject(si, "key", d->visible_key);
-            cJSON_AddNumberToObject(si, "eq", d->visible_val);
+            cJSON_AddNumberToObject(si, (d->flags & KVM_SF_SHOW_NE) ? "ne" : "eq", d->visible_val);
             cJSON_AddItemToObject(o, "showIf", si);
         }
         cJSON_AddItemToArray(arr, o);
@@ -606,14 +616,20 @@ static int32_t resulting_int(const cJSON *root, size_t idx)
  */
 static bool pin_setting_applies(const cJSON *root, const kvm_setting_t *d)
 {
-    if (!d->visible_key) {
-        return true;
+    /* A chain: the round LCD's pins hang on the panel type, which hangs on the
+     * display being on. Bounded, so a table that loops cannot hang the write. */
+    for (int depth = 0; d && d->visible_key && depth < 8; depth++) {
+        int j = find_index(d->visible_key);
+        if (j < 0) {
+            return true;
+        }
+        const bool eq = resulting_int(root, (size_t)j) == d->visible_val;
+        if (eq == ((d->flags & KVM_SF_SHOW_NE) != 0)) {
+            return false;
+        }
+        d = &s_table[j];
     }
-    int j = find_index(d->visible_key);
-    if (j < 0) {
-        return true;
-    }
-    return resulting_int(root, (size_t)j) == d->visible_val;
+    return true;
 }
 
 /**
@@ -638,7 +654,11 @@ static esp_err_t check_pins(const cJSON *root, char *err, size_t err_len)
         }
         claims[n].key = d->key;
         claims[n].gpio = (int)resulting_int(root, i);
-        claims[n].changing = cJSON_GetObjectItemCaseSensitive(root, d->key) != NULL;
+        /* A pin that comes back into view with this request (its switch just
+         * turned on) is checked as if set now: it was never weighed while
+         * hidden. */
+        claims[n].changing = cJSON_GetObjectItemCaseSensitive(root, d->key) != NULL ||
+                             !pin_setting_applies(NULL, d);
         n++;
     }
     unlock();

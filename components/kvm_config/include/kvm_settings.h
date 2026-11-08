@@ -36,6 +36,7 @@ enum {
                                  as a pin picker (free GPIOs + "None"), and it feeds the
                                  pin map. -1 means unassigned. */
     KVM_SF_PROFILE = 1u << 3, /**< a device profile may hold its own value (kvm_profiles.h) */
+    KVM_SF_SHOW_NE = 1u << 4, /**< shown while setting[visible_key] is NOT visible_val */
 };
 
 typedef struct {
@@ -57,8 +58,13 @@ typedef struct {
     uint8_t flags;              /**< KVM_SF_* */
     const char *visible_key;    /**< when non-NULL, the console shows this setting only
                                      while setting[visible_key] equals @p visible_val
+                                     (or differs from it, with KVM_SF_SHOW_NE), and only
+                                     while that setting is shown itself
                                      (e.g. the GC9A01 pins only for the round LCD type) */
     int32_t visible_val;
+    const char *const *labels;  /**< ENUM only, optional: what the console shows for each
+                                     choice; @p choices stay the names the API takes */
+    const char *unit;           /**< INT only, optional: shown after the number ("ms") */
 } kvm_setting_t;
 
 /**

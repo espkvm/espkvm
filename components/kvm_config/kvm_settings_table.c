@@ -100,6 +100,19 @@ static const char *const s_touch_kbd_choices[] = {"console", "phone"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap", "auto"};
 static const char *const s_fallback_choices[] = {"keep_trying", "hotspot"};
 
+/* What the console shows for a choice, where the name the API takes would read
+   badly. Same length and order as the choices beside them. */
+static const char *const s_codec_labels[] = {"MJPEG", "H.264"};
+static const char *const s_layout_labels[] = {"English (US)", "Russian", "Czech", "Ukrainian", "Lithuanian"};
+static const char *const s_media_labels[] = {"Auto", "CD-ROM", "Disk"};
+static const char *const s_targetos_labels[] = {"Detect", "Windows", "macOS", "Linux", "Android"};
+static const char *const s_pad_labels[] = {"Off", "Nintendo Switch", "Nintendo Switch, pad only",
+                                           "Xbox 360 (XInput)", "Xbox 360, pad only", "Original Xbox"};
+static const char *const s_netmode_labels[] = {"Ethernet", "WiFi", "Own hotspot", "Ethernet, WiFi as backup"};
+static const char *const s_fallback_labels[] = {"Keep trying", "Also start a hotspot"};
+static const char *const s_log_labels[] = {"Errors", "Warnings", "Info", "Debug"};
+static const char *const s_usb_serial_labels[] = {"Off", "Serial console", "Agent"};
+
 /* clang-format off */
 static const kvm_setting_t s_settings[] = {
     /* ---- video ---------------------------------------------------------- */
@@ -113,6 +126,7 @@ static const kvm_setting_t s_settings[] = {
         .min = 0, .max = ENUM_MAX(s_codec_choices), .def = 0, .choices = s_codec_choices,
         .requires_cap = KVM_CAP_H264,
         .flags = KVM_SF_PROFILE,
+        .labels = s_codec_labels,
     },
     {
         .key = "jpg_quality", .section = "video", .group = "Picture", .type = KVM_VT_INT,
@@ -123,10 +137,11 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "h264_kbps", .section = "video", .group = "Picture", .type = KVM_VT_INT,
-        .title = "H.264 bitrate (kbit/s)",
+        .title = "H.264 bitrate",
         .help = "Target bitrate for the hardware encoder.",
         .min = 500, .max = 20000, .def = 4000, .requires_cap = KVM_CAP_H264,
         .flags = KVM_SF_PROFILE,
+        .unit = "kbit/s",
     },
     {
         .key = "webrtc_enable", .section = "video", .group = "Picture", .type = KVM_VT_BOOL,
@@ -144,6 +159,7 @@ static const kvm_setting_t s_settings[] = {
                 "on a slow link.",
         .min = 1, .max = 60, .def = 60, .requires_cap = KVM_CAP_VIDEO,
         .flags = KVM_SF_PROFILE,
+        .unit = "fps",
     },
     {
         .key = "vid_adapt", .section = "video", .group = "Picture", .type = KVM_VT_BOOL,
@@ -166,24 +182,44 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = KVM_CAP_H264,
     },
     {
+        .key = "edid_prof", .section = "video", .group = "HDMI input", .type = KVM_VT_ENUM,
+        .title = "EDID profile",
+        .help = "What this device claims to be, as a monitor - the target picks its "
+                "output mode from what is offered here. \"Full\" advertises the common "
+                "modes from 640x480 up to 1920x1080@30. \"720p\" and \"1024x768\" stop "
+                "lower, which is often what you want: a smaller picture encodes faster "
+                "and costs less bandwidth. \"1080p30\" offers that one mode alone, for a "
+                "source that refuses a list. \"480p\" offers 720x480 and nothing bigger, "
+                "for old consoles and TV boxes. \"1080p50\", the default, is \"Full\" with "
+                "1920x1080@50 first: the target sends a frame every 20 ms instead of 33, "
+                "so the pointer shows up sooner, for a frame or two a second less. Only "
+                "boards with a rev 3.x chip and a TC358743 take 50 Hz; others get "
+                "\"Full\". Text modes stay on offer either way, so a BIOS still comes "
+                "through as text.",
+        .min = 0, .max = ENUM_MAX(s_edid_choices), .def = 5, .choices = s_edid_choices,
+        .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT | KVM_SF_PROFILE,
+    },
+    {
         .key = "rec_split_min", .section = "video", .group = "Recording", .type = KVM_VT_INT,
-        .title = "New recording file every (minutes)",
+        .title = "New recording file every",
         .help = "A long recording is written as several files, each playable on its own, "
                 "so one is quick to download and a damaged card loses one piece rather "
                 "than the whole. 0 starts a new file only at 3.9 GB, the largest file the device writes.",
         .min = 0, .max = 240, .def = 10, .requires_cap = KVM_CAP_H264,
+        .unit = "min",
     },
     {
         .key = "rec_max_min", .section = "video", .group = "Recording", .type = KVM_VT_INT,
-        .title = "Stop a recording after (minutes)",
+        .title = "Stop a recording after",
         .help = "So a recording left running does not fill the card. 0 records until it is "
                 "stopped or the card is full. A runbook's \"record <seconds>\" and the "
                 "API's ?seconds= set their own length instead.",
         .min = 0, .max = 1440, .def = 60, .requires_cap = KVM_CAP_H264,
+        .unit = "min",
     },
     {
         .key = "dashcam", .section = "video", .group = "Dashcam", .type = KVM_VT_BOOL,
-        .title = "Dashcam: keep the last minutes in memory",
+        .title = "Keep the last minutes in memory",
         .help = "Keeps the screen's recent past in memory, and saves it to the microSD card as a "
                 "clip when something happens - the screen stays one colour, a watched phrase "
                 "appears, the power goes off - or when you press Save clip. How far back "
@@ -195,46 +231,54 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "dashcam_store", .section = "video", .group = "Dashcam", .type = KVM_VT_ENUM,
-        .title = "Dashcam: where the past is kept",
-        .help = "\"memory\" holds what PSRAM can spare and does not touch the card until something "
+        .title = "Where the past is kept",
+        .help = "\"Memory\" holds what PSRAM can spare and does not touch the card until something "
                 "happens. \"microSD\" writes the screen to the card all the time, in 15-second pieces "
                 "in VIDEO/.dashcam, and deletes the old ones: it reaches back as far as the setting "
                 "below on any board, but the card cannot be handed to the target meanwhile.",
         .min = 0, .max = ENUM_MAX(s_dashcam_store_choices), .def = 0,
         .choices = s_dashcam_store_choices, .requires_cap = KVM_CAP_H264,
+        .visible_key = "dashcam", .visible_val = 1,
     },
     {
         .key = "dashcam_pre_s", .section = "video", .group = "Dashcam", .type = KVM_VT_INT,
-        .title = "Dashcam: seconds before the event",
+        .title = "Before the event",
         .help = "At most this much of the past goes into a clip - if memory holds that much, "
                 "or all of it when the past is kept on the card.",
         .min = 5, .max = 600, .def = 120, .requires_cap = KVM_CAP_H264,
+        .unit = "s",
+        .visible_key = "dashcam", .visible_val = 1,
     },
     {
         .key = "dashcam_post_s", .section = "video", .group = "Dashcam", .type = KVM_VT_INT,
-        .title = "Dashcam: seconds after the event",
+        .title = "After the event",
         .help = "How long a clip goes on after what set it off. Another event meanwhile "
                 "makes it longer, up to ten minutes in all.",
         .min = 5, .max = 600, .def = 30, .requires_cap = KVM_CAP_H264,
+        .unit = "s",
+        .visible_key = "dashcam", .visible_val = 1,
     },
     {
         .key = "dashcam_on_flat", .section = "video", .group = "Dashcam", .type = KVM_VT_BOOL,
-        .title = "Dashcam: save when the screen stays one colour",
+        .title = "Save when the screen stays one colour",
         .help = "Half a minute of one flat colour, such as a stop screen. A black screen does "
                 "not count: that is usually the display going to sleep.",
         .def = 1, .requires_cap = KVM_CAP_H264,
+        .visible_key = "dashcam", .visible_val = 1,
     },
     {
         .key = "dashcam_on_watch", .section = "video", .group = "Dashcam", .type = KVM_VT_BOOL,
-        .title = "Dashcam: save when a watched phrase appears",
+        .title = "Save when a watched phrase appears",
         .help = "The phrases are the ones set for screen alerts.",
         .def = 1, .requires_cap = KVM_CAP_H264,
+        .visible_key = "dashcam", .visible_val = 1,
     },
     {
         .key = "dashcam_on_power", .section = "video", .group = "Dashcam", .type = KVM_VT_BOOL,
-        .title = "Dashcam: save when the target's power goes off",
+        .title = "Save when the target's power goes off",
         .help = "Needs the ATX power LED wired, so the device can see it.",
         .def = 1, .requires_cap = KVM_CAP_H264,
+        .visible_key = "dashcam", .visible_val = 1,
     },
     {
         .key = "rec_text", .section = "video", .group = "Recording", .type = KVM_VT_BOOL,
@@ -247,17 +291,18 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "rec_tl_every", .section = "video", .group = "Recording", .type = KVM_VT_INT,
-        .title = "Timelapse: seconds between frames",
+        .title = "Timelapse: a frame every",
         .help = "What a timelapse started from Home Assistant, or offered first in the "
                 "recordings panel, keeps: one frame this often, played back at 25 fps.",
         .min = 1, .max = 3600, .def = 10, .requires_cap = KVM_CAP_H264,
+        .unit = "s",
     },
     {
         .key = "rec_subs", .section = "video", .group = "Recording", .type = KVM_VT_ENUM,
         .title = "Keystrokes in recordings",
         .help = "Writes what was pressed as subtitles next to each recording (a .srt "
-                "file of the same name; VLC and mpv show it). keys: shortcuts, named keys "
-                "and clicks, with typed characters shown as dots. everything: the typed "
+                "file of the same name; VLC and mpv show it). \"Keys\": shortcuts, named keys "
+                "and clicks, with typed characters shown as dots. \"Everything\": the typed "
                 "text too - which includes any password typed on the target, stored on "
                 "the card in plain text.",
         .min = 0, .max = ENUM_MAX(s_rec_subs_choices), .def = 0, .choices = s_rec_subs_choices,
@@ -271,25 +316,7 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = KVM_CAP_H264,
     },
     {
-        .key = "edid_prof", .section = "video", .type = KVM_VT_ENUM,
-        .title = "EDID profile",
-        .help = "What this device claims to be, as a monitor - the target picks its "
-                "output mode from what is offered here. \"full\" advertises the common "
-                "modes from 640x480 up to 1920x1080@30. \"720p\" and \"1024x768\" stop "
-                "lower, which is often what you want: a smaller picture encodes faster "
-                "and costs less bandwidth. \"1080p30\" offers that one mode alone, for a "
-                "source that refuses a list. \"480p\" offers 720x480 and nothing bigger, "
-                "for old consoles and TV boxes. \"1080p50\", the default, is \"full\" with "
-                "1920x1080@50 first: the target sends a frame every 20 ms instead of 33, "
-                "so the pointer shows up sooner, for a frame or two a second less. Only "
-                "boards with a rev 3.x chip and a TC358743 take 50 Hz; others get "
-                "\"full\". Text modes stay on offer either way, so a BIOS still comes "
-                "through as text.",
-        .min = 0, .max = ENUM_MAX(s_edid_choices), .def = 5, .choices = s_edid_choices,
-        .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT | KVM_SF_PROFILE,
-    },
-    {
-        .key = "scr_watch", .section = "video", .type = KVM_VT_BOOL,
+        .key = "scr_watch", .section = "video", .group = "Screen watch", .type = KVM_VT_BOOL,
         .title = "Watch the screen for words",
         .help = "Read a text screen even when nobody is looking, and raise an alert "
                 "when it says one of the phrases below. This is the case a KVM is "
@@ -299,7 +326,7 @@ static const kvm_setting_t s_settings[] = {
         .def = 0, .requires_cap = KVM_CAP_VIDEO,
     },
     {
-        .key = "scr_match", .section = "video", .type = KVM_VT_STR,
+        .key = "scr_match", .section = "video", .group = "Screen watch", .type = KVM_VT_STR,
         .title = "Phrases to watch for",
         .help = "Comma-separated, matched without regard to case, anywhere on a line - "
                 "for example: no boot device, kernel panic, press F1 to continue. An "
@@ -307,6 +334,7 @@ static const kvm_setting_t s_settings[] = {
                 "every phrase on screen is named, not only the first; the log records "
                 "both, and Home Assistant gets a sensor if MQTT is on.",
         .def_str = "", .max_len = 255, .requires_cap = KVM_CAP_VIDEO,
+        .visible_key = "scr_watch", .visible_val = 1,
     },
 
     /* ---- input ---------------------------------------------------------- */
@@ -314,11 +342,12 @@ static const kvm_setting_t s_settings[] = {
         .key = "target_os", .section = "input", .group = "Target", .type = KVM_VT_ENUM,
         .title = "Target OS",
         .help = "Which machine's conventions the console follows - the label on the "
-                "Meta key, and which OS-specific key combinations it offers. \"auto\" "
+                "Meta key, and which OS-specific key combinations it offers. \"Detect\" "
                 "trusts the guess made from how the target enumerates USB, shown next "
                 "to the USB status; set it by hand if that guess is wrong or unknown.",
         .min = 0, .max = ENUM_MAX(s_targetos_choices), .def = 0, .choices = s_targetos_choices, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .labels = s_targetos_labels,
     },
     {
         .key = "mouse_mode", .section = "input", .group = "Pointer", .type = KVM_VT_ENUM,
@@ -335,9 +364,9 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ptr_engage", .section = "input", .group = "Pointer", .type = KVM_VT_ENUM,
         .title = "Start controlling on",
-        .help = "\"click\" waits for a click on the video before input reaches the "
+        .help = "\"Click\" waits for a click on the video before input reaches the "
                 "target, and stops again on Esc or a click outside; the engaging click "
-                "is still delivered. \"hover\" tracks the pointer as soon as it is over "
+                "is still delivered. \"Hover\" tracks the pointer as soon as it is over "
                 "the video, the way a remote desktop behaves. Keyboard input always "
                 "requires a click first.",
         .min = 0, .max = ENUM_MAX(s_engage_choices), .def = 0, .choices = s_engage_choices, .requires_cap = KVM_CAP_HID,
@@ -357,7 +386,7 @@ static const kvm_setting_t s_settings[] = {
        desktop, not the one screen captured. Read by the console only. */
     {
         .key = "ptr_desk_w", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
-        .title = "Whole desktop width (px)",
+        .title = "Whole desktop width",
         .help = "For a target with more than one screen, or one that puts black borders "
                 "round its picture. The absolute pointer covers the whole desktop, so with "
                 "two screens the cursor runs off onto the other one, and with borders it "
@@ -368,45 +397,52 @@ static const kvm_setting_t s_settings[] = {
                 "off.",
         .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .unit = "px",
     },
     {
         .key = "ptr_desk_h", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
-        .title = "Whole desktop height (px)",
+        .title = "Whole desktop height",
         .help = "The height of the whole desktop. 0 means the same as this screen.",
         .min = 0, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .unit = "px",
     },
     {
         .key = "ptr_scr_x", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
-        .title = "This screen's left edge (px)",
+        .title = "This screen's left edge",
         .help = "Where this screen starts, from the left of the whole desktop. Below 0 "
                 "when the desktop starts to the right of the picture's left edge (black borders).",
         .min = -32767, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .unit = "px",
     },
     {
         .key = "ptr_scr_y", .section = "input", .group = "Several screens", .type = KVM_VT_INT,
-        .title = "This screen's top edge (px)",
+        .title = "This screen's top edge",
         .help = "Where this screen starts, from the top of the whole desktop. Below 0 "
                 "when the desktop starts below the picture's top edge (black borders).",
         .min = -32767, .max = 32767, .def = 0, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .unit = "px",
     },
     {
         .key = "mouse_sens", .section = "input", .group = "Pointer", .type = KVM_VT_INT,
-        .title = "Relative sensitivity (%)",
+        .title = "Relative sensitivity",
         .help = "Scales pointer movement in relative mode only.",
         .min = 10, .max = 400, .def = 100, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .unit = "%",
+        .visible_key = "mouse_mode", .visible_val = 1,
     },
     {
         .key = "jiggle_s", .section = "input", .group = "Pointer", .type = KVM_VT_INT,
-        .title = "Mouse jiggler (seconds)",
+        .title = "Mouse jiggler",
         .help = "0 turns it off. Otherwise the pointer is nudged one pixel and put straight "
                 "back this often, so the target does not lock or fall asleep while you are "
                 "watching it. It stands aside whenever you are using the mouse yourself, and "
                 "does nothing when no target is attached.",
         .min = 0, .max = 3600, .def = 0, .requires_cap = KVM_CAP_HID,
+        .unit = "s",
     },
 
     {
@@ -423,15 +459,16 @@ static const kvm_setting_t s_settings[] = {
         .title = "Gamepad",
         .help = "A game controller for the target, and a gamepad panel in the console; a "
                 "controller plugged into your own computer works through it too. "
-                "\"switch\": a HORI Pokken pad, for a Nintendo Switch. \"xinput\": a "
-                "wired Xbox 360 pad, for Windows, a Steam Deck and Linux. \"xbox\": the "
+                "\"Nintendo Switch\": a HORI Pokken pad. \"Xbox 360 (XInput)\": a "
+                "wired Xbox 360 pad, for Windows, a Steam Deck and Linux. \"Original Xbox\": the "
                 "original Xbox pad, always alone; the console's controller port needs an "
                 "adapter to a USB socket. The pad joins the keyboard and mouse; the "
-                "\"_alone\" choices show the pad and nothing else, the way the real one "
+                "\"pad only\" choices show the pad and nothing else, the way the real one "
                 "looks - Windows needs that for the Xbox pad, and a console may ignore a pad "
                 "with company. Takes effect after a restart.",
         .min = 0, .max = ENUM_MAX(s_pad_choices), .def = 0, .choices = s_pad_choices,
         .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT | KVM_SF_PROFILE,
+        .labels = s_pad_labels,
     },
     {
         .key = "scroll_inv", .section = "input", .group = "Pointer", .type = KVM_VT_BOOL,
@@ -441,11 +478,12 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "scroll_speed", .section = "input", .group = "Pointer", .type = KVM_VT_INT,
-        .title = "Scroll speed (%)",
+        .title = "Scroll speed",
         .help = "How far the target scrolls for a turn of the wheel or a swipe on a "
                 "touchpad. 100 sends one wheel click per notch, 50 one per two notches.",
         .min = 25, .max = 400, .def = 100, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .unit = "%",
     },
     {
         .key = "kbd_layout", .section = "input", .group = "Keyboard", .type = KVM_VT_ENUM,
@@ -454,12 +492,14 @@ static const kvm_setting_t s_settings[] = {
                 "actually types. A KVM sends key positions, not characters.",
         .min = 0, .max = ENUM_MAX(s_layout_choices), .def = 0, .choices = s_layout_choices, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
+        .labels = s_layout_labels,
     },
     {
         .key = "type_delay", .section = "input", .group = "Keyboard", .type = KVM_VT_INT,
-        .title = "Paste keystroke delay (ms)",
+        .title = "Paste keystroke delay",
         .help = "Raise it if the target drops characters while text is being pasted.",
         .min = 1, .max = 200, .def = 8, .requires_cap = KVM_CAP_HID,
+        .unit = "ms",
     },
     {
         /* User-defined key macros, as a JSON array the console reads and writes.
@@ -500,6 +540,7 @@ static const kvm_setting_t s_settings[] = {
         .title = "Time server (NTP)",
         .help = "Where the clock is set from. A name on the local network works with no internet.",
         .def_str = "pool.ntp.org", .max_len = 64, .requires_cap = KVM_CAP_SCHED,
+        .visible_key = "time_sync", .visible_val = 1,
     },
     {
         .key = "sched_tz", .section = "system", .group = "Clock", .type = KVM_VT_STR,
@@ -527,7 +568,8 @@ static const kvm_setting_t s_settings[] = {
                 "of the 40-pin header on most boards, and a DS3231 for Raspberry Pi plugs "
                 "straight on there. Own pins puts it on a second I2C bus.",
         .min = 0, .max = ENUM_MAX(s_rtc_bus_choices), .def = 0, .choices = s_rtc_bus_choices,
-        .requires_cap = -1, .flags = KVM_SF_REBOOT,
+        .requires_cap = -1, .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "rtc_chip", .visible_val = 1,
     },
     {
         .key = "rtc_sda", .section = "system", .group = "Clock", .type = KVM_VT_INT,
@@ -563,18 +605,21 @@ static const kvm_setting_t s_settings[] = {
         .title = "On a screen-watch phrase",
         .help = "Notify when one of the phrases the screen is watched for appears.",
         .def = 1, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_flat", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
         .title = "On a blank screen",
         .help = "Notify when the output stays one flat colour - a stop screen, a blanked display.",
         .def = 0, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_snap", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
         .title = "Attach a screenshot",
         .help = "Send the screen with the message.",
         .def = 1, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_clip", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
@@ -583,18 +628,21 @@ static const kvm_setting_t s_settings[] = {
                 "the chat (up to 50 MB; bigger ones are named instead), to the webhook as a "
                 "message with the file's name.",
         .def = 1, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_log", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
         .title = "Attach recent log",
         .help = "Include the tail of the device log with the message - the context around an alert.",
         .def = 0, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_tg_token", .section = "notify", .group = "Where", .type = KVM_VT_STR,
         .title = "Telegram bot token",
         .help = "From @BotFather, like 123456:AA... . Message the bot once so it may write to you.",
         .def_str = "", .max_len = 64, .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_SECRET,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_tg_chat", .section = "notify", .group = "Where", .type = KVM_VT_STR,
@@ -602,6 +650,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "The chat to message. Find chats lists the ones that wrote to the bot lately; "
                 "a group or channel id typed in works too.",
         .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
     {
         .key = "notify_url", .section = "notify", .group = "Where", .type = KVM_VT_STR,
@@ -611,11 +660,12 @@ static const kvm_setting_t s_settings[] = {
                 "with a \"log\" field added when the log tail is switched on above, sent as "
                 "application/json; anything answering 2xx counts as delivered. Optional.",
         .def_str = "", .max_len = 200, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
     },
 
     /* ---- storage -------------------------------------------------------- */
     {
-        .key = "msc_enable", .section = "storage", .type = KVM_VT_BOOL,
+        .key = "msc_enable", .section = "storage", .group = "Virtual media", .type = KVM_VT_BOOL,
         .title = "Expose virtual media",
         .help = "Present a USB drive to the target that it can boot from. Off keeps the "
                 "device a plain keyboard and mouse, which also frees the USB endpoints the "
@@ -625,19 +675,21 @@ static const kvm_setting_t s_settings[] = {
         .def = 0, .requires_cap = KVM_CAP_MSC, .flags = KVM_SF_REBOOT,
     },
     {
-        .key = "msc_mode", .section = "storage", .type = KVM_VT_ENUM,
+        .key = "msc_mode", .section = "storage", .group = "Virtual media", .type = KVM_VT_ENUM,
         .title = "Media type",
-        .help = "How an image is presented to the target. \"auto\" serves a .iso as a "
+        .help = "How an image is presented to the target. \"Auto\" serves a .iso as a "
                 "CD-ROM (so it boots and mounts as an optical drive) and any other file "
-                "as a removable disk - the right choice almost always. Force \"cdrom\" or "
-                "\"disk\" only if a file is misnamed. Handing over the whole card is picked "
+                "as a removable disk - the right choice almost always. Force \"CD-ROM\" or "
+                "\"Disk\" only if a file is misnamed. Handing over the whole card is picked "
                 "in the Media panel, not here. Switching the type re-attaches the USB drive.",
         .min = 0, .max = ENUM_MAX(s_media_choices), .def = 0, .choices = s_media_choices, .requires_cap = KVM_CAP_MSC,
+        .labels = s_media_labels,
+        .visible_key = "msc_enable", .visible_val = 1,
     },
     {
-        .key = "sd_speed", .section = "storage", .type = KVM_VT_ENUM,
+        .key = "sd_speed", .section = "storage", .group = "microSD card", .type = KVM_VT_ENUM,
         .title = "microSD speed",
-        .help = "The fastest clock the card is tried at. \"auto\" starts at what the board "
+        .help = "The fastest clock the card is tried at. \"Auto\" starts at what the board "
                 "supports and steps down by itself when the card fails to mount, fails a test "
                 "read, or fails a transfer later. Pick a lower one for a card that keeps "
                 "stepping down. Takes effect after a restart.",
@@ -687,6 +739,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Drives the optocoupler across the target's power button. -1 to disable.",
         .min = -1, .max = 54, .def = CONFIG_KVM_ATX_PWR_GPIO, .requires_cap = -1,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         .key = "atx_rst_gpio", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
@@ -694,6 +747,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Drives the optocoupler across the target's reset button. -1 to disable.",
         .min = -1, .max = 54, .def = CONFIG_KVM_ATX_RST_GPIO, .requires_cap = -1,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         .key = "atx_led_gpio", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
@@ -703,6 +757,7 @@ static const kvm_setting_t s_settings[] = {
                 "you are not sensing the LED.",
         .min = -1, .max = 54, .def = CONFIG_KVM_ATX_LED_GPIO, .requires_cap = -1,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         .key = "atx_hdd_gpio", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
@@ -712,18 +767,23 @@ static const kvm_setting_t s_settings[] = {
                 "while the disk works. -1 if you are not sensing it.",
         .min = -1, .max = 54, .def = -1, .requires_cap = -1,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         .key = "atx_short_ms", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
-        .title = "Short press (ms)",
+        .title = "Short press",
         .help = "How long a normal power or reset press is held.",
         .min = 50, .max = 2000, .def = 200, .requires_cap = -1,
+        .unit = "ms",
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         .key = "atx_long_ms", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
-        .title = "Force-off hold (ms)",
+        .title = "Force-off hold",
         .help = "How long the power button is held for a hard power off.",
         .min = 1000, .max = 15000, .def = 5000, .requires_cap = -1,
+        .unit = "ms",
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         .key = "atx_active_high", .section = "power", .group = "ATX wiring", .type = KVM_VT_BOOL,
@@ -731,6 +791,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "On to press the button when the GPIO drives high (high-level-trigger "
                 "optocoupler modules). Turn off if your module presses on a low.",
         .def = 1, .requires_cap = -1,
+        .visible_key = "atx_enable", .visible_val = 1,
     },
     {
         /* Key kept <= 15 chars: NVS rejects longer keys, and "atx_led_active_high"
@@ -740,6 +801,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "On if the LED sense reads high when the target is powered. Flip it if "
                 "the reported power state is inverted.",
         .def = 1, .requires_cap = -1,
+        .visible_key = "atx_enable", .visible_val = 1,
     },
 
     /* The button on the box - see components/kvm_sched/button.c. */
@@ -763,6 +825,8 @@ static const kvm_setting_t s_settings[] = {
                 "two.",
         .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
         .requires_cap = -1,
+        .visible_key = "btn_gpio", .visible_val = -1,
+        .flags = KVM_SF_SHOW_NE,
     },
     {
         .key = "btn_hold", .section = "power", .group = "Button on the box", .type = KVM_VT_ENUM,
@@ -771,12 +835,16 @@ static const kvm_setting_t s_settings[] = {
                 "so you know it took.",
         .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
         .requires_cap = -1,
+        .visible_key = "btn_gpio", .visible_val = -1,
+        .flags = KVM_SF_SHOW_NE,
     },
     {
         .key = "btn_runbook", .section = "power", .group = "Button on the box", .type = KVM_VT_STR,
         .title = "Runbook to run",
         .help = "The name of the runbook, for either action set to \"runbook\".",
         .def_str = "", .max_len = 47, .requires_cap = -1,
+        .visible_key = "btn_gpio", .visible_val = -1,
+        .flags = KVM_SF_SHOW_NE,
     },
     {
         .key = "btn_active_high", .section = "power", .group = "Button on the box", .type = KVM_VT_BOOL,
@@ -784,6 +852,8 @@ static const kvm_setting_t s_settings[] = {
         .help = "Off for a button that connects the pin to ground, which is the usual "
                 "kind and the M5Stack Unit Button. On for one that connects it to 3V3.",
         .def = 0, .requires_cap = -1,
+        .visible_key = "btn_gpio", .visible_val = -1,
+        .flags = KVM_SF_SHOW_NE,
     },
 
     {
@@ -801,25 +871,28 @@ static const kvm_setting_t s_settings[] = {
         .title = "Serial port over USB",
         .help = "A serial port on the USB cable the target already has, so no wires. Linux "
                 "sees it as /dev/ttyACM0, Windows as a COM port, macOS as /dev/cu.usbmodem*. "
-                "\"console\": the serial console uses it instead of the pins below; on Linux "
+                "\"Serial console\": the serial console uses it instead of the pins below; on Linux "
                 "run a login on it with \"systemctl enable --now serial-getty@ttyACM0\". "
-                "\"agent\": it is for espkvm-agent, a small program on the target that shows "
+                "\"Agent\": it is for espkvm-agent, a small program on the target that shows "
                 "what the machine is and shares its clipboard. Not together with a gamepad. "
                 "Takes effect after a restart.",
         .min = 0, .max = ENUM_MAX(s_usb_serial_choices), .def = 0, .choices = s_usb_serial_choices,
         .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
+        .labels = s_usb_serial_labels,
     },
     {
         .key = "ser_tx", .section = "power", .group = "Serial console", .type = KVM_VT_INT,
         .title = "TX pin (to the target's RX)",
         .help = "The GPIO this device sends on. -1 until you pick one.",
         .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .visible_key = "ser_enable", .visible_val = 1,
     },
     {
         .key = "ser_rx", .section = "power", .group = "Serial console", .type = KVM_VT_INT,
         .title = "RX pin (from the target's TX)",
         .help = "The GPIO this device listens on. -1 until you pick one.",
         .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .visible_key = "ser_enable", .visible_val = 1,
     },
     {
         .key = "ser_baud", .section = "power", .group = "Serial console", .type = KVM_VT_ENUM,
@@ -828,11 +901,12 @@ static const kvm_setting_t s_settings[] = {
                 "or 115200 for a PC BIOS. Always 8 data bits, no parity, one stop bit.",
         .min = 0, .max = ENUM_MAX(s_baud_choices), .def = 4, .choices = s_baud_choices,
         .requires_cap = -1,
+        .visible_key = "ser_enable", .visible_val = 1,
     },
 
     /* ---- audio ---------------------------------------------------------- */
     {
-        .key = "aud_enable", .section = "audio", .type = KVM_VT_BOOL,
+        .key = "aud_enable", .section = "audio", .group = "HDMI audio", .type = KVM_VT_BOOL,
         .title = "HDMI audio",
         .help = "The capture board sends the HDMI sound as I2S on three wires: bit clock "
                 "(BCLK or SCK), word clock (WS, LRCK or WFS) and data (SD or DATA). Wire them "
@@ -841,56 +915,28 @@ static const kvm_setting_t s_settings[] = {
         .def = 0, .requires_cap = -1,
     },
     {
-        .key = "aud_bclk", .section = "audio", .type = KVM_VT_INT,
+        .key = "aud_bclk", .section = "audio", .group = "HDMI audio", .type = KVM_VT_INT,
         .title = "BCLK pin (bit clock)",
         .help = "-1 until you pick one.",
         .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .visible_key = "aud_enable", .visible_val = 1,
     },
     {
-        .key = "aud_ws", .section = "audio", .type = KVM_VT_INT,
+        .key = "aud_ws", .section = "audio", .group = "HDMI audio", .type = KVM_VT_INT,
         .title = "WS pin (word clock)",
         .help = "-1 until you pick one.",
         .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .visible_key = "aud_enable", .visible_val = 1,
     },
     {
-        .key = "aud_din", .section = "audio", .type = KVM_VT_INT,
+        .key = "aud_din", .section = "audio", .group = "HDMI audio", .type = KVM_VT_INT,
         .title = "DATA pin",
         .help = "-1 until you pick one.",
         .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .visible_key = "aud_enable", .visible_val = 1,
     },
 
     /* ---- network -------------------------------------------------------- */
-    {
-        .key = "nc_enable", .section = "network", .group = "Netconsole", .type = KVM_VT_BOOL,
-        .title = "Receive the target's log",
-        .help = "Listen for the target's kernel messages over the network: Linux netconsole, "
-                "or anything that sends plain syslog over UDP. It keeps working when the "
-                "target's disk is gone, which is when you want it. On the target, for example: "
-                "modprobe netconsole netconsole=@/,6666@<this device's IP>/. What arrives is "
-                "unauthenticated UDP - anyone on the network can read it or send lines - so it "
-                "is kept as text and can only raise a notification, never run anything.",
-        .def = 0, .requires_cap = -1,
-    },
-    {
-        .key = "nc_port", .section = "network", .group = "Netconsole", .type = KVM_VT_INT,
-        .title = "UDP port",
-        .help = "6666 is netconsole's usual port; 514 is syslog's.",
-        .min = 1, .max = 65535, .def = 6666, .requires_cap = -1,
-    },
-    {
-        .key = "nc_from", .section = "network", .group = "Netconsole", .type = KVM_VT_STR,
-        .title = "Accept from",
-        .help = "The target's IP address; several separated by commas. Empty accepts lines "
-                "from anyone on the network.",
-        .def_str = "", .max_len = 95, .requires_cap = -1,
-    },
-    {
-        .key = "nc_match", .section = "network", .group = "Netconsole", .type = KVM_VT_STR,
-        .title = "Alert on",
-        .help = "Comma-separated phrases, matched without regard to case. A line holding one "
-                "sends a notification, at most one every 30 seconds. Empty for none.",
-        .def_str = "Kernel panic,Oops,BUG:,Call Trace", .max_len = 127, .requires_cap = -1,
-    },
     {
         .key = "net_hostname", .section = "network", .group = "Address", .type = KVM_VT_STR,
         .title = "Hostname",
@@ -916,21 +962,25 @@ static const kvm_setting_t s_settings[] = {
         .key = "net_ip", .section = "network", .group = "Address", .type = KVM_VT_STR,
         .title = "Static address", .def_str = "", .max_len = 15,
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
+        .visible_key = "net_dhcp", .visible_val = 0,
     },
     {
         .key = "net_mask", .section = "network", .group = "Address", .type = KVM_VT_STR,
         .title = "Netmask", .def_str = "255.255.255.0", .max_len = 15,
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
+        .visible_key = "net_dhcp", .visible_val = 0,
     },
     {
         .key = "net_gw", .section = "network", .group = "Address", .type = KVM_VT_STR,
         .title = "Gateway", .def_str = "", .max_len = 15,
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
+        .visible_key = "net_dhcp", .visible_val = 0,
     },
     {
         .key = "net_dns", .section = "network", .group = "Address", .type = KVM_VT_STR,
         .title = "DNS server", .def_str = "", .max_len = 15,
         .requires_cap = KVM_CAP_NET_STATIC, .flags = KVM_SF_REBOOT,
+        .visible_key = "net_dhcp", .visible_val = 0,
     },
     {
         .key = "net_ipv6", .section = "network", .group = "Address", .type = KVM_VT_BOOL,
@@ -945,9 +995,9 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "net_mode", .section = "network", .group = "WiFi", .type = KVM_VT_ENUM,
         .title = "Connection",
-        .help = "\"ethernet\": the wired port. \"wifi\": join the network below "
-                "(Ethernet is left down). \"ap\": the device makes its own WiFi hotspot "
-                "for setup where there is no network to join. \"auto\": the wired port, "
+        .help = "\"Ethernet\": the wired port. \"WiFi\": join the network below "
+                "(Ethernet is left down). \"Own hotspot\": the device makes its own WiFi hotspot "
+                "for setup where there is no network to join. \"Ethernet, WiFi as backup\": the wired port, "
                 "with the WiFi network below joined and waiting - when the cable is "
                 "pulled the device moves to WiFi, and back when the cable returns. It "
                 "answers on both addresses. If WiFi is unreachable: reset the board, then hold "
@@ -964,20 +1014,23 @@ static const kvm_setting_t s_settings[] = {
 #endif
         .choices = s_netmode_choices,
         .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
+        .labels = s_netmode_labels,
     },
     {
         .key = "wifi_ssid", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "WiFi network (SSID)",
-        .help = "The name of the network to join in \"wifi\" mode.",
+        .help = "The name of the network to join in WiFi mode.",
         .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_WIFI,
-        .flags = KVM_SF_REBOOT,
+        .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "net_mode", .visible_val = 0,
     },
     {
         .key = "wifi_pass", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "WiFi password",
         .help = "Left blank for an open network. Stored write-only.",
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
-        .flags = KVM_SF_SECRET | KVM_SF_REBOOT,
+        .flags = KVM_SF_SECRET | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "net_mode", .visible_val = 0,
     },
     {
         .key = "ap_open", .section = "network", .group = "WiFi", .type = KVM_VT_BOOL,
@@ -992,7 +1045,7 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ap_pass", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
         .title = "Hotspot password",
-        .help = "Password for the device's own hotspot (\"ap\" mode, or the rescue "
+        .help = "Password for the device's own hotspot (\"Own hotspot\" mode, or the rescue "
                 "hotspot below). At least 8 characters. Left blank, the device "
                 "makes one up the first time the hotspot comes up and prints it "
                 "in the log and on the display; for a hotspot with no password at "
@@ -1008,14 +1061,16 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "net_fallback", .section = "network", .group = "WiFi", .type = KVM_VT_ENUM,
         .title = "If WiFi can't connect",
-        .help = "keep_trying: keep retrying the network - it reconnects on its own "
+        .help = "\"Keep trying\": keep retrying the network - it reconnects on its own "
                 "when the network comes back (best for a device you cannot reach "
-                "physically). hotspot: ALSO run a rescue hotspot (ESP-KVM-xxxx) the "
+                "physically). \"Also start a hotspot\": ALSO run a rescue hotspot (ESP-KVM-xxxx) the "
                 "whole time WiFi is trying, so you can always reach the device "
                 "on-site to fix its settings - set a Hotspot password first. Only "
                 "applies in WiFi (station) mode.",
         .min = 0, .max = ENUM_MAX(s_fallback_choices), .def = 0, .choices = s_fallback_choices,
-        .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
+        .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .labels = s_fallback_labels,
+        .visible_key = "net_mode", .visible_val = 0,
     },
 
     {
@@ -1030,6 +1085,40 @@ static const kvm_setting_t s_settings[] = {
     },
 
     /* ---- vpn / wireguard ------------------------------------------------- */
+    {
+        .key = "nc_enable", .section = "network", .group = "Netconsole", .type = KVM_VT_BOOL,
+        .title = "Receive the target's log",
+        .help = "Listen for the target's kernel messages over the network: Linux netconsole, "
+                "or anything that sends plain syslog over UDP. It keeps working when the "
+                "target's disk is gone, which is when you want it. On the target, for example: "
+                "modprobe netconsole netconsole=@/,6666@<this device's IP>/. What arrives is "
+                "unauthenticated UDP - anyone on the network can read it or send lines - so it "
+                "is kept as text and can only raise a notification, never run anything.",
+        .def = 0, .requires_cap = -1,
+    },
+    {
+        .key = "nc_port", .section = "network", .group = "Netconsole", .type = KVM_VT_INT,
+        .title = "UDP port",
+        .help = "6666 is netconsole's usual port; 514 is syslog's.",
+        .min = 1, .max = 65535, .def = 6666, .requires_cap = -1,
+        .visible_key = "nc_enable", .visible_val = 1,
+    },
+    {
+        .key = "nc_from", .section = "network", .group = "Netconsole", .type = KVM_VT_STR,
+        .title = "Accept from",
+        .help = "The target's IP address; several separated by commas. Empty accepts lines "
+                "from anyone on the network.",
+        .def_str = "", .max_len = 95, .requires_cap = -1,
+        .visible_key = "nc_enable", .visible_val = 1,
+    },
+    {
+        .key = "nc_match", .section = "network", .group = "Netconsole", .type = KVM_VT_STR,
+        .title = "Alert on",
+        .help = "Comma-separated phrases, matched without regard to case. A line holding one "
+                "sends a notification, at most one every 30 seconds. Empty for none.",
+        .def_str = "Kernel panic,Oops,BUG:,Call Trace", .max_len = 127, .requires_cap = -1,
+        .visible_key = "nc_enable", .visible_val = 1,
+    },
     {
         .key = "wg_enable", .section = "vpn", .group = "WireGuard", .type = KVM_VT_BOOL,
         .title = "Enable WireGuard",
@@ -1067,9 +1156,10 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "wg_keepalive", .section = "vpn", .group = "WireGuard", .type = KVM_VT_INT,
-        .title = "Persistent keepalive (s)",
+        .title = "Persistent keepalive",
         .help = "Keeps a NAT/firewall mapping open. 25 is typical; 0 disables it.",
         .min = 0, .max = 65535, .def = 25, .requires_cap = KVM_CAP_WG,
+        .unit = "s",
     },
     {
         .key = "wg_sntp", .section = "vpn", .group = "WireGuard", .type = KVM_VT_BOOL,
@@ -1084,6 +1174,7 @@ static const kvm_setting_t s_settings[] = {
         .title = "NTP server",
         .help = "Used only when SNTP is on.",
         .def_str = "pool.ntp.org", .max_len = 47, .requires_cap = KVM_CAP_WG,
+        .visible_key = "wg_sntp", .visible_val = 1,
     },
 
     /* ---- vpn / tailscale ------------------------------------------------- */
@@ -1170,6 +1261,7 @@ static const kvm_setting_t s_settings[] = {
                 "device drops off the tailnet until someone authorises it again. 0 turns "
                 "the warning off. Needs notifications set up and the clock in sync.",
         .def = 14, .min = 0, .max = 90, .requires_cap = KVM_CAP_TS,
+        .unit = "days",
     },
     {
         .key = "ts_cert", .section = "vpn", .group = "Tailscale", .type = KVM_VT_BOOL,
@@ -1196,18 +1288,21 @@ static const kvm_setting_t s_settings[] = {
         .title = "Broker host",
         .help = "Hostname or IP of the MQTT broker, e.g. the Home Assistant host.",
         .def_str = "", .max_len = 63, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_port", .section = "mqtt", .group = "Broker", .type = KVM_VT_INT,
         .title = "Broker port",
         .help = "1883 for plain MQTT, 8883 for MQTT over TLS.",
         .min = 1, .max = 65535, .def = 1883, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_tls", .section = "mqtt", .group = "Broker", .type = KVM_VT_BOOL,
         .title = "Use TLS",
         .help = "Connect with mqtts. Set the port to 8883 as well.",
         .def = 0, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_verify", .section = "mqtt", .group = "Broker", .type = KVM_VT_BOOL,
@@ -1216,36 +1311,43 @@ static const kvm_setting_t s_settings[] = {
                 "CA bundle (public CAs, e.g. Let's Encrypt). Turn off for a broker "
                 "with a self-signed certificate.",
         .def = 1, .requires_cap = -1,
+        .visible_key = "mqtt_tls", .visible_val = 1,
     },
     {
         .key = "mqtt_user", .section = "mqtt", .group = "Broker", .type = KVM_VT_STR,
         .title = "Username",
         .help = "Leave empty for an anonymous broker.",
         .def_str = "", .max_len = 47, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_pass", .section = "mqtt", .group = "Broker", .type = KVM_VT_STR,
         .title = "Password",
         .help = "Stored on the device; never sent back to the console.",
         .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_base", .section = "mqtt", .group = "What it publishes", .type = KVM_VT_STR,
         .title = "Base topic",
         .help = "Topic prefix; the device id is appended, e.g. espkvm/a1b2c3.",
         .def_str = "espkvm", .max_len = 31, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_disco", .section = "mqtt", .group = "What it publishes", .type = KVM_VT_STR,
         .title = "Discovery prefix",
         .help = "Home Assistant MQTT discovery prefix. Default suits a stock HA.",
         .def_str = "homeassistant", .max_len = 31, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_interval", .section = "mqtt", .group = "What it publishes", .type = KVM_VT_INT,
-        .title = "Publish interval (s)",
+        .title = "Publish interval",
         .help = "How often telemetry is published.",
         .min = 5, .max = 3600, .def = 30, .requires_cap = -1,
+        .unit = "s",
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
     {
         .key = "mqtt_snap", .section = "mqtt", .group = "What it publishes", .type = KVM_VT_BOOL,
@@ -1257,27 +1359,28 @@ static const kvm_setting_t s_settings[] = {
                 "MJPEG codec - there is no still to take while H.264 runs - and a "
                 "1080p frame is a few hundred kilobytes over the broker.",
         .def = 0, .requires_cap = -1,
+        .visible_key = "mqtt_enable", .visible_val = 1,
     },
 
     /* ---- security ------------------------------------------------------- */
     {
-        .key = "sec_https", .section = "security", .type = KVM_VT_BOOL,
+        .key = "sec_https", .section = "security", .group = "Access", .type = KVM_VT_BOOL,
         .title = "Serve over HTTPS",
         .help = "Uses a self-signed certificate generated on first boot. Disable only "
                 "on a trusted network or behind a VPN.",
         .def = 1, .requires_cap = KVM_CAP_HTTPS, .flags = KVM_SF_REBOOT,
     },
     {
-        .key = "sec_auth", .section = "security", .type = KVM_VT_BOOL,
+        .key = "sec_auth", .section = "security", .group = "Access", .type = KVM_VT_BOOL,
         .title = "Require login",
         .def = 1, .requires_cap = KVM_CAP_HTTPS, .flags = KVM_SF_REBOOT,
     },
     {
-        .key = "sec_user", .section = "security", .type = KVM_VT_STR,
+        .key = "sec_user", .section = "security", .group = "Access", .type = KVM_VT_STR,
         .title = "Username", .def_str = "admin", .max_len = 31, .requires_cap = KVM_CAP_HTTPS,
     },
     {
-        .key = "agent_api", .section = "security", .type = KVM_VT_BOOL,
+        .key = "agent_api", .section = "security", .group = "Access", .type = KVM_VT_BOOL,
         .title = "Agent REST API",
         .help = "Enables the plain-REST snapshot and keyboard/mouse endpoints "
                 "(/api/v1/video/frame.jpg, /api/v1/hid/*) used to drive the target "
@@ -1308,6 +1411,7 @@ static const kvm_setting_t s_settings[] = {
                 "at is what gets written to the device, so point it somewhere you trust.",
         .def_str = CONFIG_KVM_UPDATE_URL,
         .max_len = 200, .requires_cap = KVM_CAP_OTA,
+        .visible_key = "upd_check", .visible_val = 1,
     },
 
     {
@@ -1320,6 +1424,7 @@ static const kvm_setting_t s_settings[] = {
                 "download the image itself. Ordinary updates do not need this; the browser "
                 "fetches those and hands them over.",
         .def = 0, .requires_cap = KVM_CAP_OTA,
+        .visible_key = "upd_check", .visible_val = 1,
     },
 
     {
@@ -1332,24 +1437,29 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "therm_warn", .section = "system", .group = "Thermal", .type = KVM_VT_INT,
-        .title = "Warm threshold (C)",
+        .title = "Warm threshold",
         .help = "Above this the frame rate is halved. Measured on this board: 1080p MJPEG at "
                 "full rate settles around 46 C in open air, so the default leaves plenty of "
                 "room before anything is given up.",
         .min = 35, .max = 100, .def = 70, .requires_cap = -1,
+        .unit = "°C",
+        .visible_key = "therm_guard", .visible_val = 1,
     },
     {
         .key = "therm_stop", .section = "system", .group = "Thermal", .type = KVM_VT_INT,
-        .title = "Hot threshold (C)",
+        .title = "Hot threshold",
         .help = "Above this encoding stops until the chip cools. The ESP32 family is rated to "
                 "85 C ambient and the die runs hotter than the air around it.",
         .min = 40, .max = 110, .def = 85, .requires_cap = -1,
+        .unit = "°C",
+        .visible_key = "therm_guard", .visible_val = 1,
     },
 
     {
         .key = "log_level", .section = "system", .group = "Console", .type = KVM_VT_ENUM,
         .title = "Log verbosity",
         .min = 0, .max = ENUM_MAX(s_log_choices), .def = 2, .choices = s_log_choices, .requires_cap = -1,
+        .labels = s_log_labels,
     },
     {
         .key = "ui_side", .section = "ui", .group = "Layout", .type = KVM_VT_ENUM,
@@ -1380,8 +1490,8 @@ static const kvm_setting_t s_settings[] = {
         .key = "ui_touch_kbd", .section = "ui", .group = "Touch controls", .type = KVM_VT_ENUM,
         .title = "Keyboard button",
         .help = "What the keyboard button under the picture opens in touch mode. "
-                "\"console\" is the console's own keyboard, with Ctrl, Alt, the F keys and "
-                "the arrows a phone's keyboard does not have. \"phone\" is the phone's own "
+                "\"Console\" is the console's own keyboard, with Ctrl, Alt, the F keys and "
+                "the arrows a phone's keyboard does not have. \"Phone\" is the phone's own "
                 "keyboard, for typing text with its layouts and suggestions.",
         .min = 0, .max = ENUM_MAX(s_touch_kbd_choices), .def = 0, .choices = s_touch_kbd_choices,
         .requires_cap = -1,
@@ -1445,6 +1555,7 @@ static const kvm_setting_t s_settings[] = {
                 "of the glass, or every other row missing. Shorter panels show fewer "
                 "status lines.",
         .min = 0, .max = ENUM_MAX(s_display_choices), .def = 0, .choices = s_display_choices, .requires_cap = -1,
+        .visible_key = "disp_enable", .visible_val = 1,
     },
     {
         .key = "disp_rotate_180", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,
@@ -1454,6 +1565,7 @@ static const kvm_setting_t s_settings[] = {
                 "put it. Takes effect at once: the panel is re-initialised where it stands, "
                 "with no restart.",
         .def = 0, .requires_cap = -1,
+        .visible_key = "disp_enable", .visible_val = 1,
     },
     /* GC9A01 SPI pins (the I2C OLEDs need none - they share the capture bus).
      * Pins, so the console offers only free GPIOs; a restart re-attaches on the
@@ -1496,13 +1608,15 @@ static const kvm_setting_t s_settings[] = {
         .help = "I2C data GPIO for an OLED on a bus of its own, such as the Grove port of the "
                 "M5Stack Unit PoE-P4. -1 (None) puts the OLED on the capture chip's bus, where "
                 "most boards have it. Set both SDA and SCL, or neither.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SDA_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SDA_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "disp_type", .visible_val = 2,
     },
     {
         .key = "disp_scl", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "OLED SCL",
         .help = "I2C clock GPIO for an OLED on a bus of its own. -1 (None) puts it on the "
                 "capture chip's bus.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SCL_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SCL_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "disp_type", .visible_val = 2,
     },
     {
         .key = "disp_bl", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD backlight",
@@ -1524,7 +1638,7 @@ static const kvm_section_t s_sections[] = {
     {"audio", "Audio", "The target's sound, on three wires from the capture board."},
     {"input", "Input", "Keyboard and pointer, as the target sees them."},
     {"storage", "Virtual media", "The microSD card and what is offered to the target."},
-    {"power", "Power", "ATX wiring and Wake-on-LAN."},
+    {"power", "Power", "ATX wiring, Wake-on-LAN, HDMI-CEC, the button on the board and the serial console."},
     {"network", "Network", "How the device is reached."},
     {"vpn", "VPN", "One tunnel at a time: WireGuard or Tailscale."},
     {"mqtt", "MQTT / Home Assistant", "Reporting to a home automation system."},

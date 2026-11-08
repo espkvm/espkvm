@@ -51,7 +51,7 @@ be given a URL.
 |---|---|
 | `GET /api/capabilities` | what this device can do, and why it cannot do the rest |
 | `GET /api/v1/settings`, `PUT` | settings, validated and applied as a whole |
-| `GET /api/v1/settings/schema` | title, range and help text for every setting; `profile: true` on the ones a device profile can hold |
+| `GET /api/v1/settings/schema` | title, range and help text for every setting; `profile: true` on the ones a device profile can hold; `labels` (what the console shows for each choice), `unit`, and `showIf: {key, eq}` or `{key, ne}` for a setting shown only while another one holds a value |
 | `GET /api/v1/regions` | screen areas: each one's rectangle (parts of the frame, 0..1), mode (`change`, `still`, `like`, `unlike`, `colour`), threshold (% of the area that must differ), hold (seconds), colour, `notify`, `clip`, and `live`: whether it is on, how far off it is, its main colour, how many times it fired |
 | `POST /api/v1/regions`, `/remember` | replace all the areas (`{"regions": [...]}`, up to 8, names unique), or save what area `{"id"}` shows now for `like` / `unlike` |
 | `GET /api/v1/profiles` | device profiles: the list, the active one, whether it was picked by hand, the presets, and what is attached now (`seen`: CEC name and vendor, USB OS). `welcome: true` on a device whose first password was just set (the console asks what it will see), `tourSeen`: the firmware version the console's overview of features was last closed on (`""`: never), `suggest`: a preset id for the attached device when it names itself over CEC and no profile fits it |
