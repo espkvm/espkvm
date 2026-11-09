@@ -511,6 +511,15 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "[]", .max_len = 2000, .requires_cap = KVM_CAP_HID,
     },
     {
+        /* The buttons someone pinned to the console's bar: a JSON array of
+         * {t, v} - a key ("key", "f2"), a built-in combination, a macro or a
+         * runbook by name. Kept here so every browser shows the same ones. */
+        .key = "quick_json", .section = "macros", .type = KVM_VT_STR,
+        .title = "Quick buttons",
+        .help = "Buttons pinned to the console's bar, edited from the Input panel.",
+        .def_str = "[]", .max_len = 600, .requires_cap = KVM_CAP_HID,
+    },
+    {
         /* Runbooks, the same shape as the macros: a JSON array of {name, script}
          * the console edits, in a section the settings panel does not render.
          * The size is what one PUT of the settings can carry. */

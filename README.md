@@ -77,6 +77,7 @@ Useful for what it does today, and honest about the rest.
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |
+| A command palette (Ctrl+K), your own buttons on the bar | new; the palette also finds every setting by name |
 | Notifications to Telegram or a webhook | works |
 | Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |
 | HDMI-CEC remote | works; on TC358743 boards |
@@ -354,6 +355,10 @@ The original Xbox gamepad mode, and a check on the capture size at boot, come
 from **ZacharyLeahan**'s [fork](https://github.com/ZacharyLeahan/espkvm), which
 runs ESP-KVM on an original Xbox. He worked out the XID protocol on a real
 console; the descriptor bytes and the vendor requests here are his.
+
+The Tailscale packet filter, which makes the device follow the tailnet's
+access rules, and a check on STUN replies come from JetKVM's
+[fork of microlink](https://github.com/jetkvm/microlink) (MIT).
 
 A 3D-printed enclosure for the original parts is published by jrowny on
 [MakerWorld](https://makerworld.com/en/models/2961981-esp32-p4-ip-kvm-enclosure).

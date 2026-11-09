@@ -4,6 +4,28 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.79.0] - 2026-11-09
+
+### Added
+- Command palette: Ctrl+Shift+P or Ctrl+K (Cmd on a Mac) and type a few letters of what you want: a panel, a window, a key combination, a macro, a runbook, a settings section or one setting by its name. Enter runs it, and a setting opens in Settings with its field ready. The search button at the top and the More menu on a phone open it too.
+- The tab's icon shows what the device is doing: grey when it does not answer, a ring with the percent during an update, a blinking red dot while recording, a power sign when the ATX LED says the target is off, a dash when there is no picture.
+- Bar buttons: pin a key (F2, Del, Ctrl+Alt+F2), a built-in combination, a macro or a runbook to the bar under the picture. Input panel, Bar buttons. They are kept on the device (`quick_json`), so every browser shows the same ones.
+- When the ATX power LED says the target is off and there is no picture, the black screen has a Press power button.
+
+### Changed
+- The gamepad opens over the picture by default. If you switched it to the window before, it stays a window.
+- The serial console, the agent, the target log, the TV remote and the gamepad open from the left rail now, under the panels, each only while it has something to show. On a phone they are in the More menu.
+- Screenshot, clip and record are one Capture button with a list, and Select text and Copy as text are one Screen text button. The gamepad and the target log moved to the rail, so the bar has five buttons fewer. A running recording shows its clock on the Capture button.
+- Panel explanations fold to their first sentence, with the rest on (i), as in Settings. Automation fits on one screen now.
+- Key names in the console are drawn as keys: in the palette, the shortcut list, the overview and the hints.
+- Virtual media: No medium is the first row of the list, and the disc button has a dot while a medium is in. The timelapse moved to the end of Recordings.
+
+### Fixed
+- Tailscale: the device follows the tailnet's access rules (ACLs) now. Before, any device in the tailnet could open any port on it, whatever the rules said. The filter comes from the JetKVM Mini's MIT-licensed microlink fork.
+- Tailscale: the device takes its public address only from the answer to its own STUN probe. Before, a STUN reply with no probe out could set it.
+- Ctrl+F in Settings did nothing on a non-Latin keyboard layout, such as Russian. It goes to the search box now.
+- With the panel pinned, the serial console, the target log and the gamepad over the picture opened under the panel. They take the space beside it now.
+
 ## [0.78.0] - 2026-11-08
 
 ### Changed

@@ -14,6 +14,8 @@
 | Use from a phone or tablet | works; touch trackpad, pinch zoom and on-screen keyboard |
 | Multiple viewers, one in control at a time with takeover | works |
 | User-defined key macros | works; the commands are in [SCRIPTS.md](SCRIPTS.md) |
+| Command palette: any action or setting by name | works; Ctrl+K or Ctrl+Shift+P |
+| Bar buttons: a key, a combination, a macro or a runbook on the bar under the picture | works; up to 8, kept on the device |
 | Runbooks: a macro that waits for words on the screen, run on the device | works; `wait Press F2`, then `key f2`. Carries on with the browser closed, and each one is a button in Home Assistant. Text screens only. [SCRIPTS.md](SCRIPTS.md) |
 | Scheduler: fire an action on a cron timetable | works; Wake-on-LAN in the morning, a runbook overnight, a reset on a schedule. Needs the clock, set over the network |
 | Push notifications, with a screenshot | works; to Telegram (with the screen on the MJPEG codec) or a webhook, when a watched phrase appears or the screen goes blank |
@@ -511,7 +513,15 @@ Keys for the console itself work while the target does not have control: F for
 full screen, I, M, A and R for the panels, and ? for the list. With control,
 every key goes to the target and Esc gives it back. On a phone, a long press on
 a button in a bar shows its name. The browser tab is named after the device and
-says "No signal" or "Unreachable" in front when that is the case.
+says "No signal" or "Unreachable" in front when that is the case. Its icon
+shows the state too: grey when the device does not answer, a ring during an
+update, a blinking red dot while recording, a power sign when the target is
+off, a dash with no picture.
+
+Ctrl+K or Ctrl+Shift+P opens the command palette: type a few letters of a
+panel, a window, a key combination, a macro, a runbook or a setting, and Enter
+runs it. It holds only what this board and this sign-in can do, and the keys
+are matched by their place, so it opens on any keyboard layout.
 
 The dot next to "Online" in the status bar also says whether frames are
 coming. It pulses while they are drawn, stays green and still while the
