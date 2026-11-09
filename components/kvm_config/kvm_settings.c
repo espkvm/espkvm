@@ -538,7 +538,19 @@ char *kvm_settings_schema_json(void)
         if (d->visible_key) {
             cJSON *si = cJSON_CreateObject();
             cJSON_AddStringToObject(si, "key", d->visible_key);
-            cJSON_AddNumberToObject(si, (d->flags & KVM_SF_SHOW_NE) ? "ne" : "eq", d->visible_val);
+            if (d->flags & KVM_SF_SHOW_IN) {
+                /* A set of values: the SPI LCD pins belong to two panel types. */
+                cJSON *vals = cJSON_CreateArray();
+                for (int b = 0; b < 31; b++) {
+                    if ((uint32_t)d->visible_val & (1u << b)) {
+                        cJSON_AddItemToArray(vals, cJSON_CreateNumber(b));
+                    }
+                }
+                cJSON_AddItemToObject(si, (d->flags & KVM_SF_SHOW_NE) ? "notIn" : "in", vals);
+            } else {
+                cJSON_AddNumberToObject(si, (d->flags & KVM_SF_SHOW_NE) ? "ne" : "eq",
+                                        d->visible_val);
+            }
             cJSON_AddItemToObject(o, "showIf", si);
         }
         cJSON_AddItemToArray(arr, o);
@@ -623,7 +635,10 @@ static bool pin_setting_applies(const cJSON *root, const kvm_setting_t *d)
         if (j < 0) {
             return true;
         }
-        const bool eq = resulting_int(root, (size_t)j) == d->visible_val;
+        const int32_t v = resulting_int(root, (size_t)j);
+        const bool eq = (d->flags & KVM_SF_SHOW_IN)
+                            ? (v >= 0 && v < 31 && ((uint32_t)d->visible_val & (1u << v)))
+                            : v == d->visible_val;
         if (eq == ((d->flags & KVM_SF_SHOW_NE) != 0)) {
             return false;
         }

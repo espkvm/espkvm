@@ -1,0 +1,104 @@
+# JetKVM Mini (the Ethernet model)
+#
+# Build it with:
+#   idf.py -B build.jetkvm_mini -D SDKCONFIG=build.jetkvm_mini/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/jetkvm_mini.defaults" build
+#
+# A small finished box from JetKVM on an ESP32-P4X (rev 3.x, 32 MB PSRAM) with
+# 16 MB of flash, a TC358743 HDMI bridge, 100M Ethernet, a microSD slot, a
+# 240x240 colour screen on top and two buttons on a side, in a 42 x 42 x 23 mm box. Every pin below is taken
+# from JetKVM's own open firmware (github.com/jetkvm/mini, MIT):
+#   Capture: TC358743 on I2C0, SDA 2, SCL 5, address 0x0f, RESETN 32, INT 33,
+#            two CSI lanes, a 27 MHz oscillator. LDO3 at 2.5 V feeds both the
+#            oscillator and the MIPI PHY, and the capture code turns it on
+#            before it probes the bridge, as on every other board.
+#   Ethernet: IP101 at address 1, reset on 51, the RMII pins ESP-IDF uses by
+#            default - the firmware's defaults, pin for pin.
+#   microSD: CLK 43, CMD 44, D0-D3 39-42. Card detect on 45 (low with a card
+#            in), power through a P-channel MOSFET on 46 (low is on), and the
+#            IO rail (VDD_IO_5) on LDO4 at 3.3 V.
+#   Screen:  ST7789 on SPI2 at 20 MHz, MOSI 3, SCLK 13, DC 20, RST 21, CS 22,
+#            backlight 4. 240x240 of glass on a 240x320 controller, colours
+#            inverted, RGB order.
+#   Buttons: SW2 on 47 and SW3 on 23, active low behind 10K pull-ups. SW2 is
+#            the button for the password reset here.
+#   Log:     USB Serial/JTAG on the EXT port (GPIO 24/25). There is no UART
+#            bridge on the board.
+#
+# How to get it on (the stock firmware is GPG-signed and will not take ours):
+# check the eFuses first (espefuse.py summary: no Secure Boot, no flash
+# encryption), turn on "USB debugging" in JetKVM's own settings so the EXT
+# port stays a USB Serial/JTAG, back up the whole flash with
+# `esptool read_flash 0 0x1000000` - that backup is the only way back to stock -
+# and flash over the EXT port.
+#
+# NOT YET RUN ON THE DEVICE. Configured from JetKVM's source and published so
+# owners can try it.
+
+# --- flash and partitions ---------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# --- silicon revision -------------------------------------------------------
+# ESP32-P4X only, so there is no pre-3.0 twin.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n
+CONFIG_ESP32P4_REV_MIN_300=y
+CONFIG_SPIRAM_SPEED_250M=y
+
+# --- updates ----------------------------------------------------------------
+CONFIG_KVM_UPDATE_URL="https://fw.espkvm.io/firmware/jetkvm-mini/manifest.json"
+
+# --- capture ----------------------------------------------------------------
+CONFIG_KVM_I2C_SDA_GPIO=2
+CONFIG_KVM_I2C_SCL_GPIO=5
+CONFIG_KVM_TC358743_RST_GPIO=32
+CONFIG_KVM_BRIDGE_INT_GPIO=33
+
+# --- microSD ----------------------------------------------------------------
+CONFIG_KVM_SD_PWR_GPIO=46
+CONFIG_KVM_SD_PWR_ACTIVE_LOW=y
+CONFIG_KVM_SD_CD_GPIO=45
+CONFIG_KVM_SD_CD_ACTIVE_HIGH=n
+
+# --- button -----------------------------------------------------------------
+CONFIG_KVM_BUTTON_GPIO=47
+
+# --- screen -----------------------------------------------------------------
+# On from the first boot: the panel is built in.
+CONFIG_KVM_DISP_DEFAULT_ON=y
+CONFIG_KVM_DISP_DEFAULT_TYPE=15
+CONFIG_KVM_GC9A01_SPI_HOST=2
+CONFIG_KVM_DISP_MOSI_GPIO=3
+CONFIG_KVM_DISP_SCLK_GPIO=13
+CONFIG_KVM_DISP_DC_GPIO=20
+CONFIG_KVM_DISP_RST_GPIO=21
+CONFIG_KVM_DISP_CS_GPIO=22
+CONFIG_KVM_DISP_BL_GPIO=4
+# Built in: Settings offers on/off, upside down and the brightness, not the
+# type or the pins. JetKVM's own default is 15 %; a little more reads better.
+CONFIG_KVM_DISP_FIXED=y
+CONFIG_KVM_DISP_BRIGHT_DEFAULT=40
+
+# --- the second button ------------------------------------------------------
+# SW3 is button 1 in Settings, Buttons: a short press shows the
+# next status page, holding it turns the screen off or on. Both can be
+# changed there, to the target's power button for one.
+CONFIG_KVM_BTN_COUNT=1
+CONFIG_KVM_BTN1_FIXED=y
+CONFIG_KVM_BTN_GPIO_DEFAULT=23
+CONFIG_KVM_BTN_PRESS_DEFAULT=11
+CONFIG_KVM_BTN_HOLD_DEFAULT=12
+
+# --- what the box does not have ---------------------------------------------
+# No pins come out of it, so the add-ons wired to GPIOs (ATX, a UART serial
+# console, a clock module) fold away in Settings, and so does the Pins tab.
+# The serial port over the target's USB cable still works.
+CONFIG_KVM_BOARD_NO_FREE_GPIO=y
+# The TC358743's audio lines are not wired to the P4 on this board.
+CONFIG_KVM_ENABLE_AUDIO=n
+
+# --- console ----------------------------------------------------------------
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Which board this is: names it in the console.
+CONFIG_KVM_BOARD_JETKVM_MINI=y

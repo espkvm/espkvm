@@ -32,6 +32,8 @@
 #include "kvm_settings.h"
 #include "kvm_thermal.h"
 #include "kvm_ts.h"
+#include "usb_hid.h"
+#include "video_frame.h"
 #include "wifi.h"
 
 #define TAG "kvm_display"
@@ -45,6 +47,7 @@ extern const kvm_display_driver_t kvm_display_sh1106;
 extern const kvm_display_driver_t kvm_display_gc9a01;
 extern const kvm_display_driver_t kvm_display_ssd1315;
 extern const kvm_display_driver_t kvm_display_sh1107;
+extern const kvm_display_driver_t kvm_display_st7789;
 
 static const kvm_display_driver_t *const s_drivers[] = {
     &kvm_display_ssd1306,
@@ -52,6 +55,7 @@ static const kvm_display_driver_t *const s_drivers[] = {
     &kvm_display_gc9a01,
     &kvm_display_ssd1315,
     &kvm_display_sh1107,
+    &kvm_display_st7789,
 };
 
 #define RENDER_TICK_MS 1000 /* how often the driver is handed fresh telemetry */
@@ -74,6 +78,8 @@ static struct {
 } s_notice;
 static SemaphoreHandle_t s_notice_lock;
 static TaskHandle_t s_task;
+/* Presses of the page button so far; the driver pages when it changes. */
+static volatile uint32_t s_page_presses;
 
 void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t ttl_ms)
 {
@@ -243,6 +249,12 @@ static void gather(kvm_display_status_t *st)
     st->psram_kb = (uint32_t)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
     st->psram_total_kb = (uint32_t)(heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / 1024);
     st->uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
+    const int viewers = video_frame_viewer_count();
+    st->viewers = (uint8_t)(viewers < 0 ? 0 : viewers > 255 ? 255 : viewers);
+    st->page_presses = s_page_presses;
+    const int dwell = (int)kvm_setting_int("disp_dwell");
+    st->dwell_s = (uint8_t)(dwell < 0 ? 0 : dwell > 255 ? 255 : dwell);
+    st->usb = usb_hid_target_suspended() ? 3 : usb_hid_ready() ? 2 : usb_hid_bus_alive() ? 1 : 0;
 
     const esp_app_desc_t *app = esp_app_get_description();
     snprintf(st->version, sizeof(st->version), "%s", app ? app->version : "?");
@@ -331,6 +343,28 @@ static void display_task(void *arg)
     }
 }
 
+/* The button on the box (kvm_sched/button.c) can be set to page the display
+   or turn it off and on. A page press on a display that is off turns it on. */
+void kvm_display_next_page(void)
+{
+    if (!kvm_setting_bool("disp_enable")) {
+        kvm_setting_set_int("disp_enable", 1);
+    } else {
+        s_page_presses++;
+    }
+    if (s_task) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
+void kvm_display_toggle(void)
+{
+    kvm_setting_set_int("disp_enable", !kvm_setting_bool("disp_enable"));
+    if (s_task) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
 void kvm_display_init(void)
 {
     /* Pinned to core 1: the H.264 encoder saturates core 0, and the display's
@@ -363,6 +397,14 @@ void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t
 }
 
 void kvm_display_notice_clear(void)
+{
+}
+
+void kvm_display_next_page(void)
+{
+}
+
+void kvm_display_toggle(void)
 {
 }
 

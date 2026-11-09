@@ -14,5 +14,6 @@ idf_component_register(
         kvm_net
         kvm_runbook
         kvm_record
+        kvm_display
         esp_driver_gpio
 )

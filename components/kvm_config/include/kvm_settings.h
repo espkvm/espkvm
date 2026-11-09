@@ -37,6 +37,8 @@ enum {
                                  pin map. -1 means unassigned. */
     KVM_SF_PROFILE = 1u << 3, /**< a device profile may hold its own value (kvm_profiles.h) */
     KVM_SF_SHOW_NE = 1u << 4, /**< shown while setting[visible_key] is NOT visible_val */
+    KVM_SF_SHOW_IN = 1u << 5, /**< visible_val is a bit mask: shown while bit
+                                 setting[visible_key] is set in it (with SHOW_NE: clear) */
 };
 
 typedef struct {

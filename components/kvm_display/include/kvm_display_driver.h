@@ -96,6 +96,16 @@ typedef struct {
     uint32_t psram_kb;       /**< free PSRAM, KB */
     uint32_t psram_total_kb; /**< total PSRAM, KB (for a usage bar) */
     uint32_t uptime_s;       /**< seconds since boot */
+    uint8_t viewers;         /**< browsers watching the picture now */
+    /** The USB link to the target: 0 no bus (cable out, target off),
+        1 a bus but not enumerated yet, 2 working, 3 the target is asleep. */
+    uint8_t usb;
+    /** Presses of the display's page button so far: a driver that pages
+        moves on when this changes. */
+    uint32_t page_presses;
+    /** Seconds each status page stays up, or 0: pages change only on the
+        button. */
+    uint8_t dwell_s;
     char version[32];        /**< firmware version, e.g. "v.0.20.0" */
 } kvm_display_status_t;
 

@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 #include "kvm_atx.h"
 #include "kvm_caps.h"
+#include "kvm_display.h"
 #include "kvm_record.h"
 #include "kvm_settings.h"
 #include "nvs.h"
@@ -172,6 +173,10 @@ static void dispatch(const char *name, const char *action, const char *arg, cons
         if (!net_switch(name, action)) {
             return;
         }
+    } else if (strcmp(action, "displaypage") == 0) {
+        kvm_display_next_page();
+    } else if (strcmp(action, "displaytoggle") == 0) {
+        kvm_display_toggle();
     } else if (strcmp(action, "restart") == 0) {
         ESP_LOGW(TAG, "%s: restarting the device on schedule", name);
         vTaskDelay(pdMS_TO_TICKS(200));

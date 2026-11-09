@@ -54,6 +54,9 @@ typedef enum {
                              LT6911D holds its own and cannot be told) */
     KVM_CAP_WEBRTC,     /**< H.264 to the browser over WebRTC (UDP), next to the
                              WebSocket */
+    KVM_CAP_GPIO,       /**< free GPIOs come out of the box, for the add-ons wired to pins
+                             (ATX, a UART, a clock module, audio); a closed box such as
+                             the JetKVM Mini has none (Kconfig KVM_BOARD_NO_FREE_GPIO) */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

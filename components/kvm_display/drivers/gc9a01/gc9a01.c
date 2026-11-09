@@ -10,6 +10,10 @@
  *
  * The panel controller itself is driven through the battle-tested
  * espressif/esp_lcd_gc9a01 component, so only the composition lives here.
+ *
+ * The same layout also drives the ST7789 240x240 of the JetKVM Mini: a square
+ * glass, but the same size and pixel format, so only the controller, its
+ * colour order, the clock and where the glass sits in the RAM differ.
  */
 #include "sdkconfig.h"
 
@@ -20,6 +24,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_cache.h"
 #include "esp_private/esp_cache_private.h"
@@ -37,7 +42,7 @@
 #include "kvm_settings.h"
 #include "qrcode.h"
 
-#define TAG "gc9a01"
+#define TAG "spi_lcd"
 
 #define LCD_W 240
 #define LCD_H 240
@@ -45,7 +50,6 @@
 #define FB_PIXELS (LCD_W * LCD_H)
 
 #define STATUS_SCREENS 3
-#define SCREEN_DWELL_TICKS 4
 #define SPLASH_TICKS 4 /* first half: version card, second half: espkvm logo */
 /* Rows per SPI transfer; see flush() for why the frame is not sent in one go. */
 #define FLUSH_BAND_ROWS 24
@@ -55,6 +59,10 @@ typedef struct {
     esp_lcd_panel_io_handle_t io;
     uint16_t *fb; /* RGB565, byte-swapped for the panel, in PSRAM */
     int bl;       /* backlight GPIO, -1 if tied to 3V3 */
+    int bright;   /* backlight percent last set, 0 before the first */
+    bool square;  /* the ST7789: corners outside the circle to fill */
+    uint32_t presses; /* page_presses last acted on */
+    bool primed;      /* presses taken from the first status, not acted on */
     uint8_t screen;
     uint8_t tick;
     uint8_t splash;
@@ -127,6 +135,20 @@ static void ring(uint16_t *fb, int outer, int thick, uint16_t c)
  * hold-to-confirm gesture has a natural home on the rim, where it reads as
  * "keep going" from across a room without a single word.
  */
+/* A filled disc at the centre. */
+static void disc(uint16_t *fb, int r, uint16_t c)
+{
+    const int r2 = r * r;
+    for (int y = LCD_CENTER - r; y <= LCD_CENTER + r; y++) {
+        for (int x = LCD_CENTER - r; x <= LCD_CENTER + r; x++) {
+            const int dx = x - LCD_CENTER, dy = y - LCD_CENTER;
+            if (dx * dx + dy * dy <= r2) {
+                put_px(fb, x, y, c);
+            }
+        }
+    }
+}
+
 static void arc(uint16_t *fb, int outer, int thick, float frac, uint16_t fg, uint16_t bg)
 {
     const int inner = outer - thick;
@@ -281,6 +303,13 @@ static void render_splash(gc9a01_ctx_t *g, const kvm_display_status_t *st)
  * corners well inside the glass. */
 #define QR_BOX 140
 #define QR_TOP 34
+/* The face under the join code: a soft light grey rather than white, so the
+ * screen does not glare. Still far lighter than the modules, which is all a
+ * reader needs; an inverted code (light on dark) is refused by many. The ring
+ * around it turns a deep bright blue, so the hotspot screen is told apart at a glance. */
+#define QR_FACE_R 200
+#define QR_FACE_G 205
+#define QR_FACE_B 212
 
 typedef struct {
     uint16_t *fb;
@@ -299,9 +328,9 @@ static void qr_paint(esp_qrcode_handle_t qr, void *user_data)
 
     const int side = total * scale;
     const int x0 = (LCD_W - side) / 2;
-    fill_rect(p->fb, x0, QR_TOP, side, side, rgb(255, 255, 255));
+    fill_rect(p->fb, x0, QR_TOP, side, side, rgb(QR_FACE_R, QR_FACE_G, QR_FACE_B));
 
-    const uint16_t dark = rgb(0, 0, 0);
+    const uint16_t dark = rgb(10, 12, 16);
     for (int y = 0; y < modules; y++) {
         for (int x = 0; x < modules; x++) {
             if (esp_qrcode_get_module(qr, x, y)) {
@@ -356,6 +385,75 @@ static void render_notice(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     text_fit(g->fb, 142, st->notice_detail, 2, grey);
 }
 
+/* A string from @p x (or ending at @p x, with @p right) on row @p y. */
+static void text_at(uint16_t *fb, int x, int y, const char *str, int s, uint16_t c, bool right)
+{
+    const int glyph = 6 * s;
+    if (right) {
+        x -= (int)strlen(str) * glyph - s; /* no gap after the last glyph */
+    }
+    for (const char *p = str; *p; p++, x += glyph) {
+        draw_char(fb, x, y, *p, s, c);
+    }
+}
+
+/*
+ * The four corners of a square panel, outside the round face: a label and a
+ * value in each. The box a corner can hold before it touches the ring is
+ * about 39 x 24 pixels, so a value is three characters at scale 2 and drops
+ * to scale 1 when it is longer.
+ */
+static void corner(uint16_t *fb, int which, const char *label, const char *value, uint16_t vc)
+{
+    const uint16_t lc = rgb(120, 130, 145);
+    const bool right = which & 1;
+    const bool bottom = which & 2;
+    const int x = right ? LCD_W - 4 : 4;
+    const int vs = strlen(value) <= 3 ? 2 : 1;
+    if (!bottom) {
+        text_at(fb, x, 4, label, 1, lc, right);
+        text_at(fb, x, 14, value, vs, vc, right);
+    } else {
+        text_at(fb, x, LCD_H - 4 - 7 - 3 - 7 * vs, value, vs, vc, right);
+        text_at(fb, x, LCD_H - 4 - 7, label, 1, lc, right);
+    }
+}
+
+static void render_corners(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+{
+    const uint16_t white = rgb(235, 238, 245);
+    const uint16_t grey = rgb(140, 150, 165);
+    const uint16_t green = rgb(90, 210, 120);
+    const uint16_t amber = rgb(235, 190, 70);
+    const uint16_t red = rgb(235, 100, 90);
+    const uint16_t cyan = rgb(90, 200, 235);
+    char buf[12];
+
+    /* The network needs no corner: the ring is red without it, and a board is
+       either Ethernet or Wi-Fi. The cable to the target is what the face does
+       not show. */
+    static const char *const usb_word[] = {"OFF", "...", "ON", "SLP"};
+    const uint16_t usb_col[] = {red, amber, green, amber};
+    const uint8_t u = st->usb < 4 ? st->usb : 0;
+    corner(g->fb, 0, "USB", usb_word[u], usb_col[u]);
+
+    snprintf(buf, sizeof(buf), "%dC", st->temp_c);
+    corner(g->fb, 1, "TEMP", buf, st->temp_c < 60 ? white : st->temp_c < 75 ? amber : red);
+
+    snprintf(buf, sizeof(buf), "%u", (unsigned)st->viewers);
+    corner(g->fb, 2, "VIEW", buf, st->viewers ? cyan : grey);
+
+    const uint32_t up = st->uptime_s;
+    if (up < 3600) {
+        snprintf(buf, sizeof(buf), "%lum", (unsigned long)(up / 60));
+    } else if (up < 48 * 3600) {
+        snprintf(buf, sizeof(buf), "%luh", (unsigned long)(up / 3600));
+    } else {
+        snprintf(buf, sizeof(buf), "%lud", (unsigned long)(up / 86400));
+    }
+    corner(g->fb, 3, "UP", buf, white);
+}
+
 static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 {
     const uint16_t bg = rgb(8, 10, 14);
@@ -383,12 +481,18 @@ static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
          * retype. Falls through to the text layout if the code will not fit.
          */
         if (st->ap_mode && st->join_qr[0]) {
+            /* The whole face inside the ring goes light, and the code and its
+               caption sit on it: a light square on black looked pasted on. */
+            disc(g->fb, 110, rgb(QR_FACE_R, QR_FACE_G, QR_FACE_B));
+            ring(g->fb, 118, 8, rgb(0, 120, 255));
             const int side = draw_join_qr(g->fb, st->join_qr);
             if (side > 0) {
-                text_centered(g->fb, QR_TOP + side + 8, "SCAN TO JOIN", 2, cyan);
-                text_fit(g->fb, QR_TOP + side + 28, st->ssid, 1, grey);
+                text_centered(g->fb, QR_TOP + side + 8, "SCAN TO JOIN", 2, rgb(20, 70, 130));
+                text_fit(g->fb, QR_TOP + side + 28, st->ssid, 1, rgb(70, 80, 95));
                 break;
             }
+            fill(g->fb, bg); /* no room after all: back to the text layout */
+            ring(g->fb, 118, 8, halo);
         }
         draw_icon(g->fb, 108, 36, icon_net, 3, cyan);
         text_centered(g->fb, 66, st->ap_mode ? "AP RESCUE" : "NETWORK", 2, cyan);
@@ -435,7 +539,44 @@ static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     }
 }
 
-static esp_err_t attach(void **ctx)
+/* The backlight on a PWM, so its brightness can be set. LEDC timer 1 and
+   channel 1: the pin probe in kvm_web uses timer 3 and channel 7. */
+#define BL_TIMER LEDC_TIMER_1
+#define BL_CHANNEL LEDC_CHANNEL_1
+#define BL_BITS LEDC_TIMER_10_BIT
+
+static void backlight_set(gc9a01_ctx_t *g, int pct)
+{
+    if (g->bl < 0 || pct == g->bright) {
+        return;
+    }
+    if (pct < 5) {
+        pct = 5;
+    } else if (pct > 100) {
+        pct = 100;
+    }
+    if (!g->bright) {
+        const ledc_timer_config_t t = {.speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = BL_BITS,
+                                       .timer_num = BL_TIMER, .freq_hz = 20000, .clk_cfg = LEDC_AUTO_CLK};
+        const ledc_channel_config_t c = {.gpio_num = g->bl, .speed_mode = LEDC_LOW_SPEED_MODE,
+                                         .channel = BL_CHANNEL, .timer_sel = BL_TIMER, .duty = 0};
+        if (ledc_timer_config(&t) != ESP_OK || ledc_channel_config(&c) != ESP_OK) {
+            /* No PWM: full on is still a working screen. */
+            gpio_set_direction(g->bl, GPIO_MODE_OUTPUT);
+            gpio_set_level(g->bl, 1);
+            g->bright = 100;
+            return;
+        }
+    }
+    const uint32_t duty = (uint32_t)(((1u << BL_BITS) - 1) * pct / 100);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL);
+    g->bright = pct;
+}
+
+typedef enum { CTRL_GC9A01, CTRL_ST7789 } lcd_ctrl_t;
+
+static esp_err_t attach_ctrl(void **ctx, lcd_ctrl_t ctrl)
 {
     /* Pins come from settings so they can be changed without a rebuild. */
     const int sclk = (int)kvm_setting_int("disp_sclk");
@@ -445,7 +586,7 @@ static esp_err_t attach(void **ctx)
     const int rst = (int)kvm_setting_int("disp_rst");
     const int bl = (int)kvm_setting_int("disp_bl");
     if (sclk < 0 || mosi < 0 || cs < 0 || dc < 0) {
-        ESP_LOGW(TAG, "GC9A01 needs SCLK, MOSI, CS and DC pins set");
+        ESP_LOGW(TAG, "the SPI LCD needs SCLK, MOSI, CS and DC pins set");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -486,7 +627,8 @@ static esp_err_t attach(void **ctx)
     const esp_lcd_panel_io_spi_config_t io_cfg = {
         .dc_gpio_num = dc,
         .cs_gpio_num = cs,
-        .pclk_hz = 40 * 1000 * 1000,
+        /* The JetKVM Mini's ST7789 runs at 20 MHz in its own firmware. */
+        .pclk_hz = (ctrl == CTRL_ST7789 ? 20 : 40) * 1000 * 1000,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
         .spi_mode = 0,
@@ -499,28 +641,36 @@ static esp_err_t attach(void **ctx)
     }
     const esp_lcd_panel_dev_config_t panel_cfg = {
         .reset_gpio_num = rst,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+        /* The JetKVM Mini's panel is RGB (its device tree has no `bgr`). */
+        .rgb_ele_order = ctrl == CTRL_ST7789 ? LCD_RGB_ELEMENT_ORDER_RGB : LCD_RGB_ELEMENT_ORDER_BGR,
         .bits_per_pixel = 16,
     };
-    err = esp_lcd_new_panel_gc9a01(g->io, &panel_cfg, &g->panel);
+    err = ctrl == CTRL_ST7789 ? esp_lcd_new_panel_st7789(g->io, &panel_cfg, &g->panel)
+                              : esp_lcd_new_panel_gc9a01(g->io, &panel_cfg, &g->panel);
     if (err != ESP_OK) {
         goto fail_io;
     }
     esp_lcd_panel_reset(g->panel);
     esp_lcd_panel_init(g->panel);
-    esp_lcd_panel_invert_color(g->panel, true); /* GC9A01 panels want inversion on */
-    /* The module's default is X-mirrored; turning it over means both axes. */
+    esp_lcd_panel_invert_color(g->panel, true); /* both controllers want inversion on */
     const bool upside_down = kvm_setting_bool("disp_rotate_180");
-    esp_lcd_panel_mirror(g->panel, !upside_down, upside_down);
+    if (ctrl == CTRL_ST7789) {
+        /* 240x240 of glass on a 240x320 RAM: upright it starts at row 0,
+           turned over the last 80 rows come first (JetKVM's own table). */
+        esp_lcd_panel_set_gap(g->panel, 0, upside_down ? 80 : 0);
+        esp_lcd_panel_mirror(g->panel, upside_down, upside_down);
+    } else {
+        /* The module's default is X-mirrored; turning it over means both axes. */
+        esp_lcd_panel_mirror(g->panel, !upside_down, upside_down);
+    }
     esp_lcd_panel_disp_on_off(g->panel, true);
 
-    if (bl >= 0) {
-        gpio_set_direction(bl, GPIO_MODE_OUTPUT);
-        gpio_set_level(bl, 1);
-    }
+    g->square = ctrl == CTRL_ST7789;
+    backlight_set(g, (int)kvm_setting_int("disp_bright"));
 
-    ESP_LOGI(TAG, "GC9A01 up on SPI%d (sclk %d mosi %d cs %d dc %d rst %d)",
-             CONFIG_KVM_GC9A01_SPI_HOST, sclk, mosi, cs, dc, rst);
+    ESP_LOGI(TAG, "%s up on SPI%d (sclk %d mosi %d cs %d dc %d rst %d bl %d)",
+             ctrl == CTRL_ST7789 ? "ST7789" : "GC9A01", CONFIG_KVM_GC9A01_SPI_HOST, sclk, mosi,
+             cs, dc, rst, bl);
     *ctx = g;
     return ESP_OK;
 
@@ -563,11 +713,29 @@ static esp_err_t flush(gc9a01_ctx_t *g)
 static esp_err_t render(void *ctx, const kvm_display_status_t *status)
 {
     gc9a01_ctx_t *g = ctx;
+    backlight_set(g, (int)kvm_setting_int("disp_bright"));
     if (status->notice[0]) {
         /* A notice arriving mid-splash ends the splash: by the time it clears,
          * an animation about having just booted is no longer news. */
         g->splash = 0;
         render_notice(g, status);
+        return flush(g);
+    }
+    /* The page button: the next page now, and a full dwell on it. Presses
+       from before this panel came up do not count. */
+    if (!g->primed) {
+        g->primed = true;
+        g->presses = status->page_presses;
+    }
+    if (status->page_presses != g->presses) {
+        g->presses = status->page_presses;
+        g->splash = 0;
+        g->tick = 0;
+        g->screen = (uint8_t)((g->screen + 1) % STATUS_SCREENS);
+        render_status(g, status);
+        if (g->square) {
+            render_corners(g, status);
+        }
         return flush(g);
     }
     if (g->splash > 0) {
@@ -576,8 +744,11 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
         return flush(g);
     }
     render_status(g, status);
+    if (g->square) {
+        render_corners(g, status);
+    }
     esp_err_t err = flush(g);
-    if (++g->tick >= SCREEN_DWELL_TICKS) {
+    if (status->dwell_s && ++g->tick >= status->dwell_s) {
         g->tick = 0;
         g->screen = (uint8_t)((g->screen + 1) % STATUS_SCREENS);
     }
@@ -599,16 +770,37 @@ static void detach(void *ctx)
     }
     (void)spi_bus_free(CONFIG_KVM_GC9A01_SPI_HOST);
     if (g->bl >= 0) {
+        if (g->bright) {
+            ledc_stop(LEDC_LOW_SPEED_MODE, BL_CHANNEL, 0);
+        }
         gpio_set_level(g->bl, 0);
     }
     free(g->fb);
     free(g);
 }
 
+static esp_err_t attach_gc9a01(void **ctx)
+{
+    return attach_ctrl(ctx, CTRL_GC9A01);
+}
+
+static esp_err_t attach_st7789(void **ctx)
+{
+    return attach_ctrl(ctx, CTRL_ST7789);
+}
+
 const kvm_display_driver_t kvm_display_gc9a01 = {
     .name = "gc9a01",
     .label = "GC9A01 240x240 round",
-    .attach = attach,
+    .attach = attach_gc9a01,
+    .render = render,
+    .detach = detach,
+};
+
+const kvm_display_driver_t kvm_display_st7789 = {
+    .name = "st7789",
+    .label = "ST7789 240x240",
+    .attach = attach_st7789,
     .render = render,
     .detach = detach,
 };

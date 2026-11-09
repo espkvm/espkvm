@@ -53,6 +53,12 @@ void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t
 /** Drop any notice and go back to the status rotation. */
 void kvm_display_notice_clear(void);
 
+/** The next status page now (or the display on, if it is off). */
+void kvm_display_next_page(void);
+
+/** The status display off, or back on. */
+void kvm_display_toggle(void);
+
 #ifdef __cplusplus
 }
 #endif

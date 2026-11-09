@@ -1,0 +1,50 @@
+# JetKVM Mini W (the Wi-Fi model)
+#
+# Build it with:
+#   idf.py -B build.jetkvm_mini_w -D SDKCONFIG=build.jetkvm_mini_w/sdkconfig \
+#     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/jetkvm_mini.defaults;boards/jetkvm_mini_w.defaults" build
+#
+# The Mini with an ESP32-C5 for dual-band Wi-Fi in place of the Ethernet.
+# Everything shared with the Mini is in jetkvm_mini.defaults; this moves what
+# differs, all of it from JetKVM's source (docs/hardware-variants.md and
+# components/jetkvm_board_config):
+#   Wi-Fi:   ESP32-C5 on SDIO slot 1, CMD 18, CLK 19, D0-D3 20-23, EN 9,
+#            BOOT 7. The microSD stays on slot 0 (39-44), so the two share the
+#            P4's one SDMMC controller, as on the Function EV.
+#   Screen:  DC 14, RST 15, CS 16.
+#   Buttons: SW3 on 17.
+#
+# The C5 ships with JetKVM's build of esp-hosted (2.12.3), which this firmware
+# talks to as it is - nothing on the C5 is reflashed. Whether this version of
+# the host and that one agree is the first thing to see on a real unit.
+#
+# NOT YET RUN ON THE DEVICE.
+
+CONFIG_KVM_UPDATE_URL="https://fw.espkvm.io/firmware/jetkvm-mini-w/manifest.json"
+
+# --- network ----------------------------------------------------------------
+# Wi-Fi only: a fresh device opens its own setup hotspot, like the P4-WIFI6.
+CONFIG_KVM_ETH_ENABLE=n
+CONFIG_KVM_WIFI=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_NONE=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C5=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C5=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CMD=18
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CLK=19
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D0=20
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D1=21
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D2=22
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D3=23
+CONFIG_ESP_HOSTED_HOST_RESET_GPIO=9
+CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# --- screen -----------------------------------------------------------------
+CONFIG_KVM_DISP_DC_GPIO=14
+CONFIG_KVM_DISP_RST_GPIO=15
+CONFIG_KVM_DISP_CS_GPIO=16
+CONFIG_KVM_BTN_GPIO_DEFAULT=17
+
+CONFIG_KVM_BOARD_JETKVM_MINI_W=y

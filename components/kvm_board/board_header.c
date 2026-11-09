@@ -456,6 +456,19 @@ static const kvm_board_header_t s_headers[] = {
 #define BOARD_ID_BASE "p4-guition"
 #define BOARD_VERIFIED false
 
+#elif CONFIG_KVM_BOARD_JETKVM_MINI || CONFIG_KVM_BOARD_JETKVM_MINI_W
+/* A closed box: no expansion header comes out of it. Both are rev 3.x only. */
+#define BOARD_HAS_HEADERS 0
+#if CONFIG_KVM_BOARD_JETKVM_MINI_W
+#define BOARD_NAME "JetKVM Mini W"
+#define BOARD_ID "jetkvm-mini-w"
+#else
+#define BOARD_NAME "JetKVM Mini"
+#define BOARD_ID "jetkvm-mini"
+#endif
+#define BOARD_ID_BASE BOARD_ID
+#define BOARD_VERIFIED false
+
 #else
 /* Ported by hand: no published header to draw. */
 #define BOARD_NAME "ESP32-P4"

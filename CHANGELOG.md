@@ -4,6 +4,24 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.80.0] - 2026-11-09
+
+### Added
+- JetKVM Mini and JetKVM Mini W: the first version for both, not tested enough yet. The pins come from JetKVM's open firmware. The images drive the built-in screen, the microSD slot and both buttons, and the Mini W talks to its ESP32-C5 for Wi-Fi with the firmware it ships with. Flashing needs "USB debugging" on in JetKVM's settings and a full backup first, see `boards/README.md`. Thank you, JetKVM, for making such a nice small box that ESP-KVM can live in.
+- ST7789 240x240 as a status display type, the JetKVM Mini's screen.
+- Brightness for a colour SPI status display, in Settings, Display. It needs the backlight pin set.
+- On a square panel the corners around the round face show the USB link to the target, the chip temperature, how many browsers are watching and the uptime.
+- Buttons have a settings section of their own, and there can be up to four, each with its own pin, short-press and hold actions. Two new actions drive the status display: next page, and display on/off. On the JetKVM Mini, SW3 is button 1 with those two set.
+- How long each status page stays up, in Settings, Display. 0 keeps a page until a button turns it.
+
+### Changed
+- The hotspot's join code on a round or square colour screen sits on a light grey face inside a blue ring, not in a white square on black.
+- The button settings moved from Power to the new Buttons section. A button set up before keeps its pin and its actions.
+- On a board with no free pins, such as the JetKVM Mini, the settings for things wired to pins (ATX, the UART serial console, a clock module, HDMI audio) fold to one line, and the Pins tab is gone. A built-in screen shows only on/off, brightness, page time and upside down.
+
+### Fixed
+- The console counted a hidden pin setting as taken when its condition was "not equal to", so a free pin could look busy.
+
 ## [0.79.0] - 2026-11-09
 
 ### Added

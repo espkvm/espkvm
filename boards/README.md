@@ -5,6 +5,14 @@ ESP32-P4 rev <3.0 and >=3.0 families are mutually exclusive build targets, and
 the fps-relevant H.264 RGB path is a compile-time choice tied to the minimum chip
 revision.
 
+## boards.json
+
+The release publishes this list for the browser flasher. Each entry has an
+`id` (the build matrix id), a `label`, an `image` (a photo in `docs/`, or none),
+`untested` for a board nobody has run the image on yet, and an optional `note`
+the flasher shows in place of its general text for an untested board (the
+JetKVM Mini's says to back up the flash first).
+
 ## Waveshare ESP32-P4-ETH (chip rev v1.3, 32 MB flash) - default
 
 The default build:
@@ -274,3 +282,37 @@ Three things specific to it:
   module.
 
 No `-rev3` twin: the module's lid reads ESP32P4NRW32, without the X.
+
+## JetKVM Mini and Mini W (ESP32-P4X, rev 3.x; 16 MB flash) - first version
+
+```
+idf.py -B build.jetkvm_mini \
+  -D SDKCONFIG=build.jetkvm_mini/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/jetkvm_mini.defaults" \
+  build
+
+idf.py -B build.jetkvm_mini_w \
+  -D SDKCONFIG=build.jetkvm_mini_w/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/jetkvm_mini.defaults;boards/jetkvm_mini_w.defaults" \
+  build
+```
+
+JetKVM's finished box: an HDMI input on a TC358743, Ethernet (Mini) or an
+ESP32-C5 for Wi-Fi (Mini W), a microSD slot, a 240x240 ST7789 screen and two
+buttons. Every pin comes from JetKVM's open firmware (github.com/jetkvm/mini);
+the details are in the two overlays. The screen comes on from the first boot.
+
+The stock firmware only takes GPG-signed updates, so ESP-KVM goes on over USB:
+
+1. `espefuse.py summary` first. If Secure Boot or flash encryption is burnt,
+   stop: the board will not run anything unsigned.
+2. In JetKVM's own settings, turn on "USB debugging". Without it the stock
+   firmware disconnects the USB Serial/JTAG port at start.
+3. Back up the whole flash: "Back up the flash" on the browser flasher, or
+   `esptool.py read_flash 0 0x1000000 jetkvm-mini.bin`. It is the only way
+   back to the stock firmware.
+4. Flash ESP-KVM over that port (the browser flasher or `idf.py flash`).
+
+On the Mini W the C5 keeps JetKVM's esp-hosted (2.12.3); nothing on it is
+reflashed. Whether this firmware's esp-hosted host talks to it is the first
+thing to check on a real unit.

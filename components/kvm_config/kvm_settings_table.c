@@ -31,6 +31,12 @@
 #ifndef CONFIG_KVM_ATX_LED_GPIO
 #define CONFIG_KVM_ATX_LED_GPIO -1
 #endif
+#ifndef CONFIG_KVM_DISP_BL_GPIO
+#define CONFIG_KVM_DISP_BL_GPIO -1
+#endif
+#ifndef CONFIG_KVM_DISP_DEFAULT_TYPE
+#define CONFIG_KVM_DISP_DEFAULT_TYPE 0
+#endif
 #ifndef CONFIG_KVM_DISP_SCLK_GPIO
 #define CONFIG_KVM_DISP_SCLK_GPIO -1
 #endif
@@ -78,7 +84,45 @@ static const char *const s_display_choices[] = {
     "SSD1315 72x40 (M5Stack Mini OLED)",
     "SH1107 128x64 (M5Stack Unit OLED)",
     "SSD1309 128x64 (M5Stack Unit Glass2, untested)",
+    "ST7789 240x240 (JetKVM Mini)",
 };
+/* The disp_type values that are SPI LCDs: GC9A01 (2) and ST7789 (15). Their
+   pins show for both; the OLED's own I2C pins for everything else. */
+#define DISP_SPI_TYPES ((1 << 2) | (1 << 15))
+/* A built-in panel (the JetKVM Mini): its type and pins are not the
+   operator's to change, so they never show, and the brightness hangs on the
+   display being on rather than on a type that is hidden. */
+#if CONFIG_KVM_DISP_FIXED
+#define DISP_TYPE_SHOW 2           /* disp_enable never equals 2 */
+#define DISP_PIN_SHOW 0            /* in no type */
+#define DISP_OLED_SHOW 0x7fffffff  /* notIn every type */
+#define DISP_BRIGHT_KEY "disp_enable"
+#define DISP_BRIGHT_VAL 1
+#define DISP_BRIGHT_FLAGS 0
+#else
+#define DISP_TYPE_SHOW 1
+#define DISP_PIN_SHOW DISP_SPI_TYPES
+#define DISP_OLED_SHOW DISP_SPI_TYPES
+#define DISP_BRIGHT_KEY "disp_type"
+#define DISP_BRIGHT_VAL DISP_SPI_TYPES
+#define DISP_BRIGHT_FLAGS KVM_SF_SHOW_IN
+#endif
+#ifndef CONFIG_KVM_BTN_COUNT
+#define CONFIG_KVM_BTN_COUNT 4
+#endif
+#ifndef CONFIG_KVM_BTN_GPIO_DEFAULT
+#define CONFIG_KVM_BTN_GPIO_DEFAULT -1
+#define CONFIG_KVM_BTN_PRESS_DEFAULT 0
+#define CONFIG_KVM_BTN_HOLD_DEFAULT 0
+#endif
+#ifndef CONFIG_KVM_DISP_BRIGHT_DEFAULT
+#define CONFIG_KVM_DISP_BRIGHT_DEFAULT 100
+#endif
+#if CONFIG_KVM_DISP_DEFAULT_ON
+#define DISP_DEFAULT_ON 1
+#else
+#define DISP_DEFAULT_ON 0
+#endif
 /* "auto" follows the OS guessed from USB enumeration; the rest force it. */
 static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "linux", "android"};
 /* Must match k_bauds in kvm_serial.c. */
@@ -93,7 +137,8 @@ static const char *const s_pad_choices[] = {"off", "switch", "switch_alone", "xi
 static const char *const s_btn_action_choices[] = {"nothing", "power", "power off (hold)", "reset",
                                                    "wake (WoL)", "runbook", "save clip", "screenshot",
                                                    "hotspot on/off", "next network mode",
-                                                   "Ethernet / WiFi"};
+                                                   "Ethernet / WiFi", "next display page",
+                                                   "display on/off"};
 /* Read by the console only; how long its vibration tick lasts on a phone. */
 static const char *const s_haptic_choices[] = {"light", "medium", "strong"};
 static const char *const s_touch_kbd_choices[] = {"console", "phone"};
@@ -568,7 +613,7 @@ static const kvm_setting_t s_settings[] = {
                 "PCF8523 shares an address with something else and must be named here. Off leaves "
                 "the bus alone. Only the DS3231 has been tried on hardware.",
         .min = 0, .max = ENUM_MAX(s_rtc_chip_choices), .def = 0, .choices = s_rtc_chip_choices,
-        .requires_cap = -1, .flags = KVM_SF_REBOOT,
+        .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_REBOOT,
     },
     {
         .key = "rtc_bus", .section = "system", .group = "Clock", .type = KVM_VT_ENUM,
@@ -577,21 +622,21 @@ static const kvm_setting_t s_settings[] = {
                 "of the 40-pin header on most boards, and a DS3231 for Raspberry Pi plugs "
                 "straight on there. Own pins puts it on a second I2C bus.",
         .min = 0, .max = ENUM_MAX(s_rtc_bus_choices), .def = 0, .choices = s_rtc_bus_choices,
-        .requires_cap = -1, .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
         .visible_key = "rtc_chip", .visible_val = 1,
     },
     {
         .key = "rtc_sda", .section = "system", .group = "Clock", .type = KVM_VT_INT,
         .title = "Clock chip SDA",
         .help = "The data line of the clock module's own bus.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "rtc_bus", .visible_val = 1,
     },
     {
         .key = "rtc_scl", .section = "system", .group = "Clock", .type = KVM_VT_INT,
         .title = "Clock chip SCL",
         .help = "The clock line of the clock module's own bus.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "rtc_bus", .visible_val = 1,
     },
     {
@@ -737,7 +782,7 @@ static const kvm_setting_t s_settings[] = {
         .key = "atx_enable", .section = "power", .group = "ATX wiring", .type = KVM_VT_BOOL,
         .title = "Enable ATX control",
         .help = "Requires optocouplers wired to the target's front-panel header.",
-        .def = 0, .requires_cap = -1,
+        .def = 0, .requires_cap = KVM_CAP_GPIO,
     },
     /* Pins, so the console offers only what is free on this board. The defaults
      * come from Kconfig and are picked per board clear of everything else,
@@ -746,7 +791,7 @@ static const kvm_setting_t s_settings[] = {
         .key = "atx_pwr_gpio", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
         .title = "Power button GPIO",
         .help = "Drives the optocoupler across the target's power button. -1 to disable.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_PWR_GPIO, .requires_cap = -1,
+        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_PWR_GPIO, .requires_cap = KVM_CAP_GPIO,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "atx_enable", .visible_val = 1,
     },
@@ -754,7 +799,7 @@ static const kvm_setting_t s_settings[] = {
         .key = "atx_rst_gpio", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
         .title = "Reset button GPIO",
         .help = "Drives the optocoupler across the target's reset button. -1 to disable.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_RST_GPIO, .requires_cap = -1,
+        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_RST_GPIO, .requires_cap = KVM_CAP_GPIO,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "atx_enable", .visible_val = 1,
     },
@@ -764,7 +809,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Reads the target's power LED through an optocoupler. Wire it to the "
                 "power LED, not the HDD LED, which only blinks on disk activity. -1 if "
                 "you are not sensing the LED.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_LED_GPIO, .requires_cap = -1,
+        .min = -1, .max = 54, .def = CONFIG_KVM_ATX_LED_GPIO, .requires_cap = KVM_CAP_GPIO,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "atx_enable", .visible_val = 1,
     },
@@ -774,7 +819,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "Reads the target's HDD LED the same way as the power LED, and with the "
                 "same active-high setting. The power button in the console then blinks "
                 "while the disk works. -1 if you are not sensing it.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO,
         .flags = KVM_SF_PIN | KVM_SF_REBOOT,
         .visible_key = "atx_enable", .visible_val = 1,
     },
@@ -782,7 +827,7 @@ static const kvm_setting_t s_settings[] = {
         .key = "atx_short_ms", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
         .title = "Short press",
         .help = "How long a normal power or reset press is held.",
-        .min = 50, .max = 2000, .def = 200, .requires_cap = -1,
+        .min = 50, .max = 2000, .def = 200, .requires_cap = KVM_CAP_GPIO,
         .unit = "ms",
         .visible_key = "atx_enable", .visible_val = 1,
     },
@@ -790,7 +835,7 @@ static const kvm_setting_t s_settings[] = {
         .key = "atx_long_ms", .section = "power", .group = "ATX wiring", .type = KVM_VT_INT,
         .title = "Force-off hold",
         .help = "How long the power button is held for a hard power off.",
-        .min = 1000, .max = 15000, .def = 5000, .requires_cap = -1,
+        .min = 1000, .max = 15000, .def = 5000, .requires_cap = KVM_CAP_GPIO,
         .unit = "ms",
         .visible_key = "atx_enable", .visible_val = 1,
     },
@@ -799,7 +844,7 @@ static const kvm_setting_t s_settings[] = {
         .title = "Buttons active-high",
         .help = "On to press the button when the GPIO drives high (high-level-trigger "
                 "optocoupler modules). Turn off if your module presses on a low.",
-        .def = 1, .requires_cap = -1,
+        .def = 1, .requires_cap = KVM_CAP_GPIO,
         .visible_key = "atx_enable", .visible_val = 1,
     },
     {
@@ -809,61 +854,96 @@ static const kvm_setting_t s_settings[] = {
         .title = "Power LED active-high",
         .help = "On if the LED sense reads high when the target is powered. Flip it if "
                 "the reported power state is inverted.",
-        .def = 1, .requires_cap = -1,
+        .def = 1, .requires_cap = KVM_CAP_GPIO,
         .visible_key = "atx_enable", .visible_val = 1,
     },
 
-    /* The button on the box - see components/kvm_sched/button.c. */
-    {
-        .key = "btn_gpio", .section = "power", .group = "Button on the box", .type = KVM_VT_INT,
-        .title = "Button GPIO",
-        .help = "A push button on a free pin: the M5Stack Unit Button on a Grove port (its "
-                "yellow wire), or any switch to ground. -1 for none. Not tried with real "
-                "hardware yet.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
-    },
-    {
-        .key = "btn_press", .section = "power", .group = "Button on the box", .type = KVM_VT_ENUM,
-        .title = "A short press",
-        .help = "What a short press does: the target's power button, a hard power off, "
-                "reset, Wake-on-LAN, a runbook (named below), saving the dashcam's last "
-                "seconds as a clip, or a screenshot to the card. On a board with WiFi it "
-                "can also change the connection, which restarts the device: \"hotspot "
-                "on/off\" goes to its own hotspot and back to the mode it had, \"next "
-                "network mode\" steps through them all, \"Ethernet / WiFi\" swaps the "
-                "two.",
-        .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
-        .requires_cap = -1,
-        .visible_key = "btn_gpio", .visible_val = -1,
-        .flags = KVM_SF_SHOW_NE,
-    },
-    {
-        .key = "btn_hold", .section = "power", .group = "Button on the box", .type = KVM_VT_ENUM,
-        .title = "Held for 1.5 s",
-        .help = "What holding it does. It fires as soon as it has been held long enough, "
-                "so you know it took.",
-        .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = 0, .choices = s_btn_action_choices,
-        .requires_cap = -1,
-        .visible_key = "btn_gpio", .visible_val = -1,
-        .flags = KVM_SF_SHOW_NE,
-    },
-    {
-        .key = "btn_runbook", .section = "power", .group = "Button on the box", .type = KVM_VT_STR,
-        .title = "Runbook to run",
-        .help = "The name of the runbook, for either action set to \"runbook\".",
-        .def_str = "", .max_len = 47, .requires_cap = -1,
-        .visible_key = "btn_gpio", .visible_val = -1,
-        .flags = KVM_SF_SHOW_NE,
-    },
-    {
-        .key = "btn_active_high", .section = "power", .group = "Button on the box", .type = KVM_VT_BOOL,
-        .title = "Button reads high when pressed",
-        .help = "Off for a button that connects the pin to ground, which is the usual "
-                "kind and the M5Stack Unit Button. On for one that connects it to 3V3.",
-        .def = 0, .requires_cap = -1,
-        .visible_key = "btn_gpio", .visible_val = -1,
-        .flags = KVM_SF_SHOW_NE,
-    },
+    /* The buttons on the box - see components/kvm_sched/button.c. Button 1
+     * keeps the keys it had when it was the only one. Each next button shows
+     * once the one before it has a pin, so an unused list stays one line. */
+#define BTN_PRESS_HELP                                                                         \
+    "What a short press does: the target's power button, a hard power off, reset, "            \
+    "Wake-on-LAN, a runbook (named below), saving the dashcam's last seconds as a clip, or a " \
+    "screenshot to the card. On a board with WiFi it can also change the connection, which "   \
+    "restarts the device: \"hotspot on/off\" goes to its own hotspot and back to the mode it " \
+    "had, \"next network mode\" steps through them all, \"Ethernet / WiFi\" swaps the two. "   \
+    "\"next display page\" and \"display on/off\" drive the status display."
+#define BTN_HOLD_HELP "What holding it for 1.5 s does. It fires as soon as it has been held long enough, so you know it took."
+#define BTN_RUNBOOK_HELP "The name of the runbook, for either action set to \"runbook\"."
+#define BTN_HIGH_HELP                                                                      \
+    "Off for a button that connects the pin to ground, which is the usual kind and the " \
+    "M5Stack Unit Button. On for one that connects it to 3V3."
+#define BTN_GPIO_HELP                                                                      \
+    "A push button on a free pin: the M5Stack Unit Button on a Grove port (its yellow "    \
+    "wire), or any switch to ground. -1 for none. Not tried with real hardware yet."
+#define BTN_ROWS(GROUP, K_GPIO, K_PRESS, K_HOLD, K_RB, K_HIGH, GPIO_DEF, PRESS_DEF, HOLD_DEF, PREV, PREV_VAL, PREV_FLAG, DEP) \
+    {                                                                                            \
+        .key = K_GPIO, .section = "buttons", .group = GROUP, .type = KVM_VT_INT,                 \
+        .title = "GPIO", .help = BTN_GPIO_HELP,                                                  \
+        .min = -1, .max = 54, .def = GPIO_DEF, .requires_cap = -1, .flags = KVM_SF_PIN | PREV_FLAG, \
+        .visible_key = PREV, .visible_val = PREV_VAL,                                            \
+    },                                                                                           \
+    {                                                                                            \
+        .key = K_PRESS, .section = "buttons", .group = GROUP, .type = KVM_VT_ENUM,               \
+        .title = "A short press", .help = BTN_PRESS_HELP,                                        \
+        .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = PRESS_DEF,                       \
+        .choices = s_btn_action_choices, .requires_cap = -1,                                     \
+        .visible_key = DEP, .visible_val = -1, .flags = KVM_SF_SHOW_NE,                          \
+    },                                                                                           \
+    {                                                                                            \
+        .key = K_HOLD, .section = "buttons", .group = GROUP, .type = KVM_VT_ENUM,                \
+        .title = "Held for 1.5 s", .help = BTN_HOLD_HELP,                                        \
+        .min = 0, .max = ENUM_MAX(s_btn_action_choices), .def = HOLD_DEF,                        \
+        .choices = s_btn_action_choices, .requires_cap = -1,                                     \
+        .visible_key = DEP, .visible_val = -1, .flags = KVM_SF_SHOW_NE,                          \
+    },                                                                                           \
+    {                                                                                            \
+        .key = K_RB, .section = "buttons", .group = GROUP, .type = KVM_VT_STR,                   \
+        .title = "Runbook to run", .help = BTN_RUNBOOK_HELP,                                     \
+        .def_str = "", .max_len = 47, .requires_cap = -1,                                        \
+        .visible_key = DEP, .visible_val = -1, .flags = KVM_SF_SHOW_NE,                          \
+    },                                                                                           \
+    {                                                                                            \
+        .key = K_HIGH, .section = "buttons", .group = GROUP, .type = KVM_VT_BOOL,                \
+        .title = "Reads high when pressed", .help = BTN_HIGH_HELP,                               \
+        .def = 0, .requires_cap = -1,                                                            \
+        .visible_key = DEP, .visible_val = -1, .flags = KVM_SF_SHOW_NE,                          \
+    }
+/* How many buttons this board offers, and whether button 1's pin is the
+ * board's own (a closed box like the JetKVM Mini). A hidden pin never equals
+ * -2, which is what keeps a row out of sight; the rows under a fixed pin hang
+ * on nothing, since their pin is never shown. */
+#define BTN_ROWS_X(...) BTN_ROWS(__VA_ARGS__) /* expands the *_SHOW lists first */
+#if CONFIG_KVM_BTN1_FIXED
+#define BTN1_SHOW "btn_gpio", -2, 0, NULL
+#define BTN2_PREV NULL /* button 1's pin is never shown, so do not wait for it */
+#else
+#define BTN1_SHOW NULL, 0, 0, "btn_gpio"
+#define BTN2_PREV "btn_gpio"
+#endif
+#if CONFIG_KVM_BTN_COUNT >= 2
+#define BTN2_SHOW BTN2_PREV, -1, KVM_SF_SHOW_NE
+#else
+#define BTN2_SHOW "btn2_gpio", -2, 0
+#endif
+#if CONFIG_KVM_BTN_COUNT >= 3
+#define BTN3_SHOW "btn2_gpio", -1, KVM_SF_SHOW_NE
+#else
+#define BTN3_SHOW "btn3_gpio", -2, 0
+#endif
+#if CONFIG_KVM_BTN_COUNT >= 4
+#define BTN4_SHOW "btn3_gpio", -1, KVM_SF_SHOW_NE
+#else
+#define BTN4_SHOW "btn4_gpio", -2, 0
+#endif
+    BTN_ROWS_X("Button 1", "btn_gpio", "btn_press", "btn_hold", "btn_runbook", "btn_active_high",
+               CONFIG_KVM_BTN_GPIO_DEFAULT, CONFIG_KVM_BTN_PRESS_DEFAULT, CONFIG_KVM_BTN_HOLD_DEFAULT, BTN1_SHOW),
+    BTN_ROWS_X("Button 2", "btn2_gpio", "btn2_press", "btn2_hold", "btn2_runbook", "btn2_high", -1, 0, 0,
+               BTN2_SHOW, "btn2_gpio"),
+    BTN_ROWS_X("Button 3", "btn3_gpio", "btn3_press", "btn3_hold", "btn3_runbook", "btn3_high", -1, 0, 0,
+               BTN3_SHOW, "btn3_gpio"),
+    BTN_ROWS_X("Button 4", "btn4_gpio", "btn4_press", "btn4_hold", "btn4_runbook", "btn4_high", -1, 0, 0,
+               BTN4_SHOW, "btn4_gpio"),
 
     {
         .key = "ser_enable", .section = "power", .group = "Serial console", .type = KVM_VT_BOOL,
@@ -873,7 +953,7 @@ static const kvm_setting_t s_settings[] = {
                 "TX to the RX pin below and its RX to the TX pin, plus ground. 3.3 V logic "
                 "(a Raspberry Pi, a router's header) goes straight in; a real RS-232 port "
                 "(9-pin, +-12 V) needs a MAX3232 module in between, or it damages the pin.",
-        .def = 0, .requires_cap = -1,
+        .def = 0, .requires_cap = KVM_CAP_GPIO,
     },
     {
         .key = "usb_serial", .section = "power", .group = "Serial console", .type = KVM_VT_ENUM,
@@ -893,14 +973,14 @@ static const kvm_setting_t s_settings[] = {
         .key = "ser_tx", .section = "power", .group = "Serial console", .type = KVM_VT_INT,
         .title = "TX pin (to the target's RX)",
         .help = "The GPIO this device sends on. -1 until you pick one.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN,
         .visible_key = "ser_enable", .visible_val = 1,
     },
     {
         .key = "ser_rx", .section = "power", .group = "Serial console", .type = KVM_VT_INT,
         .title = "RX pin (from the target's TX)",
         .help = "The GPIO this device listens on. -1 until you pick one.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN,
         .visible_key = "ser_enable", .visible_val = 1,
     },
     {
@@ -909,7 +989,7 @@ static const kvm_setting_t s_settings[] = {
         .help = "What the target's console runs at; 115200 for Linux and most boards, 9600 "
                 "or 115200 for a PC BIOS. Always 8 data bits, no parity, one stop bit.",
         .min = 0, .max = ENUM_MAX(s_baud_choices), .def = 4, .choices = s_baud_choices,
-        .requires_cap = -1,
+        .requires_cap = KVM_CAP_GPIO,
         .visible_key = "ser_enable", .visible_val = 1,
     },
 
@@ -921,27 +1001,27 @@ static const kvm_setting_t s_settings[] = {
                 "(BCLK or SCK), word clock (WS, LRCK or WFS) and data (SD or DATA). Wire them "
                 "to three free pins, plus ground, and pick those pins below. On the Geekworm "
                 "C790 they are on the J4 header.",
-        .def = 0, .requires_cap = -1,
+        .def = 0, .requires_cap = KVM_CAP_GPIO,
     },
     {
         .key = "aud_bclk", .section = "audio", .group = "HDMI audio", .type = KVM_VT_INT,
         .title = "BCLK pin (bit clock)",
         .help = "-1 until you pick one.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN,
         .visible_key = "aud_enable", .visible_val = 1,
     },
     {
         .key = "aud_ws", .section = "audio", .group = "HDMI audio", .type = KVM_VT_INT,
         .title = "WS pin (word clock)",
         .help = "-1 until you pick one.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN,
         .visible_key = "aud_enable", .visible_val = 1,
     },
     {
         .key = "aud_din", .section = "audio", .group = "HDMI audio", .type = KVM_VT_INT,
         .title = "DATA pin",
         .help = "-1 until you pick one.",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN,
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN,
         .visible_key = "aud_enable", .visible_val = 1,
     },
 
@@ -1548,10 +1628,10 @@ static const kvm_setting_t s_settings[] = {
         .title = "Status display",
         .help = "Drive a small display that shows the IP, link, capture status and "
                 "health. An I2C OLED (SSD1306/SH1106) shares the capture chip's I2C "
-                "and is auto-detected with no extra pins; a round SPI LCD (GC9A01) "
+                "and is auto-detected with no extra pins; an SPI LCD (GC9A01, ST7789) "
                 "uses the GPIOs set below, after you pick it as the display type. "
                 "Off by default; does nothing when no panel is connected.",
-        .def = 0, .requires_cap = -1,
+        .def = DISP_DEFAULT_ON, .requires_cap = -1,
     },
     {
         .key = "disp_type", .section = "display", .group = "Screen", .type = KVM_VT_ENUM,
@@ -1559,11 +1639,28 @@ static const kvm_setting_t s_settings[] = {
         .help = "Which panel is wired, controller and size together. SSD1306 and SH1106 "
                 "are I2C OLEDs - pick SH1106 if the image is shifted by two pixels or "
                 "wraps. GC9A01 is a round colour SPI LCD, e.g. the Waveshare 1.28\" "
-                "module. None of this can be detected: one chip drives every size and "
+                "module. ST7789 is the square colour LCD built into the JetKVM Mini. None of this can be detected: one chip drives every size and "
                 "reports none of it. A wrong size shows the picture squeezed into part "
                 "of the glass, or every other row missing. Shorter panels show fewer "
                 "status lines.",
-        .min = 0, .max = ENUM_MAX(s_display_choices), .def = 0, .choices = s_display_choices, .requires_cap = -1,
+        .min = 0, .max = ENUM_MAX(s_display_choices), .def = CONFIG_KVM_DISP_DEFAULT_TYPE, .choices = s_display_choices, .requires_cap = -1,
+        .visible_key = "disp_enable", .visible_val = DISP_TYPE_SHOW,
+    },
+    {
+        .key = "disp_bright", .section = "display", .group = "Screen", .type = KVM_VT_INT,
+        .title = "Brightness",
+        .help = "How bright the backlight of a colour SPI LCD is. Takes effect at once. "
+                "Needs the backlight pin set, and does nothing on the OLEDs.",
+        .min = 5, .max = 100, .def = CONFIG_KVM_DISP_BRIGHT_DEFAULT, .unit = "%",
+        .requires_cap = -1, .flags = DISP_BRIGHT_FLAGS,
+        .visible_key = DISP_BRIGHT_KEY, .visible_val = DISP_BRIGHT_VAL,
+    },
+    {
+        .key = "disp_dwell", .section = "display", .group = "Screen", .type = KVM_VT_INT,
+        .title = "Each page for",
+        .help = "How long each status page stays up before the next one. 0 keeps the page "
+                "until you press the display button.",
+        .min = 0, .max = 60, .def = 4, .unit = "s", .requires_cap = -1,
         .visible_key = "disp_enable", .visible_val = 1,
     },
     {
@@ -1581,57 +1678,57 @@ static const kvm_setting_t s_settings[] = {
      * new wiring. Defaults are a sane free set on the P4; set them to your board. */
     {
         .key = "disp_sclk", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD SCLK / CLK",
-        .help = "SPI clock GPIO for the GC9A01. Ignored by the I2C OLEDs.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_SCLK_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
-        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+        .help = "SPI clock GPIO for the SPI LCD. Ignored by the I2C OLEDs.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_SCLK_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_PIN_SHOW, /* SPI LCDs */
     },
     {
         .key = "disp_mosi", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD MOSI / DIN",
-        .help = "SPI data GPIO for the GC9A01.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_MOSI_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
-        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+        .help = "SPI data GPIO for the SPI LCD.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_MOSI_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_PIN_SHOW, /* SPI LCDs */
     },
     {
         .key = "disp_cs", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD CS",
-        .help = "Chip-select GPIO for the GC9A01.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_CS_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
-        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+        .help = "Chip-select GPIO for the SPI LCD.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_CS_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_PIN_SHOW, /* SPI LCDs */
     },
     {
         .key = "disp_dc", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD DC",
-        .help = "Data/command GPIO for the GC9A01.",
+        .help = "Data/command GPIO for the SPI LCD.",
         /* Not 45: on the Function EV board that pin carries SD_PWRn unless a
          * resistor is moved, so a panel wired there never sees clean levels and
          * stays dark. 26 is free on every board we support. */
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_DC_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
-        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_DC_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_PIN_SHOW, /* SPI LCDs */
     },
     {
         .key = "disp_rst", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD RST",
-        .help = "Reset GPIO for the GC9A01. -1 (None) if RST is tied to 3V3.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_RST_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
-        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+        .help = "Reset GPIO for the SPI LCD. -1 (None) if RST is tied to 3V3.",
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_RST_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_PIN_SHOW, /* SPI LCDs */
     },
     {
         .key = "disp_sda", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "OLED SDA",
         .help = "I2C data GPIO for an OLED on a bus of its own, such as the Grove port of the "
                 "M5Stack Unit PoE-P4. -1 (None) puts the OLED on the capture chip's bus, where "
                 "most boards have it. Set both SDA and SCL, or neither.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SDA_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
-        .visible_key = "disp_type", .visible_val = 2,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SDA_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_NE | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_OLED_SHOW,
     },
     {
         .key = "disp_scl", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "OLED SCL",
         .help = "I2C clock GPIO for an OLED on a bus of its own. -1 (None) puts it on the "
                 "capture chip's bus.",
-        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SCL_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
-        .visible_key = "disp_type", .visible_val = 2,
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_I2C_SCL_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_NE | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_OLED_SHOW,
     },
     {
         .key = "disp_bl", .section = "display", .group = "Wiring", .type = KVM_VT_INT, .title = "LCD backlight",
-        .help = "Backlight GPIO for the GC9A01. -1 (None) if BL is tied to 3V3 (always on).",
-        .min = -1, .max = 54, .def = -1, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT,
-        .visible_key = "disp_type", .visible_val = 2, /* GC9A01 only */
+        .help = "Backlight GPIO for the SPI LCD. -1 (None) if BL is tied to 3V3 (always on).",
+        .min = -1, .max = 54, .def = CONFIG_KVM_DISP_BL_GPIO, .requires_cap = -1, .flags = KVM_SF_PIN | KVM_SF_REBOOT | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_PIN_SHOW, /* SPI LCDs */
     },
 };
 /* clang-format on */
@@ -1647,7 +1744,8 @@ static const kvm_section_t s_sections[] = {
     {"audio", "Audio", "The target's sound, on three wires from the capture board."},
     {"input", "Input", "Keyboard and pointer, as the target sees them."},
     {"storage", "Virtual media", "The microSD card and what is offered to the target."},
-    {"power", "Power", "ATX wiring, Wake-on-LAN, HDMI-CEC, the button on the board and the serial console."},
+    {"power", "Power", "ATX wiring, Wake-on-LAN, HDMI-CEC and the serial console."},
+    {"buttons", "Buttons", "Push buttons wired to the device, and what a press or a hold of each does."},
     {"network", "Network", "How the device is reached."},
     {"vpn", "VPN", "One tunnel at a time: WireGuard or Tailscale."},
     {"mqtt", "MQTT / Home Assistant", "Reporting to a home automation system."},

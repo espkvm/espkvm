@@ -129,6 +129,14 @@ jobs:
           - id: m5-poe-p4x
             build_dir: build.m5poex
             sdkconfig_defaults: sdkconfig.defaults;boards/m5_poe_p4.defaults;boards/m5_poe_p4x.defaults
+          # JetKVM Mini and Mini W - JetKVM's finished box on an ESP32-P4X, so
+          # rev 3.x only. Pins from JetKVM's open firmware; not run on one yet.
+          - id: jetkvm-mini
+            build_dir: build.jetkvm_mini
+            sdkconfig_defaults: sdkconfig.defaults;boards/jetkvm_mini.defaults
+          - id: jetkvm-mini-w
+            build_dir: build.jetkvm_mini_w
+            sdkconfig_defaults: sdkconfig.defaults;boards/jetkvm_mini.defaults;boards/jetkvm_mini_w.defaults
           # Waveshare ESP32-P4-WIFI6-DEV-KIT - both links on one board, Ethernet
           # and a C6, on pins we already use.
           - id: p4-wifi6-devkit

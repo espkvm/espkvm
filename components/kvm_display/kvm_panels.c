@@ -42,6 +42,8 @@ static const kvm_panel_t k_panels[] = {
        The first Unit Glass (U158) has an STM32 in front of its panel and is not
        this. */
     {KVM_PANEL_DRV_SSD1306, 128, 64, 0},
+    /* The JetKVM Mini's built-in 240x240 colour LCD. */
+    {KVM_PANEL_DRV_ST7789, 240, 240, 0},
 };
 
 const kvm_panel_t *kvm_panel_selected(void)

@@ -59,6 +59,42 @@ menu "ESP-KVM"
                 below. Off unless switched on in settings, and it does nothing
                 when no panel is connected, so it is safe to build into every board.
 
+        config KVM_DISP_DEFAULT_ON
+            bool "Status display on by default"
+            depends on KVM_ENABLE_DISPLAY
+            default n
+            help
+                For a board with a panel built in, such as the JetKVM Mini, so a
+                fresh device lights its screen without a trip to Settings.
+
+        config KVM_DISP_DEFAULT_TYPE
+            int "Default panel (index into the disp_type choices)"
+            depends on KVM_ENABLE_DISPLAY
+            default 0
+            help
+                0 is the SSD1306 128x64. 15 is the ST7789 240x240 of the JetKVM
+                Mini. The list is s_display_choices in kvm_settings_table.c.
+
+        config KVM_DISP_BL_GPIO
+            int "SPI LCD default backlight GPIO (-1 if always on)"
+            depends on KVM_ENABLE_DISPLAY
+            range -1 ENV_GPIO_RANGE_MAX
+            default -1
+
+        config KVM_DISP_FIXED
+            bool "The panel is built in (hide its type and pins in Settings)"
+            depends on KVM_ENABLE_DISPLAY
+            default n
+            help
+                A board with a soldered panel, such as the JetKVM Mini: the
+                console offers only on/off, upside down and the brightness.
+
+        config KVM_DISP_BRIGHT_DEFAULT
+            int "SPI LCD default brightness, percent"
+            depends on KVM_ENABLE_DISPLAY
+            range 5 100
+            default 100
+
         config KVM_GC9A01_SPI_HOST
             int "Round SPI LCD (GC9A01) SPI host (2 = SPI2)"
             depends on KVM_ENABLE_DISPLAY
@@ -269,6 +305,10 @@ menu "ESP-KVM"
                 bool "Espressif ESP32-P4 Function EV"
             config KVM_BOARD_M5_POE_P4
                 bool "M5Stack Unit PoE-P4"
+            config KVM_BOARD_JETKVM_MINI
+                bool "JetKVM Mini (Ethernet)"
+            config KVM_BOARD_JETKVM_MINI_W
+                bool "JetKVM Mini W (Wi-Fi)"
             config KVM_BOARD_OTHER
                 bool "Something else"
         endchoice
@@ -282,6 +322,49 @@ menu "ESP-KVM"
             int "TC358743 I2C SCL"
             range ENV_GPIO_RANGE_MIN ENV_GPIO_RANGE_MAX
             default 8
+
+        config KVM_BOARD_NO_FREE_GPIO
+            bool "No free GPIOs come out of this board"
+            default n
+            help
+                A closed box such as the JetKVM Mini. The settings for add-ons
+                wired to pins (ATX, the UART serial console, a clock module,
+                HDMI audio) fold away with a note, and the Pins tab is hidden.
+
+        config KVM_BTN_COUNT
+            int "How many buttons Settings offers"
+            range 1 4
+            default 4
+            help
+                1 on a closed box with one spare button of its own (the JetKVM
+                Mini's SW3), 4 on a board with free pins for more.
+
+        config KVM_BTN1_FIXED
+            bool "Button 1 is the board's own, on KVM_BTN_GPIO_DEFAULT"
+            default n
+            help
+                Hides button 1's pin in Settings: it is soldered, not wired by
+                the operator. Its actions can still be changed.
+
+        config KVM_BTN_GPIO_DEFAULT
+            int "Default GPIO of the button on the box (btn_gpio, -1 if none)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default -1
+            help
+                For a board with a spare button of its own, such as SW3 on the
+                JetKVM Mini. The operator can still change it in Settings, Power.
+
+        config KVM_BTN_PRESS_DEFAULT
+            int "Default action of a short press (index into the btn_press choices)"
+            default 0
+            help
+                11 is "next display page".
+
+        config KVM_BTN_HOLD_DEFAULT
+            int "Default action of a long press (index into the btn_hold choices)"
+            default 0
+            help
+                12 is "display on/off".
 
         config KVM_BUTTON_GPIO
             int "BOOT button GPIO for password reset (-1 if none)"

@@ -29,7 +29,6 @@
 /* Status screens this helper cycles through, and how many render ticks each is
  * shown for (the core ticks about once a second). */
 #define STATUS_SCREENS 3
-#define SCREEN_DWELL_TICKS 4
 
 /* Most status lines any screen offers; the panel takes as many as it can hold. */
 #define STATUS_ROWS_MAX 6
@@ -48,6 +47,8 @@ struct mono_oled {
     bool title;     /* is there room for the screen's name and icon? */
     uint8_t screen; /* which status screen is showing */
     uint8_t tick;   /* ticks the current screen has been up */
+    uint32_t presses; /* page_presses last acted on */
+    bool primed;      /* presses taken from the first status, not acted on */
     uint8_t scroll;     /* characters the long rows have stepped along */
     uint8_t scroll_max; /* how far the longest row on this screen has to go */
     uint8_t splash; /* ticks of the boot logo still to show */
@@ -751,6 +752,19 @@ esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status)
     /* In hotspot mode the code takes a turn of its own between the network
        screen and the rest, so a phone gets four seconds at it. */
     const bool qr = qr_page(m, status);
+    /* The page button: the next page now, with a full dwell on it. Presses
+       from before this panel came up do not count. */
+    if (!m->primed) {
+        m->primed = true;
+        m->presses = status->page_presses;
+    }
+    if (status->page_presses != m->presses) {
+        m->presses = status->page_presses;
+        m->splash = 0;
+        m->tick = 0;
+        m->scroll = 0;
+        m->screen = (uint8_t)((m->screen + 1) % (STATUS_SCREENS + (qr ? 1 : 0)));
+    }
     uint8_t page = m->screen;
     if (qr && page == 1) {
         if (!render_join_qr(m, status)) {
@@ -766,7 +780,7 @@ esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status)
     }
     /* Move on once the screen has had its dwell and every long row has been
        shown to its end. */
-    if (++m->tick >= SCREEN_DWELL_TICKS && m->scroll >= m->scroll_max) {
+    if (status->dwell_s && ++m->tick >= status->dwell_s && m->scroll >= m->scroll_max) {
         const uint8_t screens = (uint8_t)(STATUS_SCREENS + (qr ? 1 : 0));
         m->tick = 0;
         m->scroll = 0;

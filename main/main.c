@@ -610,6 +610,13 @@ void app_main(void)
     apply_log_level();
     ESP_ERROR_CHECK(kvm_settings_subscribe(on_setting_changed, NULL));
     kvm_caps_init();
+    /* A fact of the build, not a probe: said at once, so no console that loads
+     * early sees the wired add-ons of an ordinary board as missing. */
+#if CONFIG_KVM_BOARD_NO_FREE_GPIO
+    kvm_cap_report(KVM_CAP_GPIO, false, "this box has no pins to wire anything to");
+#else
+    kvm_cap_report(KVM_CAP_GPIO, true, NULL);
+#endif
     /* Before the capture path: the guard should be watching from the first
      * frame, not from whenever the web server happens to start. */
     kvm_thermal_init();
