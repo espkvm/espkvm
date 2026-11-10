@@ -29,7 +29,7 @@
 # check the eFuses first (espefuse.py summary: no Secure Boot, no flash
 # encryption), turn on "USB debugging" in JetKVM's own settings so the EXT
 # port stays a USB Serial/JTAG, back up the whole flash with
-# `esptool read_flash 0 0x1000000` - that backup is the only way back to stock -
+# `esptool read_flash 0 0x1000000` (JetKVM also publishes a recovery image) -
 # and flash over the EXT port.
 #
 # NOT YET RUN ON THE DEVICE. Configured from JetKVM's source and published so

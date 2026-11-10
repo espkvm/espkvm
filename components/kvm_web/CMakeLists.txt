@@ -48,6 +48,7 @@ idf_component_register(
         kvm_runbook
         kvm_sched
         kvm_notify
+        kvm_upload
         kvm_cec
         kvm_serial
         kvm_agent

@@ -26,6 +26,7 @@
  * jumps rather than showing a smeared picture.
  */
 #include "kvm_record.h"
+#include "kvm_upload.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -1992,5 +1993,6 @@ esp_err_t kvm_record_screenshot(char *file, size_t file_cap, char *why, size_t w
     }
     snprintf(file, file_cap, "%s", rel);
     ESP_LOGI(TAG, "screenshot: %s, %zu bytes", rel, len);
+    kvm_upload_auto(KVM_UPLOAD_SCREENSHOT, rel);
     return ESP_OK;
 }

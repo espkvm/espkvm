@@ -254,6 +254,7 @@ static void gather(kvm_display_status_t *st)
     st->page_presses = s_page_presses;
     const int dwell = (int)kvm_setting_int("disp_dwell");
     st->dwell_s = (uint8_t)(dwell < 0 ? 0 : dwell > 255 ? 255 : dwell);
+    st->picture_page = kvm_setting_bool("disp_picture");
     st->usb = usb_hid_target_suspended() ? 3 : usb_hid_ready() ? 2 : usb_hid_bus_alive() ? 1 : 0;
 
     const esp_app_desc_t *app = esp_app_get_description();
@@ -339,8 +340,22 @@ static void display_task(void *arg)
         /* Sleep out the tick, but let a notice cut it short: waiting on the
          * notification rather than the clock is what makes a progress ring
          * follow a button in real time instead of at 1 Hz. */
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(RENDER_TICK_MS));
+        uint32_t wait_ms = RENDER_TICK_MS;
+        if (ctx && drv->next_render_ms) {
+            const uint32_t want_ms = drv->next_render_ms(ctx);
+            if (want_ms && want_ms < wait_ms) {
+                wait_ms = want_ms;
+            }
+        }
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
+}
+
+esp_err_t kvm_display_picture(uint16_t *dst, int max_w, int max_h, int *w, int *h)
+{
+    /* Two frame periods at 30 fps and some slack: longer and the panel's
+       other pages wait behind a picture that is not coming. */
+    return capture_thumbnail(dst, max_w, max_h, true, w, h, 120);
 }
 
 /* The button on the box (kvm_sched/button.c) can be set to page the display

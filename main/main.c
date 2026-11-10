@@ -38,6 +38,7 @@
 #include "kvm_ipv6.h"
 #include "kvm_mqtt.h"
 #include "kvm_record.h"
+#include "kvm_upload.h"
 #include "kvm_storage.h"
 #include "kvm_ts.h"
 #include "kvm_tls.h"
@@ -815,6 +816,8 @@ void app_main(void)
     /* Push notifications, on their own low-priority task. */
     kvm_notify_init();
     kvm_record_dashcam_init();
+    /* Uploads that were still waiting when the device went down. */
+    kvm_upload_start();
 
     ESP_LOGI(TAG, "boot: capture");
     capture_start();

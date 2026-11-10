@@ -12,6 +12,7 @@ idf_component_register(
         kvm_atx
         kvm_notify
         kvm_storage
+        kvm_upload
         kvm_audio
         esp_ringbuf
         esp_timer

@@ -106,6 +106,9 @@ typedef struct {
     /** Seconds each status page stays up, or 0: pages change only on the
         button. */
     uint8_t dwell_s;
+    /** A colour panel adds a page with a small copy of the target's screen,
+        see kvm_display_picture(). */
+    bool picture_page;
     char version[32];        /**< firmware version, e.g. "v.0.20.0" */
 } kvm_display_status_t;
 
@@ -133,7 +136,26 @@ typedef struct {
     esp_err_t (*render)(void *ctx, const kvm_display_status_t *status);
     /** Blank the panel and release everything attach() acquired. */
     void (*detach)(void *ctx);
+    /**
+     * Optional: how many ms the driver wants until its next render(), for a
+     * page that moves, such as the picture. 0, or no function, keeps the
+     * usual tick of about a second. A notice still cuts the wait short.
+     */
+    uint32_t (*next_render_ms)(void *ctx);
 } kvm_display_driver_t;
+
+/**
+ * A small copy of the target's screen for a driver to draw: RGB565, high byte
+ * first as SPI panels take it, scaled to fit @p max_w x @p max_h with its
+ * aspect kept (the PPA scales in sixteenths, so it can come out smaller than
+ * the box). Blocks for up to a frame or two. Provided by the core.
+ *
+ * @return ESP_OK with *w x *h pixels in @p dst at a stride of *w;
+ *         ESP_ERR_NOT_FOUND with no signal; ESP_ERR_NOT_SUPPORTED on a board
+ *         whose capture format the PPA cannot read; other errors when no
+ *         frame came in time
+ */
+esp_err_t kvm_display_picture(uint16_t *dst, int max_w, int max_h, int *w, int *h);
 
 #ifdef __cplusplus
 }

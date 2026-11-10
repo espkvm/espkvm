@@ -24,6 +24,7 @@ idf_component_register(
         nvs_flash
         kvm_storage
         kvm_record
+        kvm_upload
         kvm_display
         app_update
         esp_timer

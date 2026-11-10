@@ -12,6 +12,7 @@ idf_component_register(
         "capture_flat.c"
         "capture_flat_scan.c"
         "capture_snapshot.c"
+        "capture_thumb.c"
         "h264_probe.c"
         "h264_ref_pool.c"
         "h264_sps.c"

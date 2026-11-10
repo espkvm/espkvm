@@ -31,6 +31,7 @@
 #include "kvm_regions.h"
 #include "kvm_settings.h"
 #include "kvm_storage.h"
+#include "kvm_upload.h"
 #include "record_priv.h"
 #include "screentext_store.h"
 #include "ts_to_mp4.h"
@@ -289,6 +290,40 @@ static bool io_write(void *io, const uint8_t *data, size_t len)
     return fwrite(data, 1, len, ((files_t *)io)->out) == len;
 }
 
+/* What kind of file a finished job is, for automatic upload. A clip whose
+   first event is "Saved by hand" came from the button, any other from the
+   dashcam's own triggers. */
+static kvm_upload_kind_t job_kind(const record_finished_t *job)
+{
+    if (job->timelapse) {
+        return KVM_UPLOAD_TIMELAPSE;
+    }
+    if (!job->event) {
+        return KVM_UPLOAD_RECORDING;
+    }
+    for (int i = 0; i < job->chapters; i++) {
+        if (strcmp(job->chapter[i].title, "Before") != 0) {
+            return strcmp(job->chapter[i].title, "Saved by hand") == 0 ? KVM_UPLOAD_CLIP : KVM_UPLOAD_DASHCAM;
+        }
+    }
+    return KVM_UPLOAD_DASHCAM;
+}
+
+/* Every file of a recording that was split into parts. */
+static void upload_parts(const record_finished_t *job)
+{
+    const size_t stem = strlen(job->file) - 3; /* without ".ts" */
+    for (int p = 1; p <= (job->parts > 0 ? job->parts : 1); p++) {
+        char rel[80];
+        if (p == 1) {
+            snprintf(rel, sizeof(rel), "%s", job->file);
+        } else {
+            snprintf(rel, sizeof(rel), "%.*s-part%d.ts", (int)stem, job->file, p % 1000);
+        }
+        kvm_upload_auto(job_kind(job), rel);
+    }
+}
+
 /* False when it ran out of memory and may work in a moment. */
 static bool convert(const record_finished_t *job, bool last_try)
 {
@@ -351,6 +386,7 @@ static bool convert(const record_finished_t *job, bool last_try)
         }
         ESP_LOGW(TAG, "%s stays a .ts: %s", job->file, err);
         heap_caps_free(inbuf);
+        kvm_upload_auto(job_kind(job), job->file);
         if (job->event) {
             /* Still a clip the operator should hear about, just not an MP4. */
             portENTER_CRITICAL(&s_last_mu);
@@ -364,6 +400,7 @@ static bool convert(const record_finished_t *job, bool last_try)
     remove(ts);
     ESP_LOGI(TAG, "%s ready: %s in %lld ms", job->timelapse ? "timelapse" : "clip", card_mp4,
              (long long)((esp_timer_get_time() - t0) / 1000));
+    kvm_upload_auto(job_kind(job), card_mp4);
     if (job->timelapse) {
         return true; /* nothing happened to tell anyone about */
     }
@@ -432,6 +469,7 @@ static void on_finished(const record_finished_t *done)
      * file and small enough to convert in a few minutes (about 1 MB a second). */
     const bool timelapse = done->timelapse && done->parts == 1 && done->bytes <= TIMELAPSE_MP4_MAX;
     if (!done->event && !timelapse) {
+        upload_parts(done); /* a recording, or a timelapse too long to convert */
         return;
     }
     ESP_LOGI(TAG, "%s saved: %s (%d chapters)", timelapse ? "timelapse" : "clip", done->file,

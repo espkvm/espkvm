@@ -259,20 +259,7 @@ void capture_screentext_idle(capture_ctx_t *c)
     }
     s_last_us = now;
 
-    portENTER_CRITICAL(&c->fb_lock);
-    const int hidx = c->ready_fb_idx;
-    c->held_fb_idx = hidx;
-    portEXIT_CRITICAL(&c->fb_lock);
-    if (hidx < 0) {
-        return;
-    }
-    void *src = c->fb[hidx];
-    if (esp_cache_msync(src, c->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C) == ESP_OK) {
-        capture_screentext_tick(c, src);
-    }
-    portENTER_CRITICAL(&c->fb_lock);
-    c->held_fb_idx = -1;
-    portEXIT_CRITICAL(&c->fb_lock);
+    (void)capture_read_newest(c, capture_screentext_tick);
 }
 
 void capture_screentext_tick(capture_ctx_t *c, const void *frame)

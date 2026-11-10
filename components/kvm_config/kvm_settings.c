@@ -152,6 +152,50 @@ static void migrate_update_url(nvs_handle_t nvs)
     }
 }
 
+/*
+ * Notifications used to have three switches for what to send (a watched
+ * phrase, a blank screen, a dashcam clip) and sent it everywhere. Now each
+ * channel has a mask of what it takes. A device that had those switches
+ * stored gets the same choice in every channel, once, and the old keys go.
+ */
+static void migrate_notify_routes(nvs_handle_t nvs)
+{
+    static const struct {
+        const char *key;
+        int bit;
+    } old[] = {{"notify_watch", 0}, {"notify_flat", 1}, {"notify_clip", 3}};
+    static const char *const masks[] = {"notify_tg_ev", "notify_hook_ev", "notify_push_ev"};
+    int32_t on = 0, off = 0;
+    bool any = false;
+    for (size_t i = 0; i < sizeof(old) / sizeof(old[0]); i++) {
+        int32_t v;
+        if (nvs_get_i32(nvs, old[i].key, &v) == ESP_OK) {
+            any = true;
+            if (v) {
+                on |= 1 << old[i].bit;
+            } else {
+                off |= 1 << old[i].bit;
+            }
+            (void)nvs_erase_key(nvs, old[i].key);
+        }
+    }
+    if (!any) {
+        return;
+    }
+    for (size_t m = 0; m < sizeof(masks) / sizeof(masks[0]); m++) {
+        const int idx = find_index(masks[m]);
+        if (idx < 0) {
+            continue;
+        }
+        const int32_t v = (s_values[idx].i | on) & ~off;
+        if (v != s_values[idx].i && nvs_set_i32(nvs, masks[m], v) == ESP_OK) {
+            s_values[idx].i = v;
+        }
+    }
+    (void)nvs_commit(nvs);
+    ESP_LOGI(TAG, "notifications: the old switches moved into the per-channel table");
+}
+
 esp_err_t kvm_settings_init(void)
 {
     if (s_values) {
@@ -198,6 +242,7 @@ esp_err_t kvm_settings_init(void)
         load_one(nvs, i);
     }
     migrate_update_url(nvs);
+    migrate_notify_routes(nvs);
     nvs_close(nvs);
     ESP_LOGI(TAG, "%u settings loaded", (unsigned)s_count);
     profiles_init();
@@ -494,19 +539,28 @@ char *kvm_settings_schema_json(void)
             cJSON_AddNumberToObject(o, "min", d->min);
             cJSON_AddNumberToObject(o, "max", d->max);
         }
-        if (d->type == KVM_VT_ENUM && d->choices) {
+        /* An enum names each value, a mask each bit: max is all bits set. */
+        const bool mask = d->type == KVM_VT_INT && (d->flags & KVM_SF_MASK);
+        int32_t names = d->type == KVM_VT_ENUM ? d->max + 1 : 0;
+        while (mask && names < 31 && ((uint32_t)d->max >> names)) {
+            names++;
+        }
+        if (names && d->choices) {
             cJSON *ch = cJSON_CreateArray();
-            for (int32_t c = 0; c <= d->max; c++) {
+            for (int32_t c = 0; c < names; c++) {
                 cJSON_AddItemToArray(ch, cJSON_CreateString(d->choices[c]));
             }
             cJSON_AddItemToObject(o, "choices", ch);
         }
-        if (d->type == KVM_VT_ENUM && d->labels) {
+        if (names && d->labels) {
             cJSON *lb = cJSON_CreateArray();
-            for (int32_t c = 0; c <= d->max; c++) {
+            for (int32_t c = 0; c < names; c++) {
                 cJSON_AddItemToArray(lb, cJSON_CreateString(d->labels[c]));
             }
             cJSON_AddItemToObject(o, "labels", lb);
+        }
+        if (mask) {
+            cJSON_AddBoolToObject(o, "mask", true);
         }
         if (d->unit) {
             cJSON_AddStringToObject(o, "unit", d->unit);

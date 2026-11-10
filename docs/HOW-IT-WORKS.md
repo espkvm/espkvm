@@ -8,7 +8,7 @@
 | MJPEG streaming | works |
 | H.264 streaming | works; needs HTTPS in the browser |
 | Keyboard, absolute and relative pointer, media keys | works |
-| Alt+Tab, Ctrl+W and the Windows key reaching the target | works in Chrome and Edge; full screen, with control taken, and the "All keys" button on. Firefox and Safari have no way to give a page those keys |
+| Alt+Tab, Ctrl+W and the Windows key reaching the target | works in Chrome and Edge; full screen, with control taken, and the keyboard lock button on (the keyboard with a padlock). With it, Esc goes to the target too, and holding Esc leaves full screen and gives control back. Firefox and Safari have no way to give a page those keys |
 | Waking a sleeping target from the keyboard | works; over USB, if the machine allows it. Otherwise Wake-on-LAN or the ATX button |
 | Pasting text with a keyboard layout | works; US English, Russian, Czech, Ukrainian, Lithuanian |
 | Use from a phone or tablet | works; touch trackpad, pinch zoom and on-screen keyboard |

@@ -155,6 +155,21 @@ void capture_screentext_forget(void);
  */
 void capture_flat_tick(capture_ctx_t *c, const void *frame);
 
+/*
+ * Read the newest frame while nothing is being encoded: hold it so the CSI DMA
+ * does not write over it, invalidate it, hand it to @p fn, let it go. For the
+ * readers that still want a look at the screen with nobody watching. Capture
+ * task only. @return false when there was no frame to read.
+ */
+typedef void (*capture_frame_fn_t)(capture_ctx_t *c, const void *frame);
+bool capture_read_newest(capture_ctx_t *c, capture_frame_fn_t fn);
+
+/* A small picture for a status display, scaled from this frame when one is
+ * asked for. Capture task only. See capture_thumb.c. */
+void capture_thumb_tick(capture_ctx_t *c, const void *frame);
+/* The same with nobody watching: reads the newest frame itself. */
+void capture_thumb_idle(capture_ctx_t *c);
+
 /* A screenshot asked for while H.264 runs is encoded from this frame. Capture
  * task only; costs nothing unless one is waiting. See capture_snapshot.c. */
 void capture_snapshot_tick(capture_ctx_t *c, const void *frame);
@@ -170,6 +185,10 @@ uint32_t capture_flat_ms(void);
 
 /** Ask whoever holds spare PSRAM to give it back. False when nobody listens. */
 bool capture_release_memory(bool failed);
+
+/* True once h264_ref_pool.c holds the reference block: a new encoder of any
+ * supported width then takes it back and needs no internal room for it. */
+bool h264_ref_pool_ready(void);
 
 /** Whether the flat colour is black or nearly. Meaningful while flat. */
 bool capture_flat_dark(void);
@@ -262,6 +281,15 @@ void capture_yuv422_to_h264(const uint8_t *src, uint8_t *dst, uint32_t hres, uin
 #if CONFIG_KVM_TC358743_ADV_DEBUG
 void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes);
 #endif
+
+/* The CSI link as the receiver sees it, for the frame-timeout line: whether the
+   clock lane runs at high speed (the source transmits) and which lanes sit in
+   stop state. */
+typedef struct {
+    unsigned clk_hs, stop_d0, stop_d1, stop_clk;
+    uint32_t phy_err;
+} capture_csi_link_t;
+void capture_hw_csi_link(capture_csi_link_t *out);
 
 /** CSI bits per pixel for debug logs (RGB888 -> 24 bpp BGR order in DRAM). */
 unsigned capture_csi_bpp(void);

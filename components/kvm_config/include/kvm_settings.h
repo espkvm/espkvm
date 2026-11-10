@@ -39,6 +39,10 @@ enum {
     KVM_SF_SHOW_NE = 1u << 4, /**< shown while setting[visible_key] is NOT visible_val */
     KVM_SF_SHOW_IN = 1u << 5, /**< visible_val is a bit mask: shown while bit
                                  setting[visible_key] is set in it (with SHOW_NE: clear) */
+    KVM_SF_MASK = 1u << 6,    /**< an INT that is a set of bits, one per entry of
+                                 @p choices (bit 0 first). The console draws the
+                                 mask settings of one group as a table: a row per
+                                 bit, a column per setting. */
 };
 
 typedef struct {
@@ -53,7 +57,7 @@ typedef struct {
     int32_t min;
     int32_t max;
     int32_t def;                /**< default for BOOL/INT/ENUM (enum: index) */
-    const char *const *choices; /**< ENUM only, @p max + 1 entries */
+    const char *const *choices; /**< ENUM: @p max + 1 entries. KVM_SF_MASK: one per bit */
     const char *def_str;        /**< STR only */
     uint16_t max_len;           /**< STR only, excluding the terminator */
     int8_t requires_cap;        /**< kvm_cap_t, or -1 when always applicable */
@@ -64,8 +68,8 @@ typedef struct {
                                      while that setting is shown itself
                                      (e.g. the GC9A01 pins only for the round LCD type) */
     int32_t visible_val;
-    const char *const *labels;  /**< ENUM only, optional: what the console shows for each
-                                     choice; @p choices stay the names the API takes */
+    const char *const *labels;  /**< ENUM or KVM_SF_MASK, optional: what the console shows
+                                     for each choice; @p choices stay the names the API takes */
     const char *unit;           /**< INT only, optional: shown after the number ("ms") */
 } kvm_setting_t;
 

@@ -115,6 +115,7 @@ be given a URL.
 | `POST /api/v1/record/event` | save a dashcam clip now: the past in memory plus `dashcam_post_s` after |
 | `POST /api/v1/screenshot` | save a screenshot to SCREENSHOTS/ on the card |
 | `GET /api/v1/captures`, `GET /api/v1/captures/file?path=`, `POST /api/v1/captures/delete?path=` | list, download and delete recordings and screenshots |
+| `POST /api/v1/captures/upload?path=`, `GET /api/v1/captures/upload`, `POST /api/v1/captures/upload/cancel`, `POST /api/v1/captures/upload/test` | send a recording or a screenshot to the WebDAV folder in the settings (a recording takes its .srt along), see the queue and how each file went, stop it, or check the folder. With `up_dav_ev` set, finished files are queued by the device itself (`"auto":true`). A queued item with `retryIn` > 0 waits for the server, which did not answer |
 | `GET /api/v1/captures/search?q=` | find a phrase in the screen text saved with recordings; each answer says which file and how far in |
 
 ### Keyboard, pointer and gamepad
@@ -157,7 +158,7 @@ These need the agent API, and answer 409 when no target is attached.
 |---|---|
 | `POST /api/v1/runbooks/run`, `/stop`, `GET /api/v1/runbooks/status` | run a saved runbook by name, stop it, see which step it is on |
 | `POST /api/v1/schedules/run`, `GET /api/v1/schedules/status` | fire a saved schedule now, or see the device clock and what last fired |
-| `POST /api/v1/notify/test`, `GET /api/v1/notify/status` | send a test notification, or see whether the last one got through |
+| `POST /api/v1/notify/test`, `GET /api/v1/notify/status` | send a test notification (to every channel), or see whether the last one got through; `ready` says which channels are set up, keyed by their routing setting |
 | `GET /api/v1/push`, `POST /api/v1/push/subscribe`, `POST /api/v1/push/remove` | Web Push: the device's key and the browsers it notifies (see NOTIFICATIONS.md) |
 | `POST /api/v1/notify/chats` | look up the Telegram chats the bot can write to; the list comes in `GET /api/v1/notify/status` |
 

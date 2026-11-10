@@ -385,7 +385,7 @@ static void check_key_expiry(void)
     }
     s_key_warned = now;
     ESP_LOGW(TAG, "%s", body);
-    kvm_notify_send("Tailscale key", body, false);
+    kvm_notify_send(KVM_NOTIFY_TSKEY, "Tailscale key", body, false);
 }
 
 static void ts_task(void *arg)

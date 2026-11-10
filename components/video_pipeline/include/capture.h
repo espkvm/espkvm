@@ -131,6 +131,22 @@ esp_err_t capture_reconnect_source(void);
 esp_err_t capture_snapshot_jpeg(uint8_t **out, size_t *out_len, uint32_t timeout_ms);
 
 /**
+ * A small RGB565 copy of the screen, for a status display. Scaled by the PPA
+ * from the next captured frame, keeping the aspect, to fit @p max_w x @p max_h
+ * in steps of 1/16 (the PPA's) - so 1920x1080 into 240x240 is 240x135, and a
+ * 1024 wide screen comes out 192 wide. Never scaled up.
+ *
+ * @param dst      at least max_w * max_h pixels; the picture is written with a
+ *                 stride of *out_w
+ * @param swap     write each pixel high byte first, as SPI panels take it
+ * @return ESP_ERR_NOT_FOUND with no signal, ESP_ERR_NOT_SUPPORTED where the PPA
+ *         cannot read the captured format (YUV422 before chip rev 3.0),
+ *         ESP_ERR_TIMEOUT when no frame came in time
+ */
+esp_err_t capture_thumbnail(uint16_t *dst, int max_w, int max_h, bool swap, int *out_w,
+                            int *out_h, uint32_t timeout_ms);
+
+/**
  * The I2C master bus the capture bridge lives on (I2C_NUM_0, the board's
  * TC358743 SDA/SCL). Shared so an optional status OLED wired to the same two
  * lines can be probed and driven without any dedicated pins. NULL before the

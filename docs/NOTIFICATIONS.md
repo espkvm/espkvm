@@ -7,12 +7,24 @@ and to browsers (Web Push), in any mix. Everything here is set in the console un
 Notifications; `POST /api/v1/notify/test` sends a test one and
 `GET /api/v1/notify/status` says how the last one went.
 
+## What goes where
+
+Each channel takes the kinds of event its column in the table under Settings
+&rarr; Notifications ticks: a watched phrase on the screen, a blank screen, a
+screen area, a dashcam clip, a target log alert, the Tailscale key running out.
+Everything but the blank screen is ticked to start with. A test, and the note
+that alerts were dropped, go to every channel.
+
+In the settings API each column is an int, a bit per row in that order:
+`notify_tg_ev`, `notify_hook_ev`, `notify_push_ev` (bit 0 the watched phrase,
+bit 5 the Tailscale key). A new channel is a new column, with a file of its own
+in `components/kvm_notify/`.
+
 ## Telegram
 
 Put a bot token and a chat id in the settings. **Find chats** lists the chats
 the bot can already write to, so the id does not have to be looked up by hand.
-With the MJPEG codec a screenshot is attached; with H.264 the frame cannot be
-handed over as a JPEG, so the message goes without one. A dashcam clip under
+A screenshot is attached on either codec. A dashcam clip under
 50 MB is uploaded as a video that plays in the chat; a bigger one is named
 instead.
 

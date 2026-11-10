@@ -99,7 +99,7 @@ static void check_line(const char *line, const char *from)
         s_last_alert_us = now;
         char body[300];
         snprintf(body, sizeof(body), "From %s (unverified network log): %.200s", from, line);
-        kvm_notify_send("Target log alert", body, false);
+        kvm_notify_send(KVM_NOTIFY_NETLOG, "Target log alert", body, false);
         ESP_LOGW(TAG, "alert: \"%s\" in a line from %s", p, from);
         return;
     }

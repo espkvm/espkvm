@@ -2815,7 +2815,7 @@ static esp_err_t api_notify_status_get(httpd_req_t *req)
     /* The chat list rides along, so finding chats costs no route of its own. */
     const size_t chats_cap = 4096;
     char *chats = heap_caps_malloc(chats_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    const size_t body_cap = sizeof(res) + 128 + chats_cap;
+    const size_t body_cap = sizeof(res) + 256 + chats_cap;
     char *body = heap_caps_malloc(body_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!chats || !body) {
         free(chats);
@@ -2834,9 +2834,14 @@ static esp_err_t api_notify_status_get(httpd_req_t *req)
         res[o++] = *p;
     }
     res[o] = '\0';
+    char ready[128];
+    if (!kvm_notify_ready_json(ready, sizeof(ready))) {
+        strlcpy(ready, "{}", sizeof(ready));
+    }
     snprintf(body, body_cap,
-             "{\"enabled\":%s,\"lastResult\":\"%s\",\"lastAt\":\"%s\",\"pending\":%d,\"telegram\":%s}",
-             st.enabled ? "true" : "false", res, st.last_at, st.pending, chats);
+             "{\"enabled\":%s,\"lastResult\":\"%s\",\"lastAt\":\"%s\",\"pending\":%d,\"ready\":%s,"
+             "\"telegram\":%s}",
+             st.enabled ? "true" : "false", res, st.last_at, st.pending, ready, chats);
     free(chats);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -2861,7 +2866,7 @@ static esp_err_t api_notify_test_post(httpd_req_t *req)
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
     }
-    kvm_notify_send("ESP-KVM test", "If you can read this, notifications work.", true);
+    kvm_notify_send(KVM_NOTIFY_ALL, "ESP-KVM test", "If you can read this, notifications work.", true);
     httpd_resp_set_status(req, "202 Accepted");
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"queued\"}");

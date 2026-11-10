@@ -304,14 +304,18 @@ the details are in the two overlays. The screen comes on from the first boot.
 
 The stock firmware only takes GPG-signed updates, so ESP-KVM goes on over USB:
 
-1. `espefuse.py summary` first. If Secure Boot or flash encryption is burnt,
-   stop: the board will not run anything unsigned.
-2. In JetKVM's own settings, turn on "USB debugging". Without it the stock
-   firmware disconnects the USB Serial/JTAG port at start.
-3. Back up the whole flash: "Back up the flash" on the browser flasher, or
-   `esptool.py read_flash 0 0x1000000 jetkvm-mini.bin`. It is the only way
-   back to the stock firmware.
-4. Flash ESP-KVM over that port (the browser flasher or `idf.py flash`).
+1. In JetKVM's own web interface, Settings, Advanced, turn on "USB Debugging"
+   and restart. Without it the stock firmware disconnects the USB Serial/JTAG
+   port about 1.8 s after a power-on.
+2. Unplug the target and connect the EXT port (Power EXT) to the computer with
+   a data cable. That port is the USB Serial/JTAG and powers the Mini.
+3. `espefuse.py summary`. If Secure Boot or flash encryption is burnt, stop:
+   the board will not run anything unsigned.
+4. Back up the whole flash: "Back up the flash" on the browser flasher, or
+   `esptool.py read_flash 0 0x1000000 jetkvm-mini.bin`. It keeps the device's
+   own settings. JetKVM also publishes a recovery image per model
+   (jetkvm.com/docs/advanced-usage/factory-reset-mini).
+5. Flash ESP-KVM over that port (the browser flasher or `idf.py flash`).
 
 On the Mini W the C5 keeps JetKVM's esp-hosted (2.12.3); nothing on it is
 reflashed. Whether this firmware's esp-hosted host talks to it is the first

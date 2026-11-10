@@ -10,6 +10,8 @@
  * here; how those pixels become bytes on the wire lives in the codec modules.
  */
 #include "capture_priv.h"
+
+#include <inttypes.h>
 #include "kvm_regions.h"
 #include "capture.h"
 #include "fps_gate.h"
@@ -286,6 +288,26 @@ static void regions_tick(capture_ctx_t *c, const void *src)
     kvm_regions_scan(&f);
 }
 
+bool capture_read_newest(capture_ctx_t *c, capture_frame_fn_t fn)
+{
+    portENTER_CRITICAL(&c->fb_lock);
+    const int hidx = c->ready_fb_idx;
+    c->held_fb_idx = hidx;
+    portEXIT_CRITICAL(&c->fb_lock);
+    if (hidx < 0) {
+        return false;
+    }
+    void *src = c->fb[hidx];
+    const bool ok = esp_cache_msync(src, c->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C) == ESP_OK;
+    if (ok) {
+        fn(c, src);
+    }
+    portENTER_CRITICAL(&c->fb_lock);
+    c->held_fb_idx = -1;
+    portEXIT_CRITICAL(&c->fb_lock);
+    return ok;
+}
+
 /* With nobody watching nothing is encoded. An area that reports somewhere
    still gets its look: hold the newest frame, at the areas' own pace. */
 static void regions_idle(capture_ctx_t *c)
@@ -293,20 +315,7 @@ static void regions_idle(capture_ctx_t *c)
     if (!c->signal_present || !kvm_regions_due_unwatched()) {
         return;
     }
-    portENTER_CRITICAL(&c->fb_lock);
-    const int hidx = c->ready_fb_idx;
-    c->held_fb_idx = hidx;
-    portEXIT_CRITICAL(&c->fb_lock);
-    if (hidx < 0) {
-        return;
-    }
-    void *src = c->fb[hidx];
-    if (esp_cache_msync(src, c->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C) == ESP_OK) {
-        regions_tick(c, src);
-    }
-    portENTER_CRITICAL(&c->fb_lock);
-    c->held_fb_idx = -1;
-    portEXIT_CRITICAL(&c->fb_lock);
+    (void)capture_read_newest(c, regions_tick);
 }
 
 void capture_loop_run(capture_ctx_t *c)
@@ -393,8 +402,15 @@ void capture_loop_run(capture_ctx_t *c)
             if (!c->signal_present || c->mode_too_fast) {
                 continue; /* too fast was said once, by the monitor */
             }
-            ESP_LOGW(CAPTURE_LOG_TAG, "csi frame wait timeout (dma_done_irqs=%lu)",
-                     (unsigned long)c->csi_dma_done_irqs);
+            /* The link state says whether the bridge transmits at all: with
+               clk_hs=0 and every lane stopped, nothing arrives on the ribbon. */
+            capture_csi_link_t link;
+            capture_hw_csi_link(&link);
+            ESP_LOGW(CAPTURE_LOG_TAG,
+                     "csi frame wait timeout (dma_done_irqs=%lu, clk_hs=%u, stop d0=%u d1=%u clk=%u, "
+                     "phy_err=0x%08" PRIx32 ")",
+                     (unsigned long)c->csi_dma_done_irqs, link.clk_hs, link.stop_d0, link.stop_d1,
+                     link.stop_clk, link.phy_err);
 #if CONFIG_KVM_TC358743_ADV_DEBUG
             static uint32_t s_csi_timeout_logs;
             capture_debug_csi_timeout(c, capture_csi_bpp(), c->frame_bytes);
@@ -486,6 +502,7 @@ void capture_loop_run(capture_ctx_t *c)
              * screen exists for exactly this state, so give it the frame. */
             capture_screentext_idle(c);
             regions_idle(c);
+            capture_thumb_idle(c);
             continue;
         }
 
@@ -526,6 +543,7 @@ void capture_loop_run(capture_ctx_t *c)
             if (now - last_mjpeg_us < 250000 && !video_frame_wanted(lead_us)) {
                 capture_screentext_idle(c);
                 regions_idle(c);
+                capture_thumb_idle(c);
                 continue;
             }
             last_mjpeg_us = now;
@@ -613,6 +631,7 @@ void capture_loop_run(capture_ctx_t *c)
             capture_screentext_tick(c, src);
             capture_flat_tick(c, src);
             regions_tick(c, src);
+            capture_thumb_tick(c, src);
         }
 
 #if CAPTURE_YUV_SWAP
@@ -666,6 +685,7 @@ void capture_loop_run(capture_ctx_t *c)
                 capture_screentext_tick(c, src);
                 capture_flat_tick(c, src);
                 regions_tick(c, src);
+                capture_thumb_tick(c, src);
                 capture_snapshot_tick(c, src);
             }
             early_next = true;

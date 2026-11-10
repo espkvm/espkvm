@@ -26,6 +26,7 @@
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
+#include "esp_timer.h"
 #include "esp_cache.h"
 #include "esp_private/esp_cache_private.h"
 #include "esp_heap_caps.h"
@@ -49,7 +50,12 @@
 #define LCD_CENTER 120
 #define FB_PIXELS (LCD_W * LCD_H)
 
-#define STATUS_SCREENS 3
+#define STATUS_SCREENS 3 /* network, video, health; the picture is a fourth */
+#define PICTURE_PAGE 3
+/* How often the picture page redraws: ten times a second, or twice while a
+   browser is watching, so the panel never takes PSRAM time from the stream. */
+#define PICTURE_MS 100
+#define PICTURE_WATCHED_MS 500
 #define SPLASH_TICKS 4 /* first half: version card, second half: espkvm logo */
 /* Rows per SPI transfer; see flush() for why the frame is not sent in one go. */
 #define FLUSH_BAND_ROWS 24
@@ -64,8 +70,10 @@ typedef struct {
     uint32_t presses; /* page_presses last acted on */
     bool primed;      /* presses taken from the first status, not acted on */
     uint8_t screen;
-    uint8_t tick;
+    int64_t page_us; /* when the current page came up, for the dwell */
     uint8_t splash;
+    uint8_t viewers; /* from the last status, for next_render_ms() */
+    uint16_t *pic;   /* the picture page's copy of the screen, made on first use */
 } gc9a01_ctx_t;
 
 /* RGB565, byte-swapped so the buffer can go straight to the panel (which wants
@@ -539,6 +547,99 @@ static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     }
 }
 
+/* One pixel of a byte-swapped RGB565 buffer as 8-bit channels. */
+static inline void px_rgb(uint16_t v, int *r, int *g, int *b)
+{
+    v = (uint16_t)((v >> 8) | (v << 8));
+    *r = (v >> 8) & 0xf8;
+    *g = (v >> 3) & 0xfc;
+    *b = (v << 3) & 0xf8;
+}
+
+/* Draw a byte-swapped RGB565 picture into the frame at a new size, bilinear:
+   the PPA scales only in sixteenths, so the last step to the panel's own box
+   is done here. A same-size picture is a plain copy. */
+static void blit_scaled(uint16_t *fb, int dx, int dy, int dw, int dh, const uint16_t *src, int sw,
+                        int sh)
+{
+    if (dw == sw && dh == sh) {
+        for (int y = 0; y < dh; y++) {
+            memcpy(fb + (size_t)(dy + y) * LCD_W + dx, src + (size_t)y * sw, (size_t)sw * 2u);
+        }
+        return;
+    }
+    for (int y = 0; y < dh; y++) {
+        const int fy = (int)(((int64_t)y * (sh - 1) << 8) / (dh > 1 ? dh - 1 : 1));
+        const int y0 = fy >> 8, ty = fy & 0xff;
+        const int y1 = y0 + 1 < sh ? y0 + 1 : y0;
+        for (int x = 0; x < dw; x++) {
+            const int fx = (int)(((int64_t)x * (sw - 1) << 8) / (dw > 1 ? dw - 1 : 1));
+            const int x0 = fx >> 8, tx = fx & 0xff;
+            const int x1 = x0 + 1 < sw ? x0 + 1 : x0;
+            int r[4], gr[4], b[4];
+            px_rgb(src[y0 * sw + x0], &r[0], &gr[0], &b[0]);
+            px_rgb(src[y0 * sw + x1], &r[1], &gr[1], &b[1]);
+            px_rgb(src[y1 * sw + x0], &r[2], &gr[2], &b[2]);
+            px_rgb(src[y1 * sw + x1], &r[3], &gr[3], &b[3]);
+#define LERP2(a) ((((a[0] * (256 - tx) + a[1] * tx) * (256 - ty)) + ((a[2] * (256 - tx) + a[3] * tx) * ty)) >> 16)
+            fb[(size_t)(dy + y) * LCD_W + dx + x] = rgb((uint8_t)LERP2(r), (uint8_t)LERP2(gr), (uint8_t)LERP2(b));
+#undef LERP2
+        }
+    }
+}
+
+/*
+ * The picture page: the target's screen, small. On the square panel it spans
+ * the width between the corners, on the round one it is the largest
+ * rectangle inside the ring. Without a signal, or when no frame comes, it is
+ * the video page instead, which says why.
+ */
+static void render_picture(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+{
+    const uint16_t bg = rgb(8, 10, 14);
+    const uint16_t grey = rgb(140, 150, 165);
+    int sw = 0, sh = 0;
+    if (!g->pic) {
+        g->pic = heap_caps_malloc(FB_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    }
+    if (!st->video_signal || !g->pic ||
+        kvm_display_picture(g->pic, LCD_W, LCD_H, &sw, &sh) != ESP_OK || sw < 2 || sh < 2) {
+        g->screen = 1;
+        render_status(g, st);
+        g->screen = PICTURE_PAGE;
+        return;
+    }
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%ux%u", (unsigned)st->hres, (unsigned)st->vres);
+    fill(g->fb, bg);
+    int dw, dh, dx, dy;
+    if (g->square) {
+        /* Between the top and bottom corners: 36 rows each. */
+        const int box_h = LCD_H - 2 * 36;
+        dw = LCD_W;
+        dh = sh * dw / sw;
+        if (dh > box_h) {
+            dh = box_h;
+            dw = sw * dh / sh;
+        }
+        dx = (LCD_W - dw) / 2;
+        dy = 36 + (box_h - dh) / 2;
+        blit_scaled(g->fb, dx, dy, dw, dh, g->pic, sw, sh);
+        text_centered(g->fb, 10, buf, 1, grey);
+    } else {
+        /* The rectangle of this shape whose corners touch a circle of radius
+           106, just inside the ring. */
+        const float diag = sqrtf((float)(sw * sw + sh * sh));
+        dw = (int)(212.0f * (float)sw / diag);
+        dh = sh * dw / sw;
+        dx = (LCD_W - dw) / 2;
+        dy = (LCD_H - dh) / 2;
+        blit_scaled(g->fb, dx, dy, dw, dh, g->pic, sw, sh);
+        ring(g->fb, 118, 8, rgb(90, 210, 120));
+        text_centered(g->fb, dy + dh + 8, buf, 1, grey);
+    }
+}
+
 /* The backlight on a PWM, so its brightness can be set. LEDC timer 1 and
    channel 1: the pin probe in kvm_web uses timer 3 and channel 7. */
 #define BL_TIMER LEDC_TIMER_1
@@ -710,9 +811,42 @@ static esp_err_t flush(gc9a01_ctx_t *g)
     return ESP_OK;
 }
 
+/* The status pages and, when asked for, the picture. */
+static uint8_t page_count(const kvm_display_status_t *st)
+{
+    return st->picture_page ? STATUS_SCREENS + 1 : STATUS_SCREENS;
+}
+
+static void render_page(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+{
+    if (g->screen == PICTURE_PAGE) {
+        render_picture(g, st);
+    } else {
+        render_status(g, st);
+    }
+    if (g->square) {
+        render_corners(g, st);
+    }
+}
+
+static uint32_t next_render_ms(void *ctx)
+{
+    const gc9a01_ctx_t *g = ctx;
+    if (g->screen != PICTURE_PAGE || g->splash) {
+        return 0;
+    }
+    return g->viewers ? PICTURE_WATCHED_MS : PICTURE_MS;
+}
+
 static esp_err_t render(void *ctx, const kvm_display_status_t *status)
 {
     gc9a01_ctx_t *g = ctx;
+    const int64_t now = esp_timer_get_time();
+    g->viewers = status->viewers;
+    if (g->screen >= page_count(status)) {
+        g->screen = 0; /* the picture page was switched off while up */
+        g->page_us = now;
+    }
     backlight_set(g, (int)kvm_setting_int("disp_bright"));
     if (status->notice[0]) {
         /* A notice arriving mid-splash ends the splash: by the time it clears,
@@ -730,12 +864,9 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
     if (status->page_presses != g->presses) {
         g->presses = status->page_presses;
         g->splash = 0;
-        g->tick = 0;
-        g->screen = (uint8_t)((g->screen + 1) % STATUS_SCREENS);
-        render_status(g, status);
-        if (g->square) {
-            render_corners(g, status);
-        }
+        g->page_us = now;
+        g->screen = (uint8_t)((g->screen + 1) % page_count(status));
+        render_page(g, status);
         return flush(g);
     }
     if (g->splash > 0) {
@@ -743,14 +874,17 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
         render_splash(g, status);
         return flush(g);
     }
-    render_status(g, status);
-    if (g->square) {
-        render_corners(g, status);
+    if (!g->page_us) {
+        g->page_us = now;
     }
+    render_page(g, status);
     esp_err_t err = flush(g);
-    if (status->dwell_s && ++g->tick >= status->dwell_s) {
-        g->tick = 0;
-        g->screen = (uint8_t)((g->screen + 1) % STATUS_SCREENS);
+    /* By the clock, not by renders: the picture page renders ten times a
+       second. Half a second early, so a page drawn once a second still gets
+       its full count of renders. */
+    if (status->dwell_s && now - g->page_us >= (int64_t)status->dwell_s * 1000000 - 500000) {
+        g->page_us = now;
+        g->screen = (uint8_t)((g->screen + 1) % page_count(status));
     }
     return err;
 }
@@ -775,6 +909,7 @@ static void detach(void *ctx)
         }
         gpio_set_level(g->bl, 0);
     }
+    free(g->pic);
     free(g->fb);
     free(g);
 }
@@ -795,6 +930,7 @@ const kvm_display_driver_t kvm_display_gc9a01 = {
     .attach = attach_gc9a01,
     .render = render,
     .detach = detach,
+    .next_render_ms = next_render_ms,
 };
 
 const kvm_display_driver_t kvm_display_st7789 = {
@@ -803,6 +939,7 @@ const kvm_display_driver_t kvm_display_st7789 = {
     .attach = attach_st7789,
     .render = render,
     .detach = detach,
+    .next_render_ms = next_render_ms,
 };
 
 #endif /* CONFIG_KVM_ENABLE_DISPLAY */

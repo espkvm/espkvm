@@ -4,6 +4,23 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.81.0] - 2026-11-10
+
+### Added
+- Uploading recordings and screenshots to a WebDAV folder: Nextcloud, a NAS share or any WebDAV server. Set the folder in Settings, Video, Upload, then press Upload beside a file or Upload all in the recordings panel. The device sends the files itself, one at a time, into a folder named after it, and the panel shows how far each one got. Files can also go on their own as soon as they are saved: tick recordings, clips saved by hand, dashcam clips, screenshots or timelapses in Settings, Video, Upload automatically. Files that wait are kept in a list on the card, so a restart or a power cut does not lose them. When the server does not answer, the queue waits and tries again, from half a minute up to ten minutes. While someone watches the picture, an upload slows to about 1 MB/s.
+- A picture page for a colour status display: a small live copy of the target's screen, on the round GC9A01 and on the JetKVM Mini's screen. It redraws ten times a second, or twice while a browser is watching. Off by default, in Settings, Display, Picture page.
+
+### Changed
+- In full screen with the keyboard lock on, Esc goes to the target, so vi and other programs that need it work. Holding Esc leaves full screen and gives control back. In a window, and in Firefox and Safari, Esc gives control back as before. Chrome and Edge only.
+- The "All keys" button is now a keyboard with a padlock.
+- When frames stop arriving, the log line (`csi frame wait timeout`) now also says whether the capture board sends anything: `clk_hs=1` means its clock lane runs, `clk_hs=0` with every lane stopped means nothing comes down the ribbon.
+- Notifications: a table in Settings, Notifications picks what goes where, a row per event and a column per channel (Telegram, webhook, browsers). A browser can get only the Tailscale key reminder, say, while Telegram gets everything. The old switches for a watched phrase, a blank screen and dashcam clips are carried over into it.
+
+### Fixed
+- Find a setting did not look at the group names, so "upload" missed the user name and the password under Upload. It does now.
+- The help in the console said a Telegram alert carries a screenshot only with MJPEG. It comes with either codec.
+- H.264 could drop to MJPEG until a restart after the picture went blocky on a long-running device. The encoder rebuild checked the wrong kind of free memory, started without room and failed. It now checks the memory the encoder really needs, and when that is not free it leaves the old encoder running.
+
 ## [0.80.0] - 2026-11-09
 
 ### Added

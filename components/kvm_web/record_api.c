@@ -25,6 +25,7 @@
 #include "kvm_auth.h"
 #include "kvm_record.h"
 #include "kvm_storage.h"
+#include "kvm_upload.h"
 #include "web_priv.h"
 
 #define TAG "web"
@@ -311,6 +312,8 @@ static esp_err_t captures_get(httpd_req_t *req)
         cJSON_AddItemToObject(root, "video", list_dir(KVM_RECORD_DIR, ".ts", ".mp4"));
         cJSON_AddItemToObject(root, "screenshots", list_dir(KVM_SCREENSHOT_DIR, ".jpg", NULL));
     }
+    /* The console offers Upload only with somewhere to send it. */
+    cJSON_AddBoolToObject(root, "canUpload", !blocked && kvm_upload_ready());
     /* No deleting while a recording runs: it would rewrite the FAT under it. */
     cJSON_AddBoolToObject(root, "canDelete", !blocked && !kvm_record_active() && kvm_storage_writable());
     char *body = cJSON_PrintUnformatted(root);
@@ -630,6 +633,91 @@ static esp_err_t captures_delete_post(httpd_req_t *req)
     return captures_get(req);
 }
 
+/*
+ * Uploading to the operator's WebDAV folder (kvm_upload).
+ *
+ *   POST /api/v1/captures/upload?path=VIDEO/x.ts   queue one file (its .srt goes too)
+ *
+ * With up_dav_ev set, kvm_record queues finished files by itself.
+ *   GET  /api/v1/captures/upload                   the queue and how each file went
+ *   POST /api/v1/captures/upload/cancel
+ *   POST /api/v1/captures/upload/test              make the device's folder there
+ *
+ * The path is checked the same way as a download, so only what the recorder
+ * and the screenshot button wrote can leave the card.
+ */
+static esp_err_t send_upload_status(httpd_req_t *req)
+{
+    const size_t cap = 8192;
+    char *body = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!body) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    if (!kvm_upload_status_json(body, cap)) {
+        free(body);
+        return send_json_error(req, "500 Internal Server Error", "status too long");
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t r = httpd_resp_sendstr(req, body);
+    free(body);
+    return r;
+}
+
+static esp_err_t upload_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    return send_upload_status(req);
+}
+
+static esp_err_t upload_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    const char *blocked = files_blocked();
+    if (blocked) {
+        return send_json_error(req, "409 Conflict", blocked);
+    }
+    char rel[80];
+    bool video = false;
+    if (!path_from_query(req, rel, sizeof(rel), &video)) {
+        return send_json_error(req, "400 Bad Request", "missing or invalid ?path=");
+    }
+    (void)video;
+    /* A recording's subtitles go with it: kvm_upload adds them. */
+    esp_err_t err = kvm_upload_queue(rel);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict", "no upload folder is set (Settings, Video, Upload)");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "503 Service Unavailable", "the upload queue is full");
+    }
+    return send_upload_status(req);
+}
+
+static esp_err_t upload_cancel_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    kvm_upload_cancel();
+    return send_upload_status(req);
+}
+
+static esp_err_t upload_test_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    if (kvm_upload_test() == ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict", "no upload folder is set");
+    }
+    return send_upload_status(req);
+}
+
 static const httpd_uri_t s_routes[] = {
     {.uri = "/api/v1/record/status", .method = HTTP_GET, .handler = record_status_get},
     {.uri = "/api/v1/record/start", .method = HTTP_POST, .handler = record_start_post},
@@ -640,6 +728,10 @@ static const httpd_uri_t s_routes[] = {
     {.uri = "/api/v1/captures/file", .method = HTTP_GET, .handler = captures_file_get},
     {.uri = "/api/v1/captures/search", .method = HTTP_GET, .handler = captures_search_get},
     {.uri = "/api/v1/captures/delete", .method = HTTP_POST, .handler = captures_delete_post},
+    {.uri = "/api/v1/captures/upload", .method = HTTP_GET, .handler = upload_get},
+    {.uri = "/api/v1/captures/upload", .method = HTTP_POST, .handler = upload_post},
+    {.uri = "/api/v1/captures/upload/cancel", .method = HTTP_POST, .handler = upload_cancel_post},
+    {.uri = "/api/v1/captures/upload/test", .method = HTTP_POST, .handler = upload_test_post},
 };
 
 const httpd_uri_t *record_api_routes(size_t *count)

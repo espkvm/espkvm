@@ -76,6 +76,11 @@ void *__wrap_esp_h264_aligned_malloc(uint32_t alignment, uint32_t n, uint32_t si
     return __real_esp_h264_aligned_malloc(alignment, n, size, actual_size, caps);
 }
 
+bool h264_ref_pool_ready(void)
+{
+    return s_pool && s_pool_len >= REF_POOL_BYTES;
+}
+
 /* In IRAM like heap_caps_free itself: it is called with the flash cache off. */
 void IRAM_ATTR __wrap_heap_caps_free(void *ptr)
 {

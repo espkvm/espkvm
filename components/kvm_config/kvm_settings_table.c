@@ -54,6 +54,18 @@
 #endif
 
 static const char *const s_codec_choices[] = {"mjpeg", "h264"};
+/* Kinds of notification, bit 0 first: the order of kvm_notify_ev_t. */
+static const char *const s_notify_ev[] = {"watch", "flat", "area", "clip", "netlog", "tskey"};
+static const char *const s_notify_ev_labels[] = {
+    "A watched phrase on the screen", "Blank screen", "Screen area", "Dashcam clip",
+    "Target log alert", "Tailscale key running out"};
+#define NOTIFY_EV_ALL ((1 << 6) - 1)
+#define NOTIFY_EV_DEF (NOTIFY_EV_ALL & ~(1 << 1)) /* all but the blank screen */
+/* Must match kvm_upload_kind_t: the bit for each kind is 1 << its value. */
+static const char *const s_up_ev[] = {"recording", "clip", "dashcam", "screenshot", "timelapse"};
+static const char *const s_up_ev_labels[] = {
+    "Recording", "Clip saved by hand", "Dashcam clip", "Screenshot", "Timelapse"};
+#define UP_EV_ALL ((1 << 5) - 1)
 static const char *const s_rec_subs_choices[] = {"off", "keys", "everything"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "720p", "1024x768", "480p", "1080p50"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
@@ -90,22 +102,23 @@ static const char *const s_display_choices[] = {
    pins show for both; the OLED's own I2C pins for everything else. */
 #define DISP_SPI_TYPES ((1 << 2) | (1 << 15))
 /* A built-in panel (the JetKVM Mini): its type and pins are not the
-   operator's to change, so they never show, and the brightness hangs on the
-   display being on rather than on a type that is hidden. */
+   operator's to change, so they never show, and the colour-panel settings
+   (brightness, the picture page) hang on the display being on rather than on
+   a type that is hidden. */
 #if CONFIG_KVM_DISP_FIXED
 #define DISP_TYPE_SHOW 2           /* disp_enable never equals 2 */
 #define DISP_PIN_SHOW 0            /* in no type */
 #define DISP_OLED_SHOW 0x7fffffff  /* notIn every type */
-#define DISP_BRIGHT_KEY "disp_enable"
-#define DISP_BRIGHT_VAL 1
-#define DISP_BRIGHT_FLAGS 0
+#define DISP_COLOUR_KEY "disp_enable"
+#define DISP_COLOUR_VAL 1
+#define DISP_COLOUR_FLAGS 0
 #else
 #define DISP_TYPE_SHOW 1
 #define DISP_PIN_SHOW DISP_SPI_TYPES
 #define DISP_OLED_SHOW DISP_SPI_TYPES
-#define DISP_BRIGHT_KEY "disp_type"
-#define DISP_BRIGHT_VAL DISP_SPI_TYPES
-#define DISP_BRIGHT_FLAGS KVM_SF_SHOW_IN
+#define DISP_COLOUR_KEY "disp_type"
+#define DISP_COLOUR_VAL DISP_SPI_TYPES
+#define DISP_COLOUR_FLAGS KVM_SF_SHOW_IN
 #endif
 #ifndef CONFIG_KVM_BTN_COUNT
 #define CONFIG_KVM_BTN_COUNT 4
@@ -341,6 +354,39 @@ static const kvm_setting_t s_settings[] = {
                 "recordings panel, keeps: one frame this often, played back at 25 fps.",
         .min = 1, .max = 3600, .def = 10, .requires_cap = KVM_CAP_H264,
         .unit = "s",
+    },
+    /* Uploading recordings and screenshots: a destination of the operator's
+       own. WebDAV is the first; empty address = no upload buttons. */
+    {
+        .key = "up_dav_url", .section = "video", .group = "Upload", .type = KVM_VT_STR,
+        .title = "WebDAV folder",
+        .help = "Where the Upload button sends a recording or a screenshot: a folder on a WebDAV "
+                "server, such as https://cloud.example.com/remote.php/dav/files/me/espkvm/ on "
+                "Nextcloud, or a share on a NAS. Files go into a folder named after this device, "
+                "with VIDEO and SCREENSHOTS in it. HTTPS needs a certificate the device trusts; "
+                "plain http sends the password unencrypted, so keep it to your own network.",
+        .def_str = "", .max_len = 200, .requires_cap = -1,
+    },
+    {
+        .key = "up_dav_user", .section = "video", .group = "Upload", .type = KVM_VT_STR,
+        .title = "User name",
+        .help = "For the WebDAV server. Empty if it needs none.",
+        .def_str = "", .max_len = 64, .requires_cap = -1,
+    },
+    {
+        .key = "up_dav_pass", .section = "video", .group = "Upload", .type = KVM_VT_STR,
+        .title = "Password",
+        .help = "On Nextcloud, an app password made under Settings, Security.",
+        .def_str = "", .max_len = 128, .requires_cap = -1, .flags = KVM_SF_SECRET,
+    },
+    /* One column per destination in the console's table; WebDAV is the first. */
+    {
+        .key = "up_dav_ev", .section = "video", .group = "Upload automatically", .type = KVM_VT_INT,
+        .title = "WebDAV",
+        .help = "What goes to the WebDAV folder on its own, as soon as it is saved on the card. "
+                "Files wait on the card while the server cannot be reached, also over a restart.",
+        .min = 0, .max = UP_EV_ALL, .def = 0, .choices = s_up_ev, .labels = s_up_ev_labels,
+        .requires_cap = -1, .flags = KVM_SF_MASK,
     },
     {
         .key = "rec_subs", .section = "video", .group = "Recording", .type = KVM_VT_ENUM,
@@ -649,43 +695,21 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "[]", .max_len = 3000, .requires_cap = KVM_CAP_SCHED,
     },
     {
-        .key = "notify_enable", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
+        .key = "notify_enable", .section = "notify", .type = KVM_VT_BOOL,
         .title = "Send notifications",
-        .help = "Push a message when a watched phrase appears or the screen goes blank.",
+        .help = "Send a message when something happens on the target: a watched phrase, a "
+                "blank screen, a dashcam clip. The table below picks what goes where.",
         .def = 0, .requires_cap = KVM_CAP_NOTIFY,
     },
     {
-        .key = "notify_watch", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
-        .title = "On a screen-watch phrase",
-        .help = "Notify when one of the phrases the screen is watched for appears.",
-        .def = 1, .requires_cap = KVM_CAP_NOTIFY,
-        .visible_key = "notify_enable", .visible_val = 1,
-    },
-    {
-        .key = "notify_flat", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
-        .title = "On a blank screen",
-        .help = "Notify when the output stays one flat colour - a stop screen, a blanked display.",
-        .def = 0, .requires_cap = KVM_CAP_NOTIFY,
-        .visible_key = "notify_enable", .visible_val = 1,
-    },
-    {
-        .key = "notify_snap", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
+        .key = "notify_snap", .section = "notify", .type = KVM_VT_BOOL,
         .title = "Attach a screenshot",
-        .help = "Send the screen with the message.",
+        .help = "Send the screen with the message, where the channel can carry a picture.",
         .def = 1, .requires_cap = KVM_CAP_NOTIFY,
         .visible_key = "notify_enable", .visible_val = 1,
     },
     {
-        .key = "notify_clip", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
-        .title = "Send dashcam clips",
-        .help = "When the dashcam saves a clip, send it: to Telegram as a video that plays in "
-                "the chat (up to 50 MB; bigger ones are named instead), to the webhook as a "
-                "message with the file's name.",
-        .def = 1, .requires_cap = KVM_CAP_NOTIFY,
-        .visible_key = "notify_enable", .visible_val = 1,
-    },
-    {
-        .key = "notify_log", .section = "notify", .group = "When", .type = KVM_VT_BOOL,
+        .key = "notify_log", .section = "notify", .type = KVM_VT_BOOL,
         .title = "Attach recent log",
         .help = "Include the tail of the device log with the message - the context around an alert.",
         .def = 0, .requires_cap = KVM_CAP_NOTIFY,
@@ -714,6 +738,33 @@ static const kvm_setting_t s_settings[] = {
                 "with a \"log\" field added when the log tail is switched on above, sent as "
                 "application/json; anything answering 2xx counts as delivered. Optional.",
         .def_str = "", .max_len = 200, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
+    },
+    /* What goes where: a mask per channel, a bit per kind of event, in the
+       order of kvm_notify_ev_t. A test and the "alerts dropped" note go
+       everywhere. The blank screen starts off, as it always did. */
+    {
+        .key = "notify_tg_ev", .section = "notify", .group = "What goes where", .type = KVM_VT_INT,
+        .title = "Telegram",
+        .help = "A dashcam clip under 50 MB plays in the chat. A bigger one is named.",
+        .min = 0, .max = NOTIFY_EV_ALL, .def = NOTIFY_EV_DEF, .choices = s_notify_ev, .labels = s_notify_ev_labels,
+        .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_MASK,
+        .visible_key = "notify_enable", .visible_val = 1,
+    },
+    {
+        .key = "notify_hook_ev", .section = "notify", .group = "What goes where", .type = KVM_VT_INT,
+        .title = "Webhook",
+        .help = "A dashcam clip is named, with its file on the card.",
+        .min = 0, .max = NOTIFY_EV_ALL, .def = NOTIFY_EV_DEF, .choices = s_notify_ev, .labels = s_notify_ev_labels,
+        .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_MASK,
+        .visible_key = "notify_enable", .visible_val = 1,
+    },
+    {
+        .key = "notify_push_ev", .section = "notify", .group = "What goes where", .type = KVM_VT_INT,
+        .title = "Browsers",
+        .help = "Text only: a push message has no room for a picture.",
+        .min = 0, .max = NOTIFY_EV_ALL, .def = NOTIFY_EV_DEF, .choices = s_notify_ev, .labels = s_notify_ev_labels,
+        .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_MASK,
         .visible_key = "notify_enable", .visible_val = 1,
     },
 
@@ -1444,9 +1495,9 @@ static const kvm_setting_t s_settings[] = {
         .help = "When the screen watch fires, publish a still of the screen as a "
                 "camera in Home Assistant, so the notification carries what the "
                 "machine actually shows. The button is always there; this only "
-                "decides whether an alert takes a picture by itself. Needs the "
-                "MJPEG codec - there is no still to take while H.264 runs - and a "
-                "1080p frame is a few hundred kilobytes over the broker.",
+                "decides whether an alert takes a picture by itself. Works on "
+                "either codec, and a 1080p frame is a few hundred kilobytes over "
+                "the broker.",
         .def = 0, .requires_cap = -1,
         .visible_key = "mqtt_enable", .visible_val = 1,
     },
@@ -1652,8 +1703,8 @@ static const kvm_setting_t s_settings[] = {
         .help = "How bright the backlight of a colour SPI LCD is. Takes effect at once. "
                 "Needs the backlight pin set, and does nothing on the OLEDs.",
         .min = 5, .max = 100, .def = CONFIG_KVM_DISP_BRIGHT_DEFAULT, .unit = "%",
-        .requires_cap = -1, .flags = DISP_BRIGHT_FLAGS,
-        .visible_key = DISP_BRIGHT_KEY, .visible_val = DISP_BRIGHT_VAL,
+        .requires_cap = -1, .flags = DISP_COLOUR_FLAGS,
+        .visible_key = DISP_COLOUR_KEY, .visible_val = DISP_COLOUR_VAL,
     },
     {
         .key = "disp_dwell", .section = "display", .group = "Screen", .type = KVM_VT_INT,
@@ -1662,6 +1713,15 @@ static const kvm_setting_t s_settings[] = {
                 "until you press the display button.",
         .min = 0, .max = 60, .def = 4, .unit = "s", .requires_cap = -1,
         .visible_key = "disp_enable", .visible_val = 1,
+    },
+    {
+        .key = "disp_picture", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,
+        .title = "Picture page",
+        .help = "Adds a page with a small copy of the target's screen. It redraws ten "
+                "times a second, or twice while a browser is watching. Colour panels "
+                "only.",
+        .def = 0, .requires_cap = -1, .flags = DISP_COLOUR_FLAGS,
+        .visible_key = DISP_COLOUR_KEY, .visible_val = DISP_COLOUR_VAL,
     },
     {
         .key = "disp_rotate_180", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,

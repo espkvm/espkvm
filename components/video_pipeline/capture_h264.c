@@ -243,10 +243,43 @@ const char *h264_err_name(esp_h264_err_t err)
     }
 }
 
-/* What a working encoder took from internal RAM, measured on the open that
- * succeeded. A rebuild checks the longest free run against it. */
+/* What a working encoder took from internal RAM and PSRAM, measured on the
+ * open that succeeded. For the log: a rebuild checks enc_internal_need() and
+ * enc_psram_need(), which know which kind of memory each buffer wants. */
 static size_t s_enc_internal_bytes;
-static size_t s_enc_psram_bytes; /* PSRAM it took, measured the same way */
+static size_t s_enc_psram_bytes;
+
+/*
+ * The internal DMA memory a new encoder of this width needs in one run: the
+ * deblocking scratch (esp_h264_enc_hw_max_db_tmp_buffer_size() in esp_h264
+ * 1.5.0) and its descriptors, about 16 KB at 1920 wide. Plus the reference rows,
+ * 135 KB, only while h264_ref_pool.c does not hold them yet.
+ *
+ * DMA-capable, not just internal: RTC RAM and the TCM count as internal but the
+ * encoder cannot use them. Checking plain internal let a rebuild through with an
+ * 18 KB run that was the wrong kind, the scratch did not fit, and H.264 was gone
+ * until a restart (funcev 2026-11-09).
+ */
+static size_t enc_internal_need(uint32_t w)
+{
+    const size_t mbw = (w + 15u) / 16u;
+    size_t need = mbw * (16u * 4u + 8u * 4u * 2u) + 7u + 8u + 64u + 1024u;
+    if (!h264_ref_pool_ready()) {
+        need += 3u * 16u * (16u + 8u) * mbw + 7u;
+    }
+    return need;
+}
+
+/* The deblocking data, one run of about 3 MB at 1080p. It asks for internal
+ * first and lands in PSRAM, as max_db_buffer_size() in esp_h264 1.5.0. */
+static size_t enc_psram_need(uint32_t w, uint32_t h)
+{
+    const size_t mbw = (w + 15u) / 16u;
+    const size_t mbh = (h + 15u) / 16u;
+    const size_t row12 = 16u * 12u + 8u * 4u * 2u;
+    const size_t row4 = 16u * 4u + 8u * 4u * 2u;
+    return mbw * (mbh - 1u) * row12 + mbw * (row12 + row4) + mbw * (mbh - 1u) * row4 + 16u + 64u;
+}
 
 /*
  * Reserving the reference frame's block does not work on this chip, tried three
@@ -526,8 +559,10 @@ static esp_err_t encoder_open(uint32_t w, uint32_t h)
     const size_t psram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     s_enc_psram_bytes = psram_before > psram_after ? psram_before - psram_after : 0;
     ESP_LOGI(CAPTURE_LOG_TAG, "h264 encoder %" PRIu32 "x%" PRIu32 " @%" PRId32 " fps, %" PRIu32
-             " kbit/s, gop %u, %u KB internal, %u KB PSRAM", w, h, fps, s_bitrate / 1000u, s_gop,
-             (unsigned)(s_enc_internal_bytes / 1024), (unsigned)(s_enc_psram_bytes / 1024));
+             " kbit/s, gop %u, %u KB internal, %u KB PSRAM (a rebuild needs runs of %u and %u KB)",
+             w, h, fps, s_bitrate / 1000u, s_gop,
+             (unsigned)(s_enc_internal_bytes / 1024), (unsigned)(s_enc_psram_bytes / 1024),
+             (unsigned)(enc_internal_need(w) / 1024), (unsigned)(enc_psram_need(w, h) / 1024));
     return ESP_OK;
 }
 
@@ -557,24 +592,25 @@ static bool wedge_rebuild_if_needed(uint32_t w, uint32_t h)
     }
     /*
      * Only rebuild when the room for a new encoder is already free, without
-     * counting on the old one giving its block back. It does not always: the
-     * reference frame wants one contiguous internal run, and releasing a 135 KB
-     * block does not reliably leave a 135 KB hole. A rebuild that fails here
-     * costs the whole codec - the caller drops to MJPEG until the next restart -
-     * so a picture in blocks is the better of the two. Seen on the bench with
-     * 314 KB free and the longest run 132 KB.
+     * counting on the old one giving its blocks back. It does not always:
+     * releasing a block does not reliably leave a hole of that size for the
+     * next request. A rebuild that fails here costs the whole codec - the
+     * caller drops to MJPEG until the next restart - so a picture in blocks is
+     * the better of the two. Seen on the bench with 314 KB free and the longest
+     * run 132 KB.
      */
-    /* PSRAM the same way: its reference frame is one run of about 3 MB at
+    /* PSRAM the same way: the deblocking data is one run of about 3 MB at
        1080p, and after a day of recordings and uploads the longest free run
        can be just under that (3008 KB, funcev 2026-10-26). */
-    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    const size_t need = enc_internal_need(w);
+    const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    const size_t need_ps = enc_psram_need(w, h);
     const size_t largest_ps = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
-    if ((s_enc_internal_bytes && largest < s_enc_internal_bytes) ||
-        (s_enc_psram_bytes && largest_ps < s_enc_psram_bytes)) {
+    if (largest < need || largest_ps < need_ps) {
         ESP_LOGW(CAPTURE_LOG_TAG,
                  "keyframes fell, but a new encoder needs %u KB internal and %u KB PSRAM and the "
                  "longest free runs are %u and %u KB - leaving it alone",
-                 (unsigned)(s_enc_internal_bytes / 1024), (unsigned)(s_enc_psram_bytes / 1024),
+                 (unsigned)(need / 1024), (unsigned)(need_ps / 1024),
                  (unsigned)(largest / 1024), (unsigned)(largest_ps / 1024));
         s_wedged = false;
         s_idr_starved = 0;
