@@ -55,11 +55,12 @@
 
 static const char *const s_codec_choices[] = {"mjpeg", "h264"};
 /* Kinds of notification, bit 0 first: the order of kvm_notify_ev_t. */
-static const char *const s_notify_ev[] = {"watch", "flat", "area", "clip", "netlog", "tskey"};
+/* Must match kvm_notify_ev_t: append, never reorder. */
+static const char *const s_notify_ev[] = {"watch", "flat", "area", "clip", "netlog", "tskey", "release"};
 static const char *const s_notify_ev_labels[] = {
     "A watched phrase on the screen", "Blank screen", "Screen area", "Dashcam clip",
-    "Target log alert", "Tailscale key running out"};
-#define NOTIFY_EV_ALL ((1 << 6) - 1)
+    "Target log alert", "Tailscale key running out", "New firmware"};
+#define NOTIFY_EV_ALL ((1 << 7) - 1)
 #define NOTIFY_EV_DEF (NOTIFY_EV_ALL & ~(1 << 1)) /* all but the blank screen */
 /* Must match kvm_upload_kind_t: the bit for each kind is 1 << its value. */
 static const char *const s_up_ev[] = {"recording", "clip", "dashcam", "screenshot", "timelapse"};
@@ -740,6 +741,23 @@ static const kvm_setting_t s_settings[] = {
         .def_str = "", .max_len = 200, .requires_cap = KVM_CAP_NOTIFY,
         .visible_key = "notify_enable", .visible_val = 1,
     },
+    {
+        .key = "notify_ntfy_url", .section = "notify", .group = "Where", .type = KVM_VT_STR,
+        .title = "ntfy topic",
+        .help = "The topic to post to, such as https://ntfy.sh/a-long-name-nobody-guesses, or "
+                "a topic on your own ntfy server. Subscribe to the same topic in the ntfy app. "
+                "Anyone who knows a topic on ntfy.sh can read it, so pick a long name. Optional.",
+        .def_str = "", .max_len = 200, .requires_cap = KVM_CAP_NOTIFY,
+        .visible_key = "notify_enable", .visible_val = 1,
+    },
+    {
+        .key = "notify_ntfy_key", .section = "notify", .group = "Where", .type = KVM_VT_STR,
+        .title = "ntfy access token",
+        .help = "For a topic that needs a login: an access token (tk_...), or user:password. "
+                "Empty if it needs none.",
+        .def_str = "", .max_len = 100, .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_SECRET,
+        .visible_key = "notify_enable", .visible_val = 1,
+    },
     /* What goes where: a mask per channel, a bit per kind of event, in the
        order of kvm_notify_ev_t. A test and the "alerts dropped" note go
        everywhere. The blank screen starts off, as it always did. */
@@ -763,6 +781,15 @@ static const kvm_setting_t s_settings[] = {
         .key = "notify_push_ev", .section = "notify", .group = "What goes where", .type = KVM_VT_INT,
         .title = "Browsers",
         .help = "Text only: a push message has no room for a picture.",
+        .min = 0, .max = NOTIFY_EV_ALL, .def = NOTIFY_EV_DEF, .choices = s_notify_ev, .labels = s_notify_ev_labels,
+        .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_MASK,
+        .visible_key = "notify_enable", .visible_val = 1,
+    },
+    {
+        .key = "notify_ntfy_ev", .section = "notify", .group = "What goes where", .type = KVM_VT_INT,
+        .title = "ntfy",
+        .help = "The screenshot goes as an attachment where the server takes them, else the text alone. "
+                "A dashcam clip is named, with its file on the card.",
         .min = 0, .max = NOTIFY_EV_ALL, .def = NOTIFY_EV_DEF, .choices = s_notify_ev, .labels = s_notify_ev_labels,
         .requires_cap = KVM_CAP_NOTIFY, .flags = KVM_SF_MASK,
         .visible_key = "notify_enable", .visible_val = 1,
@@ -1173,6 +1200,40 @@ static const kvm_setting_t s_settings[] = {
         .visible_key = "net_mode", .visible_val = 0,
     },
     {
+        .key = "wifi2_ssid", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
+        .title = "Second WiFi network",
+        .help = "Another network the device knows, such as at a second site. With more than one, "
+                "it joins the strongest one in range, and moves on when that one goes. Optional.",
+        .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "net_mode", .visible_val = 0,
+    },
+    {
+        .key = "wifi2_pass", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
+        .title = "Second WiFi password",
+        .help = "Left blank for an open network. Stored write-only.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_SECRET | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "net_mode", .visible_val = 0,
+    },
+    {
+        .key = "wifi3_ssid", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
+        .title = "Third WiFi network",
+        .help = "Another network the device knows, such as at a second site. With more than one, "
+                "it joins the strongest one in range, and moves on when that one goes. Optional.",
+        .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "net_mode", .visible_val = 0,
+    },
+    {
+        .key = "wifi3_pass", .section = "network", .group = "WiFi", .type = KVM_VT_STR,
+        .title = "Third WiFi password",
+        .help = "Left blank for an open network. Stored write-only.",
+        .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_WIFI,
+        .flags = KVM_SF_SECRET | KVM_SF_REBOOT | KVM_SF_SHOW_NE,
+        .visible_key = "net_mode", .visible_val = 0,
+    },
+    {
         .key = "ap_open", .section = "network", .group = "WiFi", .type = KVM_VT_BOOL,
         .title = "Open hotspot (no password)",
         .help = "Run the device's hotspot with no password at all. Off, and with "
@@ -1538,8 +1599,9 @@ static const kvm_setting_t s_settings[] = {
                 "install it. With the project's own address it also tells check.espkvm.io, at "
                 "most once a day, this device's random id, its board, its version and the chip revision, so "
                 "the author can count the devices in use. The id is not taken from the hardware; "
-                "a settings reset makes a new one. The device never reaches out on its own - a "
-                "KVM that phones home is not what belongs in an isolated network.",
+                "erasing the flash makes a new one. The device itself asks only when New firmware "
+                "is ticked for a channel under Notifications: once a day, and it sends nothing "
+                "about itself when it does.",
         .def = 0, .requires_cap = KVM_CAP_OTA,
     },
     {

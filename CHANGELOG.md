@@ -4,6 +4,35 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.82.0] - 2026-11-11
+
+### Added
+- ntfy as a notification channel: a topic on ntfy.sh or on your own server, with an access token or a login where it needs one. The screenshot goes as an attachment, or the text alone where the server takes no attachments. A column of its own in the table under Settings, Notifications.
+- A notification when a new firmware release is out: a "New firmware" row in the table under Settings, Notifications, ticked for every channel to start with. With Offer firmware updates on, the device reads the update manifest once a day and sends one message per release, with a link to what changed. It is the only thing the device asks the internet by itself, and only while a channel is ticked for it. A table saved before, on the device or in a settings file, gets the new row ticked wherever the channel takes anything.
+- A Test button under each channel set up in the notification table, so trying ntfy does not also post to Telegram. In the API: `POST /api/v1/notify/test` with `{"channel":"notify_ntfy_ev"}`.
+- Up to three Wi-Fi networks in Settings, Network. The device joins the strongest one it can see, and tries them in turn when it sees none. A Find networks button under each name lists the networks in sight, and a click fills the name in. The scan needs Wi-Fi on (the wifi or auto network mode).
+- `GET /api/v1/video/status` has the CSI link state as `csi`, sampled about once a second while frames flow, for comparing a capture board that gives no picture with one that works. [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) says how to read it.
+
+### Fixed
+- The 0.81.0 note on the frame-timeout line had the meaning of the lane states wrong. Every lane stopped is what a working link reads between frames. A link where nothing reaches the P4 reads no lane stopped and no high-speed clock.
+- Alerts came without a screenshot on boards with less than 5 MB of PSRAM free, the Function EV among them. The check asked for room for the largest picture there could be, when taking it and again when reading it back from the card. It now asks for room for the picture it has.
+- A WebSocket outlived the sign-in it was opened under. After a logout, an expiry or a changed password, the socket stayed open, and a viewer's socket was then taken for the owner's, so it could type and click. Sockets now need a live sign-in, and a logout or a password change closes them.
+- After four wrong passwords the device slept up to 15 s before each answer, and the whole web server waited with it. Now it answers 429 straight away until the pause is over, and other requests go on. Wrong current passwords and wrong two-factor codes count the same way.
+- While the default password was still in force, a session could also make a viewing token and start two-factor setup. It can now only set the password.
+- A cross-site WebSocket with a very long Origin header got past the Origin check.
+- A viewer could not use WebRTC: the allow-list had the wrong path. Any signed-in session could also close another one's WebRTC stream by its number. A session can now only close its own.
+- A button set to change the network mode, the hotspot or the display crashed the device: its task stack was in PSRAM, and these actions write to flash.
+- A time zone longer than 39 characters made every schedule fire three times in its minute. A schedule that restarts the device also ran again after the restart, in the same minute.
+- A settings write with the same key twice could get a reserved pin past the pin check.
+- Deleting an image while the whole card was handed to the target could damage the card's filesystem. The pin probe could take the SD card or Ethernet offline until a restart. It now refuses pins the board uses.
+- A Wi-Fi network name with a quote or a control character broke the status JSON and the network list. A file name with a quote broke the upload answer.
+- Home Assistant updates ran on the system timer task, so a screenshot with an alert held up every other timer for seconds.
+- Changing the virtual media type now re-attaches the drive, as its help says.
+- In the console: on a Mac, a key pressed with Cmd stayed down on the target. A Ctrl or Alt locked on the touch keyboard stayed down after unlocking it. Clearing a number field saved 0. A settings file that failed half way left the device on the Default profile.
+
+### Changed
+- Resetting the settings no longer gives the device a new random id for the device count, so a reset device is not counted as a new one. Erasing the flash still makes a new id.
+
 ## [0.81.0] - 2026-11-10
 
 ### Added

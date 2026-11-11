@@ -183,6 +183,9 @@ static void wait_bridge_pixel_stream(const kvm_bridge_t *b, uint32_t timeout_ms)
     ESP_LOGW(CAPTURE_LOG_TAG, "HDMI lock wait %u ms - starting CSI anyway", (unsigned)timeout_ms);
 }
 
+static capture_csi_link_t s_link_last;
+static int64_t s_link_at_us; /* 0: never sampled */
+
 void capture_hw_csi_link(capture_csi_link_t *out)
 {
     const uint32_t rx = MIPI_CSI_HOST.phy_rx.val;
@@ -192,6 +195,19 @@ void capture_hw_csi_link(capture_csi_link_t *out)
     out->stop_d1 = (stop >> 1) & 1u;
     out->stop_clk = (stop >> 16) & 1u;
     out->phy_err = MIPI_CSI_HOST.int_st_phy_fatal.val | MIPI_CSI_HOST.int_st_phy.val;
+    s_link_last = *out; /* a torn read here costs one odd sample in a status JSON */
+    s_link_at_us = esp_timer_get_time();
+}
+
+bool capture_csi_link_last(capture_csi_link_t *out, uint32_t *age_ms)
+{
+    const int64_t at = s_link_at_us;
+    if (!at) {
+        return false;
+    }
+    *out = s_link_last;
+    *age_ms = (uint32_t)((esp_timer_get_time() - at) / 1000);
+    return true;
 }
 
 #if CONFIG_KVM_TC358743_ADV_DEBUG

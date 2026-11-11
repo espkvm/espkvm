@@ -137,6 +137,24 @@ void kvm_web_security_headers(httpd_req_t *req)
 static bool viewing_allowed(httpd_req_t *req, esp_err_t *out);
 
 /** Send a malloc'd JSON document and free it. NULL means the generator failed. */
+/* Copy @p in as the inside of a JSON string: quotes, backslashes and control
+ * bytes escaped. Stops short rather than cutting an escape in half. */
+static void json_esc(const char *in, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (const unsigned char *p = (const unsigned char *)(in ? in : ""); *p && o + 7 < cap; p++) {
+        if (*p == '"' || *p == '\\') {
+            out[o++] = '\\';
+            out[o++] = (char)*p;
+        } else if (*p < 0x20) {
+            o += (size_t)snprintf(out + o, cap - o, "\\u%04x", *p);
+        } else {
+            out[o++] = (char)*p;
+        }
+    }
+    out[o] = '\0';
+}
+
 static esp_err_t send_json_owned(httpd_req_t *req, char *json)
 {
     if (!json) {
@@ -656,8 +674,19 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
         snprintf(age, sizeof(age), "%u", (unsigned)st.frame_age_ms);
     }
 
-    /* Worst case with every string field full is about 1460. */
-    char body[1600];
+    /* The CSI link as last sampled: does the bridge send at all. */
+    char csi[128] = "";
+    capture_csi_link_t link;
+    uint32_t link_age;
+    if (capture_csi_link_last(&link, &link_age)) {
+        snprintf(csi, sizeof(csi),
+                 ",\"csi\":{\"clkHs\":%u,\"stop\":[%u,%u],\"stopClk\":%u,\"phyErr\":%" PRIu32
+                 ",\"ageMs\":%" PRIu32 "}",
+                 link.clk_hs, link.stop_d0, link.stop_d1, link.stop_clk, link.phy_err, link_age);
+    }
+
+    /* Worst case with every string field full is about 1560. */
+    char body[1720];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,\"audioHz\":%u,"
@@ -689,7 +718,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                         reloads the settings when this moves. */
                      "\"profile\":%u,"
                      /* The target's HDD LED, null when it is not wired. */
-                     "\"hdd\":%s}",
+                     "\"hdd\":%s%s}",
                      capture_source_power_known() ? "true" : "false",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
                      st.interlaced ? "true" : "false", (unsigned)st.input_hz,
@@ -716,7 +745,7 @@ static esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)rec.clips_converting, rec.last_clip, shot_blocked ? "\"" : "",
                      shot_blocked ? shot_blocked : "null", shot_blocked ? "\"" : "",
                      (unsigned)kvm_profiles_active(),
-                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false");
+                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false", csi);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
     }
@@ -862,6 +891,11 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
     if (!hostname || !hostname[0]) {
         hostname = CONFIG_KVM_MDNS_HOSTNAME;
     }
+    /* An SSID is any 32 bytes, and an old hostname was not checked. */
+    char hostname_j[6 * 31 + 1];
+    char ssid_j[6 * 32 + 1];
+    json_esc(hostname, hostname_j, sizeof(hostname_j));
+    json_esc(wifi.ssid, ssid_j, sizeof(ssid_j));
     esp_netif_t *netif = esp_netif_get_default_netif();
     esp_netif_ip_info_t ip4_info;
     char ip4[16] = "";
@@ -980,7 +1014,7 @@ static esp_err_t api_system_info_get(httpd_req_t *req)
                      kvm_thermal_state_name(kvm_thermal_state()),
                      net_up ? "true" : "false", net_mbps, net_mode, net_active,
                      has_eth ? "true" : "false",
-                     wifi.up ? "true" : "false", wifi.rssi, wifi.ssid, wifi.ap_clients, hostname,
+                     wifi.up ? "true" : "false", wifi.rssi, ssid_j, wifi.ap_clients, hostname_j,
                      ip4, ip4_backup, mac_str, ip6_json,
                      atx.enabled ? "true" : "false", atx.have_led ? "true" : "false",
                      atx.power_on ? "true" : "false", mqtt_on ? "true" : "false",
@@ -1543,7 +1577,13 @@ static bool image_name_ok(const char *name)
     if (!name || !name[0] || strlen(name) > IMAGE_NAME_MAX) {
         return false;
     }
-    return !strpbrk(name, "/\\") && !strstr(name, "..");
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+        if (*p < 0x20) {
+            return false;
+        }
+    }
+    /* FAT refuses " * : < > ? | too, and a quote would break the JSON answer. */
+    return !strpbrk(name, "/\\\"*:<>?|") && !strstr(name, "..");
 }
 
 /* Decode %XX escapes in place; a browser sends a space in a filename as %20.
@@ -2005,6 +2045,10 @@ static esp_err_t api_storage_delete_post(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
+    }
+    /* The whole card handed to the target, or a card this board only reads. */
+    if (!kvm_storage_writable()) {
+        return send_json_error(req, "409 Conflict", kvm_storage_write_unavailable_reason());
     }
     /* Freeing a large file rewrites the FAT under a recording's feet. */
     if (kvm_record_active()) {
@@ -2866,7 +2910,23 @@ static esp_err_t api_notify_test_post(httpd_req_t *req)
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
     }
-    kvm_notify_send(KVM_NOTIFY_ALL, "ESP-KVM test", "If you can read this, notifications work.", true);
+    /* {"channel":"notify_ntfy_ev"} tests one channel; no body tests them all. */
+    char channel[24] = "";
+    cJSON *j = read_json_body(req);
+    if (j) {
+        const cJSON *ch = cJSON_GetObjectItem(j, "channel");
+        if (cJSON_IsString(ch) && ch->valuestring) {
+            strlcpy(channel, ch->valuestring, sizeof(channel));
+        }
+        cJSON_Delete(j);
+    }
+    const esp_err_t err = kvm_notify_send_test(channel);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return send_json_error(req, "400 Bad Request", "no such channel");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "503 Service Unavailable", "the notification queue is full");
+    }
     httpd_resp_set_status(req, "202 Accepted");
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"status\":\"queued\"}");
@@ -3438,8 +3498,10 @@ static esp_err_t ws_input_handler(httpd_req_t *req)
 
     uint8_t buf[32];
     if (pkt.len > sizeof(buf)) {
-        ESP_LOGW(TAG, "ws frame too large %zu", (size_t)pkt.len);
-        return ESP_OK;
+        /* Its payload stays unread, and the next frame would be read from the
+         * middle of it: close instead. */
+        ESP_LOGW(TAG, "ws frame too large %zu: closing", (size_t)pkt.len);
+        return ESP_FAIL;
     }
     if (pkt.len) {
         memset(buf, 0, sizeof(buf));
@@ -4914,7 +4976,10 @@ static esp_err_t ws_pre_handshake(httpd_req_t *req)
      * here on. */
     uint8_t session[32];
     (void)kvm_auth_session_of(req, session);
-    kvm_auth_mark_socket(httpd_req_to_sockfd(req), session);
+    if (!kvm_auth_mark_socket(httpd_req_to_sockfd(req), session)) {
+        log_refusal("too many sockets");
+        return ESP_FAIL;
+    }
     return ESP_OK;
 }
 
@@ -4965,9 +5030,14 @@ static esp_err_t video_ws_handler(httpd_req_t *req)
      * have to guess.
      */
     uint8_t hello[8] = {0};
+    if (pkt.len > sizeof(hello)) {
+        return ESP_FAIL; /* left unread it would desync the socket: close */
+    }
     if (pkt.len) {
         pkt.payload = hello;
-        (void)httpd_ws_recv_frame(req, &pkt, sizeof(hello));
+        if (httpd_ws_recv_frame(req, &pkt, sizeof(hello)) != ESP_OK) {
+            return ESP_FAIL;
+        }
     }
     const int fd = httpd_req_to_sockfd(req);
     if (pkt.len >= 1 && hello[0] == WS_C2D_VIDEO_ACK) {

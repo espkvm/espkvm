@@ -549,6 +549,21 @@ static void replay_cues(int64_t from_us)
 
 /* Memory for the ring, sized to what PSRAM can spare: the dashcam's big one,
  * or a recording's small one. Under s_ctl. */
+/* Make a ring built in locals the live one, in one step under s_ring_mu: a
+ * memory-pressure ring_free() from the capture task must never see half of it. */
+static void ring_publish(uint8_t *buf, frame_ring_entry_t *ents, uint8_t *frame, size_t frame_cap,
+                         size_t bytes, bool lent)
+{
+    xSemaphoreTake(s_ring_mu, portMAX_DELAY);
+    s_ring_buf = buf;
+    s_ring_entries = ents;
+    s_frame = frame;
+    s_frame_cap = frame_cap;
+    s_ring_lent = lent;
+    frame_ring_init(&s_ring, buf, bytes, ents, RING_FRAMES);
+    xSemaphoreGive(s_ring_mu);
+}
+
 static bool ring_alloc(bool dashcam)
 {
     if (s_ring_buf) {
@@ -563,8 +578,8 @@ static bool ring_alloc(bool dashcam)
     size_t lent = 0;
     uint8_t *tail = capture_arena_borrow(min + FRAME_MAX, &lent);
     if (tail) {
-        s_ring_entries = heap_caps_malloc(RING_FRAMES * sizeof(frame_ring_entry_t), MALLOC_CAP_SPIRAM);
-        if (!s_ring_entries) {
+        frame_ring_entry_t *ents = heap_caps_malloc(RING_FRAMES * sizeof(frame_ring_entry_t), MALLOC_CAP_SPIRAM);
+        if (!ents) {
             capture_arena_give_back(tail);
             return false;
         }
@@ -572,11 +587,7 @@ static bool ring_alloc(bool dashcam)
         if (bytes > max) {
             bytes = max;
         }
-        s_ring_lent = true;
-        s_ring_buf = tail;
-        s_frame = tail + bytes; /* both 64-aligned: the region's pieces are */
-        s_frame_cap = FRAME_MAX;
-        frame_ring_init(&s_ring, s_ring_buf, bytes, s_ring_entries, RING_FRAMES);
+        ring_publish(tail, ents, tail + bytes, FRAME_MAX, bytes, true); /* both 64-aligned */
         ESP_LOGI(TAG, "frame ring: %u KB, in the codec region", (unsigned)(bytes / 1024));
         return true;
     }
@@ -623,26 +634,23 @@ static bool ring_alloc(bool dashcam)
         bytes = REC_RING_BYTES_MAX;
     }
     for (;;) {
-        s_frame_cap = bytes < FRAME_MAX ? bytes : FRAME_MAX;
-        s_ring_buf = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
-        s_ring_entries = heap_caps_malloc(RING_FRAMES * sizeof(frame_ring_entry_t), MALLOC_CAP_SPIRAM);
-        s_frame = heap_caps_malloc(s_frame_cap, MALLOC_CAP_SPIRAM);
-        const bool got = s_ring_buf && s_ring_entries && s_frame;
+        const size_t cap = bytes < FRAME_MAX ? bytes : FRAME_MAX;
+        uint8_t *buf = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+        frame_ring_entry_t *ents = heap_caps_malloc(RING_FRAMES * sizeof(frame_ring_entry_t), MALLOC_CAP_SPIRAM);
+        uint8_t *frame = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM);
+        const bool got = buf && ents && frame;
         if (got && (!keep || heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= keep)) {
+            ring_publish(buf, ents, frame, cap, bytes, false);
             break;
         }
-        heap_caps_free(s_ring_buf);
-        heap_caps_free(s_ring_entries);
-        heap_caps_free(s_frame);
-        s_ring_buf = NULL;
-        s_ring_entries = NULL;
-        s_frame = NULL;
+        heap_caps_free(buf);
+        heap_caps_free(ents);
+        heap_caps_free(frame);
         if (!got || bytes / 2 < min) {
             return false;
         }
         bytes /= 2;
     }
-    frame_ring_init(&s_ring, s_ring_buf, bytes, s_ring_entries, RING_FRAMES);
     ESP_LOGI(TAG, "frame ring: %u KB", (unsigned)(bytes / 1024));
     return true;
 }
@@ -1488,6 +1496,13 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
         /* The operator's recording takes the writer; the dashcam picks up again
          * after it. */
         stop_writer("a recording started");
+        if (s_active) {
+            /* The old writer is stuck on the card; a second one beside it
+             * would share and free the same buffers. */
+            snprintf(why, why_cap, "the recorder is busy");
+            xSemaphoreGive(s_ctl);
+            return ESP_ERR_INVALID_STATE;
+        }
     }
     if (card_free_bytes() < MIN_FREE_BYTES) {
         snprintf(why, why_cap, "the card is full");
@@ -1665,6 +1680,9 @@ static esp_err_t start(uint32_t max_seconds, const char *event_title, uint32_t p
     s_stop = false;
     (void)xSemaphoreTake(s_writer_done, 0);
     s_active = true;
+    /* A writer that finished after its stop gave up left a "done" behind; it
+     * must not stand in for this writer's. */
+    (void)xSemaphoreTake(s_writer_done, 0);
     if (xTaskCreate(writer_task, "kvm_rec_wr", 4096, NULL, WRITER_PRIO, NULL) != pdPASS) {
         fclose(s_file);
         s_file = NULL;

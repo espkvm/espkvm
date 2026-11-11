@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "http_recv.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 
@@ -146,15 +147,11 @@ static cJSON *read_body(httpd_req_t *req, esp_err_t *out)
         *out = send_json_error(req, "500 Internal Server Error", "no memory");
         return NULL;
     }
-    int got = 0;
-    while (got < (int)req->content_len) {
-        const int r = httpd_req_recv(req, body + got, req->content_len - got);
-        if (r <= 0) {
-            free(body);
-            *out = send_json_error(req, "400 Bad Request", "could not read the body");
-            return NULL;
-        }
-        got += r;
+    const int got = kvm_recv_all(req, body, (int)req->content_len);
+    if (got < 0) {
+        free(body);
+        *out = send_json_error(req, "400 Bad Request", "could not read the body");
+        return NULL;
     }
     body[got] = '\0';
     cJSON *j = cJSON_Parse(body);

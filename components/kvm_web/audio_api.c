@@ -294,8 +294,11 @@ static esp_err_t audio_ws_handler(httpd_req_t *req)
         audio_api_drop(fd);
         return ESP_OK;
     }
-    if (pkt.len == 0 || pkt.len > 16) {
+    if (pkt.len == 0) {
         return ESP_OK;
+    }
+    if (pkt.len > 16) {
+        return ESP_FAIL; /* left unread it would desync the socket: close */
     }
     uint8_t data[16];
     pkt.payload = data;

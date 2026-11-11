@@ -60,10 +60,24 @@ typedef struct {
  *
  * @param out     receives the version string, e.g. "v.0.40.1"
  * @param out_len size of @p out
- * @return ESP_OK, ESP_ERR_NOT_ALLOWED when the device may not fetch, or a
- *         failure from the request.
+ * @return ESP_OK, ESP_ERR_NOT_ALLOWED when the device may not ask
+ *         (fw_may_check), or a failure from the request.
  */
 esp_err_t fw_latest_version(char *out, size_t out_len);
+
+/**
+ * Whether the device may ask the manifest itself: "Let the device fetch
+ * releases itself" is on, or the update check is on and a notification
+ * channel takes "New firmware". Otherwise it never reaches out.
+ */
+bool fw_may_check(void);
+
+/**
+ * Check once a day whether a newer release is out, while fw_may_check() and a
+ * channel wants "New firmware", and send one notification per release. Once,
+ * after the notifications are up.
+ */
+void fw_watch_start(void);
 
 esp_err_t fw_install_start(const char *version, uint32_t trial_s);
 

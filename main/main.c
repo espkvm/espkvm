@@ -53,6 +53,7 @@
 #include "kvm_cec.h"
 #include "profile_auto.h"
 #include "kvm_sched.h"
+#include "fw_install.h"
 #include "runbook.h"
 #include "usb_hid.h"
 #include "video_frame.h"
@@ -128,7 +129,7 @@ static void on_setting_changed(const char *key, void *user)
         apply_log_level();
     }
     if (strcmp(key, "msc_enable") == 0 || strcmp(key, "msc_image") == 0 ||
-        strcmp(key, "*") == 0) {
+        strcmp(key, "msc_mode") == 0 || strcmp(key, "*") == 0) {
         apply_media_selection();
     }
     if (strncmp(key, "atx_", 4) == 0 || strcmp(key, "*") == 0) {
@@ -815,6 +816,8 @@ void app_main(void)
     kvm_regions_init();
     /* Push notifications, on their own low-priority task. */
     kvm_notify_init();
+    /* "New firmware": a daily look at the manifest, only when a channel asks. */
+    fw_watch_start();
     kvm_record_dashcam_init();
     /* Uploads that were still waiting when the device went down. */
     kvm_upload_start();

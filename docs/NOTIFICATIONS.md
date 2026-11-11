@@ -2,22 +2,23 @@
 
 The device can say something happened while nobody was watching: a watched
 phrase appeared on the screen, the screen went blank, a dashcam clip was saved,
-the tailnet key is about to run out. It sends that to Telegram, to a webhook,
-and to browsers (Web Push), in any mix. Everything here is set in the console under Settings &rarr;
-Notifications; `POST /api/v1/notify/test` sends a test one and
+the tailnet key is about to run out, a new firmware release is out. It sends that to Telegram, to a webhook,
+to browsers (Web Push) and to ntfy, in any mix. Everything here is set in the console under Settings &rarr;
+Notifications; `POST /api/v1/notify/test` sends a test one (to one channel
+with `{"channel":"notify_ntfy_ev"}`, the column's routing setting) and
 `GET /api/v1/notify/status` says how the last one went.
 
 ## What goes where
 
 Each channel takes the kinds of event its column in the table under Settings
 &rarr; Notifications ticks: a watched phrase on the screen, a blank screen, a
-screen area, a dashcam clip, a target log alert, the Tailscale key running out.
-Everything but the blank screen is ticked to start with. A test, and the note
+screen area, a dashcam clip, a target log alert, the Tailscale key running out,
+new firmware. Everything but the blank screen is ticked to start with. A test, and the note
 that alerts were dropped, go to every channel.
 
 In the settings API each column is an int, a bit per row in that order:
-`notify_tg_ev`, `notify_hook_ev`, `notify_push_ev` (bit 0 the watched phrase,
-bit 5 the Tailscale key). A new channel is a new column, with a file of its own
+`notify_tg_ev`, `notify_hook_ev`, `notify_push_ev`, `notify_ntfy_ev` (bit 0 the watched phrase,
+bit 5 the Tailscale key, bit 6 new firmware). A new channel is a new column, with a file of its own
 in `components/kvm_notify/`.
 
 ## Telegram
@@ -51,6 +52,21 @@ screenshot or log goes this way: a push message is a few hundred bytes.
 | `GET /api/v1/push` | the VAPID public key and the browsers |
 | `POST /api/v1/push/subscribe` | `{endpoint, keys: {p256dh, auth}, name}`, as `PushSubscription.toJSON()` gives it |
 | `POST /api/v1/push/remove` | `{id}` or `{endpoint}` |
+
+## ntfy
+
+Put a topic URL in **ntfy topic**: `https://ntfy.sh/a-long-name-nobody-guesses`,
+or a topic on your own ntfy server. Subscribe to the same topic in the ntfy app
+on the phone. A topic on ntfy.sh is readable by anyone who knows its name, so
+make the name long. For a topic behind a login, **ntfy access token** takes an
+access token (`tk_...`) or `user:password`.
+
+The text is the body of a `POST` and the title goes as `?title=`. A screenshot
+goes as an attachment: a `PUT` with the JPEG as the body and the text in
+`?message=`. A server that takes no attachments, which is the default on a
+self-hosted one, answers that with a 4xx, and then the same message goes again
+as text. A dashcam clip is named, with its file on the card, as for the
+webhook. Nothing about ntfy is installed or registered on the device.
 
 ## Webhook
 
@@ -112,6 +128,21 @@ or chat id, a 4xx from the webhook - is not retried. Telegram and the webhook
 are counted apart: if one went through, only the other is tried again.
 `GET /api/v1/notify/status` shows how many are waiting in `pending`. Switching
 notifications off clears the list, on the card too.
+
+## New firmware
+
+With **Offer firmware updates** on (Settings &rarr; System &rarr; Updates) and
+**New firmware** ticked for a channel, the device reads the update manifest
+once a day, the same address the console reads. When it names a newer release
+than the one running, the channels that take it get "ESP-KVM v.0.82.0 is out.
+This device runs v.0.81.0. Open the console to install it.", with a link to the
+release notes for the project's own builds. One message per release: the last
+one told about is kept in flash, so a restart does not repeat it.
+
+This is the one thing the device asks the internet by itself, and only because
+a channel was ticked for it, which needs a way out anyway. The request carries
+nothing about the device. With the box unticked, or the update check off, no
+request goes out. The first check comes an hour after boot.
 
 ## The tailnet key
 

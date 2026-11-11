@@ -22,6 +22,11 @@
 /* A screen JPEG we are willing to attach. Bigger than this and we send text
    only - a notification is not a place for a megabyte. */
 #define NOTIFY_PHOTO_MAX (2 * 1024 * 1024) /* a 1080p screenshot at quality 90 */
+/* What a screen JPEG usually takes, for the check before one is made. The
+   worst case above was asked for before, which a board with under 5 MB of
+   PSRAM free never had, so it never sent a picture. The real size is checked
+   once the JPEG exists. */
+#define NOTIFY_PHOTO_TYPICAL (512 * 1024)
 /* How much of the tail of the device log to attach, when asked. Telegram takes
    up to 4096 characters in one message; a webhook takes it as a field. */
 #define NOTIFY_LOG_TAIL_MAX 2048
@@ -42,6 +47,7 @@ typedef struct {
     bool want_photo;
     char path[112];     /* EV_CLIP: the file */
     char card_path[80]; /* EV_CLIP: how the card names it */
+    char only[16];      /* a test for one channel: its route key; "" = every channel */
 } notify_event_t;
 
 /* How a send went: sent, failed in a way worth trying again (no network, a
@@ -88,6 +94,7 @@ typedef struct {
 extern const notify_channel_t notify_channel_tg;
 extern const notify_channel_t notify_channel_hook;
 extern const notify_channel_t notify_channel_push;
+extern const notify_channel_t notify_channel_ntfy;
 
 /* --- shared by the channels, from kvm_notify.c ------------------------------ */
 

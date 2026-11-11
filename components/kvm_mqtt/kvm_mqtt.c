@@ -302,9 +302,8 @@ static void publish_state(void)
  * a second timer watches only the alert's sequence number - a mutexed read of
  * one integer - and publishes the state the moment it moves.
  */
-static void alert_cb(void *arg)
+static void alert_work(void)
 {
-    (void)arg;
     static uint32_t s_seen;
     static uint32_t s_rb_seen;
     uint32_t seq = 0;
@@ -340,11 +339,50 @@ static void alert_cb(void *arg)
     }
 }
 
+static void state_work(void)
+{
+    publish_state();
+    publish_update_state(false);
+}
+
+/*
+ * The timers only wake this task. Publishing on the esp_timer task held up
+ * every other timer for seconds (a screenshot waits up to 3 s and goes out
+ * whole), on a 3.5 KB stack a TLS write could overrun.
+ */
+#define WORK_STATE 1u
+#define WORK_ALERT 2u
+static TaskHandle_t s_worker;
+
+static void worker_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        uint32_t bits = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
+        if (bits & WORK_ALERT) {
+            alert_work();
+        }
+        if (bits & WORK_STATE) {
+            state_work();
+        }
+    }
+}
+
 static void timer_cb(void *arg)
 {
     (void)arg;
-    publish_state();
-    publish_update_state(false);
+    if (s_worker) {
+        xTaskNotify(s_worker, WORK_STATE, eSetBits);
+    }
+}
+
+static void alert_cb(void *arg)
+{
+    (void)arg;
+    if (s_worker) {
+        xTaskNotify(s_worker, WORK_ALERT, eSetBits);
+    }
 }
 
 
@@ -1125,6 +1163,11 @@ esp_err_t kvm_mqtt_init(void)
         if (!s_mtx) {
             return ESP_ERR_NO_MEM;
         }
+    }
+    if (!s_worker &&
+        xTaskCreateWithCaps(worker_task, "mqtt_pub", 8192, NULL, 4, &s_worker, MALLOC_CAP_SPIRAM) != pdPASS) {
+        s_worker = NULL;
+        return ESP_ERR_NO_MEM;
     }
     if (!s_timer) {
         const esp_timer_create_args_t args = {.callback = timer_cb, .name = "mqtt_pub"};

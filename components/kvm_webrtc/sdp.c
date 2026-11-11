@@ -270,8 +270,11 @@ int sdp_parse_offer(const char *sdp, sdp_offer_t *out)
         } else if (starts(line, len, "a=mid:")) {
             copy_rest(line, len, 6, out->mid, sizeof(out->mid));
         } else if (starts(line, len, "a=extmap:")) {
-            size_t used;
+            size_t used = 0;
             const int id = read_pt(line + 9, len - 9, &used);
+            if (id < 1) {
+                continue;
+            }
             /* "a=extmap:<id>[/direction] <uri>": skip a direction if there is one. */
             const char *uri = memchr(line + 9 + used, ' ', len - 9 - used);
             static const char playout[] = "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay";

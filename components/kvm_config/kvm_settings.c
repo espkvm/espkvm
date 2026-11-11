@@ -196,6 +196,36 @@ static void migrate_notify_routes(nvs_handle_t nvs)
     ESP_LOGI(TAG, "notifications: the old switches moved into the per-channel table");
 }
 
+/*
+ * "New firmware" (bit 6) joined the notification table in 0.82.0, ticked for
+ * every channel. A device that had saved the table has its old mask stored,
+ * which would leave the new row unticked where a fresh device has it ticked.
+ * So, once: a channel that takes anything at all takes this too. A channel
+ * with every box cleared stays cleared.
+ */
+static void migrate_notify_release(nvs_handle_t nvs)
+{
+    uint8_t done;
+    if (nvs_get_u8(nvs, "nev_release", &done) == ESP_OK) {
+        return;
+    }
+    static const char *const masks[] = {"notify_tg_ev", "notify_hook_ev", "notify_push_ev"};
+    for (size_t m = 0; m < sizeof(masks) / sizeof(masks[0]); m++) {
+        const int idx = find_index(masks[m]);
+        int32_t stored;
+        if (idx < 0 || nvs_get_i32(nvs, masks[m], &stored) != ESP_OK || stored == 0) {
+            continue;
+        }
+        const int32_t v = stored | (1 << 6);
+        if (v != stored && nvs_set_i32(nvs, masks[m], v) == ESP_OK) {
+            s_values[idx].i = v;
+            ESP_LOGI(TAG, "notifications: New firmware ticked for %s", masks[m]);
+        }
+    }
+    (void)nvs_set_u8(nvs, "nev_release", 1);
+    (void)nvs_commit(nvs);
+}
+
 esp_err_t kvm_settings_init(void)
 {
     if (s_values) {
@@ -243,6 +273,7 @@ esp_err_t kvm_settings_init(void)
     }
     migrate_update_url(nvs);
     migrate_notify_routes(nvs);
+    migrate_notify_release(nvs);
     nvs_close(nvs);
     ESP_LOGI(TAG, "%u settings loaded", (unsigned)s_count);
     profiles_init();
@@ -435,11 +466,17 @@ esp_err_t kvm_settings_reset(void)
 {
     ESP_RETURN_ON_FALSE(s_values, ESP_ERR_INVALID_STATE, TAG, "not initialised");
 
+    /* The install id is not a setting: it survives a reset, so a reset device is
+     * not counted twice. Erasing the flash makes a new one. */
+    char id[KVM_INSTALL_ID_LEN + 1];
+    kvm_install_id(id);
+
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         err = nvs_erase_all(nvs);
         if (err == ESP_OK) {
+            (void)nvs_set_str(nvs, INSTALL_ID_KEY, id);
             err = nvs_commit(nvs);
         }
         nvs_close(nvs);
@@ -447,7 +484,6 @@ esp_err_t kvm_settings_reset(void)
 
     profiles_reset();
     lock();
-    s_install_id[0] = '\0';
     for (size_t i = 0; i < s_count; i++) {
         const kvm_setting_t *d = &s_table[i];
         s_over_set[i] = false;
@@ -710,6 +746,22 @@ static bool pin_setting_applies(const cJSON *root, const kvm_setting_t *d)
  *
  * @return ESP_OK when the resulting wiring is sound.
  */
+/* An mDNS / DNS label: letters, digits and '-', not at either end. */
+static bool hostname_ok(const char *h)
+{
+    const size_t n = strlen(h);
+    if (n == 0 || h[0] == '-' || h[n - 1] == '-') {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        const char c = h[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static esp_err_t check_pins(const cJSON *root, char *err, size_t err_len)
 {
     kvm_pin_claim_t claims[MAX_PIN_CLAIMS];
@@ -779,7 +831,26 @@ esp_err_t kvm_settings_apply_json(const char *json, char *err, size_t err_len)
             cJSON_Delete(root);
             return ESP_ERR_NOT_FOUND;
         }
+        /* A key twice: the pin check reads the first, the write takes the last. */
+        for (const cJSON *prev = root->child; prev != it; prev = prev->next) {
+            if (strcmp(prev->string, it->string) == 0) {
+                if (err) {
+                    snprintf(err, err_len, "'%s' appears twice", it->string);
+                }
+                cJSON_Delete(root);
+                return ESP_ERR_INVALID_ARG;
+            }
+        }
         const kvm_setting_t *d = &s_table[idx];
+        if (d->type == KVM_VT_STR && strcmp(d->key, "net_hostname") == 0 && cJSON_IsString(it) &&
+            !hostname_ok(it->valuestring)) {
+            if (err) {
+                strlcpy(err, "the hostname takes letters, digits and '-', and cannot start or end with '-'",
+                        err_len);
+            }
+            cJSON_Delete(root);
+            return ESP_ERR_INVALID_ARG;
+        }
         if (d->type == KVM_VT_STR) {
             if (!cJSON_IsString(it) || strlen(it->valuestring) > d->max_len) {
                 if (err) {

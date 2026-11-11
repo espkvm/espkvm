@@ -19,6 +19,7 @@ __attribute__((unused)) static const char *TAG = "wifi";
 
 #if CONFIG_KVM_WIFI
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -56,8 +57,126 @@ static esp_netif_t *s_ap_netif; /* the rescue hotspot's netif in APSTA mode */
 static volatile bool s_up;
 static volatile int s_rssi;
 static kvm_net_mode_t s_mode = KVM_NET_ETHERNET;
-static char s_ssid[33];
+static char s_ssid[33]; /* the network joined or being joined */
 static unsigned s_retries;
+
+/*
+ * Up to three known networks (wifi_ssid, wifi2_ssid, wifi3_ssid), for a device
+ * that moves between sites. With more than one, every join starts with a scan
+ * and takes the strongest one in sight; when none is in sight (a hidden network
+ * does not show) they are tried in turn.
+ */
+#define WIFI_NETS 3
+#define WIFI_PICK_MAX 24 /* scan records looked at */
+typedef struct {
+    char ssid[33];
+    char pass[64];
+} wifi_net_t;
+static wifi_net_t s_nets[WIFI_NETS];
+static int s_net_count;
+static unsigned s_net_turn;          /* the next one to try blind */
+static volatile bool s_picking;      /* a pick task is running */
+
+static void nets_load(void)
+{
+    static const char *const keys[WIFI_NETS][2] = {
+        {"wifi_ssid", "wifi_pass"}, {"wifi2_ssid", "wifi2_pass"}, {"wifi3_ssid", "wifi3_pass"}};
+    s_net_count = 0;
+    for (int i = 0; i < WIFI_NETS; i++) {
+        const char *ssid = kvm_setting_str(keys[i][0]);
+        if (!ssid || !ssid[0]) {
+            continue;
+        }
+        const char *pass = kvm_setting_str(keys[i][1]);
+        strlcpy(s_nets[s_net_count].ssid, ssid, sizeof(s_nets[0].ssid));
+        strlcpy(s_nets[s_net_count].pass, pass ? pass : "", sizeof(s_nets[0].pass));
+        s_net_count++;
+    }
+}
+
+static void net_apply(int i)
+{
+    wifi_config_t wc = {0};
+    strlcpy((char *)wc.sta.ssid, s_nets[i].ssid, sizeof(wc.sta.ssid));
+    strlcpy((char *)wc.sta.password, s_nets[i].pass, sizeof(wc.sta.password));
+    /* The weakest acceptable auth, not a requirement: open networks too. */
+    wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
+    strlcpy(s_ssid, s_nets[i].ssid, sizeof(s_ssid));
+}
+
+static void schedule_reconnect(void);
+
+/* A connect refused up front raises no disconnect event, so nothing would try
+ * again: retry on the timer instead. */
+static void connect_or_retry(void)
+{
+    if (esp_wifi_connect() != ESP_OK) {
+        schedule_reconnect();
+    }
+}
+
+/* Scan, take the strongest known network, join it. A task: the scan blocks. */
+static void pick_task(void *arg)
+{
+    (void)arg;
+    int best = -1;
+    int best_rssi = -128;
+    wifi_scan_config_t cfg = {0};
+    if (esp_wifi_scan_start(&cfg, true) == ESP_OK) {
+        uint16_t n = 0;
+        (void)esp_wifi_scan_get_ap_num(&n);
+        if (n > WIFI_PICK_MAX) {
+            n = WIFI_PICK_MAX;
+        }
+        wifi_ap_record_t *recs = n ? calloc(n, sizeof(*recs)) : NULL;
+        if (recs && esp_wifi_scan_get_ap_records(&n, recs) == ESP_OK) {
+            for (int r = 0; r < n; r++) {
+                for (int i = 0; i < s_net_count; i++) {
+                    if (strcmp((const char *)recs[r].ssid, s_nets[i].ssid) == 0 && recs[r].rssi > best_rssi) {
+                        best = i;
+                        best_rssi = recs[r].rssi;
+                    }
+                }
+            }
+        } else {
+            (void)esp_wifi_clear_ap_list();
+        }
+        free(recs);
+    }
+    if (best < 0) {
+        best = (int)(s_net_turn++ % (unsigned)s_net_count); /* none in sight: take turns */
+        if (s_retries % 8u == 0u) {
+            ESP_LOGI(TAG, "WiFi: none of the %d known networks in sight, trying \"%s\"", s_net_count,
+                     s_nets[best].ssid);
+        }
+    } else if (strcmp(s_ssid, s_nets[best].ssid) != 0 || s_retries == 0) {
+        ESP_LOGI(TAG, "WiFi: joining \"%s\" (%d dBm), the strongest of %d known", s_nets[best].ssid,
+                 best_rssi, s_net_count);
+    }
+    net_apply(best);
+    connect_or_retry();
+    s_picking = false;
+    vTaskDelete(NULL);
+}
+
+/* Join: straight away with one known network, through a scan with more. */
+static void join(void)
+{
+    if (s_net_count <= 1) {
+        connect_or_retry();
+        return;
+    }
+    if (s_picking) {
+        return;
+    }
+    s_picking = true;
+    /* The scan goes over esp-hosted RPC: the same stack as the scan task below. */
+    if (xTaskCreate(pick_task, "wifi_pick", 6144, NULL, 4, NULL) != pdPASS) {
+        s_picking = false;
+        connect_or_retry(); /* no memory for the scan: the last one picked */
+    }
+}
 /* True once esp_wifi is up (a WiFi mode is running); only then can a scan run. */
 static bool s_wifi_running;
 static bool s_setup_ap; /* the open hotspot for a device with no password and no cable */
@@ -73,6 +192,7 @@ typedef struct {
 static scan_state_t s_scan_state = SCAN_IDLE;
 static scan_ap_t s_scan_aps[SCAN_MAX_APS];
 static int s_scan_count;
+static const char *s_scan_why; /* why the last scan failed, for the console */
 static SemaphoreHandle_t s_scan_mu;
 
 /*
@@ -289,7 +409,7 @@ static esp_timer_handle_t s_reconnect_timer;
 static void reconnect_cb(void *arg)
 {
     (void)arg;
-    esp_wifi_connect();
+    join();
 }
 
 static void schedule_reconnect(void)
@@ -311,8 +431,8 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     (void)base;
     (void)data;
     if (id == WIFI_EVENT_STA_START) {
-        if (s_ssid[0]) {
-            esp_wifi_connect(); /* nothing to join without an SSID (rescue-hotspot-only) */
+        if (s_net_count) {
+            join(); /* nothing to join without an SSID (rescue-hotspot-only) */
         }
     } else if (id == WIFI_EVENT_STA_CONNECTED) {
         /* Association, not the address: IPv6 needs the interface up to form its
@@ -401,18 +521,8 @@ static esp_err_t wifi_start_sta(void)
     (void)esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_got_ip, NULL);
     (void)esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, on_got_ip6, NULL);
 
-    const char *ssid = kvm_setting_str("wifi_ssid");
-    strlcpy(s_ssid, ssid ? ssid : "", sizeof(s_ssid));
-
-    wifi_config_t wc = {0};
-    strlcpy((char *)wc.sta.ssid, s_ssid, sizeof(wc.sta.ssid));
-    const char *pass = kvm_setting_str("wifi_pass");
-    if (pass) {
-        strlcpy((char *)wc.sta.password, pass, sizeof(wc.sta.password));
-    }
-    /* The threshold is the weakest acceptable auth, not a requirement, so this
-     * accepts anything from an open network up. */
-    wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    nets_load();
+    s_ssid[0] = '\0';
 
     if (hotspot) {
         /* Run the station and a rescue access point at the same time (APSTA): the
@@ -425,10 +535,11 @@ static esp_err_t wifi_start_sta(void)
         fill_ap_config(&ap, false);
         ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK, ESP_FAIL, TAG, "apsta");
         (void)esp_wifi_set_config(WIFI_IF_AP, &ap);
-        (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
     } else {
         ESP_RETURN_ON_FALSE(esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK, ESP_FAIL, TAG, "sta mode");
-        (void)esp_wifi_set_config(WIFI_IF_STA, &wc);
+    }
+    if (s_net_count) {
+        net_apply(0); /* the first until a scan says otherwise */
     }
     kvm_cap_report(KVM_CAP_WIFI, true, NULL);
 
@@ -449,8 +560,11 @@ static esp_err_t wifi_start_sta(void)
         start_captive_dns();                /* pop the OS "sign in" sheet on join */
         ESP_LOGI(TAG, "WiFi station \"%s\" + rescue hotspot \"%s\" (http://192.168.4.1/)",
                  s_ssid[0] ? s_ssid : "(no SSID)", apssid);
-    } else if (s_ssid[0]) {
+    } else if (s_net_count == 1) {
         ESP_LOGI(TAG, "WiFi joining \"%s\"%s", s_ssid,
+                 s_mode == KVM_NET_AUTO ? " as the backup for Ethernet" : "");
+    } else if (s_net_count > 1) {
+        ESP_LOGI(TAG, "WiFi: %d known networks, joining the strongest%s", s_net_count,
                  s_mode == KVM_NET_AUTO ? " as the backup for Ethernet" : "");
     } else {
         ESP_LOGW(TAG, "WiFi mode but no SSID set");
@@ -747,6 +861,9 @@ static void wifi_scan_task(void *arg)
     }
     xSemaphoreTake(s_scan_mu, portMAX_DELAY);
     s_scan_state = (err == ESP_OK) ? SCAN_DONE : SCAN_ERROR;
+    s_scan_why = (err == ESP_ERR_NOT_SUPPORTED) ? "Wi-Fi is off. Set the network mode to wifi or auto to scan."
+                 : (err == ESP_OK)              ? ""
+                                                : esp_err_to_name(err);
     const int found = s_scan_count;
     xSemaphoreGive(s_scan_mu);
     if (err != ESP_OK) {
@@ -799,23 +916,41 @@ void kvm_wifi_scan_json(char *buf, size_t len)
     default: st = "idle"; break;
     }
     int o = snprintf(buf, len, "{\"status\":\"%s\",\"aps\":[", st);
-    for (int i = 0; i < s_scan_count && o > 0 && o < (int)len - 80; i++) {
-        /* Escape the two characters that would break the JSON string; SSIDs are
-         * otherwise printable. */
-        char esc[65];
+    /* Room kept for the closing "]", the error text and "}". */
+    const int tail = 100;
+    for (int i = 0; i < s_scan_count && o > 0 && o < (int)len - tail; i++) {
+        /* An SSID is any 32 bytes: escape quotes and backslashes, write control
+         * bytes as \u00XX (6 bytes each at most, 32 of them). */
+        char esc[32 * 6 + 1];
         int e = 0;
-        for (const char *p = s_scan_aps[i].ssid; *p && e < (int)sizeof(esc) - 2; p++) {
+        for (const unsigned char *p = (const unsigned char *)s_scan_aps[i].ssid; *p; p++) {
             if (*p == '"' || *p == '\\') {
                 esc[e++] = '\\';
+                esc[e++] = (char)*p;
+            } else if (*p < 0x20) {
+                e += snprintf(esc + e, sizeof(esc) - e, "\\u%04x", *p);
+            } else {
+                esc[e++] = (char)*p;
             }
-            esc[e++] = *p;
         }
         esc[e] = '\0';
-        o += snprintf(buf + o, len - o, "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%u}", i ? "," : "",
-                      esc, s_scan_aps[i].rssi, s_scan_aps[i].auth);
+        char item[sizeof(esc) + 48];
+        const int n = snprintf(item, sizeof(item), "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%u}", i ? "," : "",
+                               esc, s_scan_aps[i].rssi, s_scan_aps[i].auth);
+        if (n <= 0 || o + n >= (int)len - tail) {
+            break; /* the rest does not fit: leave them out, keep the JSON whole */
+        }
+        memcpy(buf + o, item, (size_t)n + 1);
+        o += n;
     }
     if (o > 0 && o < (int)len - 3) {
-        snprintf(buf + o, len - o, "]}");
+        o += snprintf(buf + o, len - o, "]");
+    }
+    if (s_scan_state == SCAN_ERROR && s_scan_why && o > 0 && o < (int)len - 96) {
+        o += snprintf(buf + o, len - o, ",\"error\":\"%s\"", s_scan_why); /* fixed texts, no quotes */
+    }
+    if (o > 0 && o < (int)len - 1) {
+        snprintf(buf + o, len - o, "}");
     }
     if (s_scan_mu) {
         xSemaphoreGive(s_scan_mu);

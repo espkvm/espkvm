@@ -95,7 +95,7 @@ static esp_err_t webrtc_post(httpd_req_t *req)
     char *s = cJSON_PrintUnformatted(out);
     cJSON_Delete(out);
     if (!s) {
-        kvm_webrtc_close(id);
+        kvm_webrtc_close(id, owner);
         return send_json_error(req, "503 Service Unavailable", "out of memory");
     }
     httpd_resp_set_type(req, "application/json");
@@ -110,13 +110,17 @@ static esp_err_t webrtc_delete(httpd_req_t *req)
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
     }
+    uint8_t owner[32];
+    if (!kvm_auth_session_of(req, owner)) {
+        return kvm_auth_challenge(req);
+    }
     char q[32] = {0};
     char v[12] = {0};
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
         httpd_query_key_value(q, "id", v, sizeof(v)) != ESP_OK) {
         return send_json_error(req, "400 Bad Request", "expected ?id=N");
     }
-    kvm_webrtc_close((uint32_t)strtoul(v, NULL, 10));
+    kvm_webrtc_close((uint32_t)strtoul(v, NULL, 10), owner);
     httpd_resp_set_status(req, "204 No Content");
     return httpd_resp_send(req, NULL, 0);
 }
@@ -124,6 +128,10 @@ static esp_err_t webrtc_delete(httpd_req_t *req)
 static esp_err_t webrtc_sound_post(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    uint8_t owner[32];
+    if (!kvm_auth_session_of(req, owner)) {
         return kvm_auth_challenge(req);
     }
     char q[40] = {0};
@@ -134,7 +142,7 @@ static esp_err_t webrtc_sound_post(httpd_req_t *req)
         httpd_query_key_value(q, "on", on, sizeof(on)) != ESP_OK) {
         return send_json_error(req, "400 Bad Request", "expected ?id=N&on=1 or 0");
     }
-    kvm_webrtc_sound((uint32_t)strtoul(id, NULL, 10), on[0] == '1');
+    kvm_webrtc_sound((uint32_t)strtoul(id, NULL, 10), owner, on[0] == '1');
     httpd_resp_set_status(req, "204 No Content");
     return httpd_resp_send(req, NULL, 0);
 }

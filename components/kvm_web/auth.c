@@ -121,6 +121,10 @@ static bool s_have_viewer;
 /* Failed attempts slow every further attempt down. One operator, one counter:
  * a KVM has no legitimate reason to see a burst of logins. */
 static uint32_t s_failures;
+/* After the fourth failure in a row, nothing is checked until this time. A
+ * time rather than a sleep: the web server has one task, and a sleep in it
+ * held up every other request, the owner's own sign-in among them. */
+static int64_t s_locked_until_us;
 
 /* ---- two-factor state ---- */
 #define RC_COUNT 8
@@ -157,15 +161,17 @@ static void unlock(void)
  * perfectly good connection - which is exactly what it did. The set is small
  * because the device serves one console and a handful of viewers.
  */
-#define MAX_WS_SOCKETS 8
-static int s_ws_authed[MAX_WS_SOCKETS] = {-1, -1, -1, -1, -1, -1, -1, -1};
+static bool session_alive_locked(const uint8_t hash[32]);
+
+#define MAX_WS_SOCKETS 12 /* the plain server's max_open_sockets */
+static int s_ws_authed[MAX_WS_SOCKETS] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 /* The sign-in each one was opened under, as kvm_auth_session_of() gives it. */
 static uint8_t s_ws_session[MAX_WS_SOCKETS][32];
 
-void kvm_auth_mark_socket(int fd, const uint8_t session[32])
+bool kvm_auth_mark_socket(int fd, const uint8_t session[32])
 {
     if (fd < 0) {
-        return;
+        return false;
     }
     lock();
     int slot = -1;
@@ -184,6 +190,7 @@ void kvm_auth_mark_socket(int fd, const uint8_t session[32])
         memcpy(s_ws_session[slot], session, 32);
     }
     unlock();
+    return slot >= 0;
 }
 
 bool kvm_auth_socket_session(int fd, uint8_t out[32])
@@ -229,12 +236,37 @@ bool kvm_auth_socket_ok(int fd)
     lock();
     for (int i = 0; i < MAX_WS_SOCKETS; i++) {
         if (s_ws_authed[i] == fd) {
-            ok = true;
+            /* The sign-in it was opened under must still be live: a logout,
+             * an expiry or an eviction ends the socket too. */
+            ok = session_alive_locked(s_ws_session[i]);
             break;
         }
     }
     unlock();
     return ok;
+}
+
+/*
+ * Close the sockets whose sign-in has ended (a logout, a password change). A
+ * socket that only receives, such as /video, sends no frames to be refused, so
+ * it has to be closed from here.
+ */
+static void close_dead_sockets(httpd_handle_t h)
+{
+    int dead[MAX_WS_SOCKETS];
+    int n = 0;
+    lock();
+    for (int i = 0; i < MAX_WS_SOCKETS; i++) {
+        if (s_ws_authed[i] >= 0 && !session_alive_locked(s_ws_session[i])) {
+            dead[n++] = s_ws_authed[i];
+            s_ws_authed[i] = -1;
+        }
+    }
+    unlock();
+    for (int i = 0; i < n; i++) {
+        ESP_LOGI(TAG, "closing socket %d: its sign-in has ended", dead[i]);
+        (void)httpd_sess_trigger_close(h, dead[i]);
+    }
 }
 
 /*
@@ -510,10 +542,6 @@ static void session_clear_all(void)
     lock();
     memset(s_sessions, 0, sizeof(s_sessions));
     sessions_save_locked();
-    /* Sockets authenticated under the old password go with them. */
-    for (int i = 0; i < MAX_WS_SOCKETS; i++) {
-        s_ws_authed[i] = -1;
-    }
     unlock();
 }
 
@@ -814,10 +842,16 @@ bool kvm_auth_token_ok(httpd_req_t *req)
 bool kvm_auth_origin_ok(httpd_req_t *req)
 {
     char origin[128];
-    if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
+    const size_t olen = httpd_req_get_hdr_value_len(req, "Origin");
+    if (olen == 0) {
         /* No Origin at all: a same-origin GET, curl, or Home Assistant. Nothing
            a browser sends across sites is missing this header. */
         return true;
+    }
+    /* Longer than any Host this device answers to: another site. */
+    if (olen >= sizeof(origin) ||
+        httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
+        return false;
     }
     char host[96];
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
@@ -903,17 +937,29 @@ bool kvm_auth_session_alive(const uint8_t hash[32])
     if (memcmp(hash, zero, 32) == 0) {
         return false;
     }
-    const int64_t now = esp_timer_get_time();
-    bool ok = false;
     lock();
-    for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (s_sessions[i].expires_us > now && equal_ct(s_sessions[i].hash, hash, 32)) {
-            ok = true;
-            break;
-        }
-    }
+    const bool ok = session_alive_locked(hash);
     unlock();
     return ok;
+}
+
+/* A live sign-in has this hash. Takes no lock; with auth off every one is live. */
+static bool session_alive_locked(const uint8_t hash[32])
+{
+    if (!kvm_auth_required()) {
+        return true;
+    }
+    static const uint8_t zero[32];
+    if (memcmp(hash, zero, 32) == 0) {
+        return false;
+    }
+    const int64_t now = esp_timer_get_time();
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (s_sessions[i].expires_us > now && equal_ct(s_sessions[i].hash, hash, 32)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /*
@@ -958,9 +1004,13 @@ static bool view_allowed(httpd_req_t *req)
         }
         return false;
     }
-    /* Signing out, and the WebRTC offer that carries the picture. */
+    /* Signing out, and the WebRTC session that carries the picture. */
+    if (req->method == HTTP_DELETE) {
+        return path_is(req->uri, "/api/v1/video/webrtc"); /* its own session only, checked there */
+    }
     return req->method == HTTP_POST &&
-           (path_is(req->uri, "/api/v1/auth/logout") || strncmp(req->uri, "/api/v1/webrtc", 14) == 0);
+           (path_is(req->uri, "/api/v1/auth/logout") || path_is(req->uri, "/api/v1/video/webrtc") ||
+            path_is(req->uri, "/api/v1/video/webrtc/sound"));
 }
 
 /* The request comes from a live view-only sign-in. */
@@ -994,8 +1044,13 @@ bool kvm_auth_session_view_only(const uint8_t hash[32])
 
 bool kvm_auth_socket_view_only(int fd)
 {
+    if (!kvm_auth_required()) {
+        return false;
+    }
+    /* No live sign-in behind the socket reads as view only: it may not act. */
     uint8_t hash[32];
-    return kvm_auth_required() && kvm_auth_socket_session(fd, hash) && kvm_auth_session_view_only(hash);
+    return !kvm_auth_socket_session(fd, hash) || !kvm_auth_session_alive(hash) ||
+           kvm_auth_session_view_only(hash);
 }
 
 bool kvm_auth_check(httpd_req_t *req)
@@ -1028,8 +1083,10 @@ bool kvm_auth_check(httpd_req_t *req)
      * so a direct API client - or the video/input WebSocket, whose upgrade also
      * runs through here - cannot skip it.
      */
-    if (must_change && strncmp(req->uri, "/api/v1/auth/", 13) != 0) {
-        return false;
+    if (must_change && !path_is(req->uri, "/api/v1/auth/session") &&
+        !path_is(req->uri, "/api/v1/auth/password") && !path_is(req->uri, "/api/v1/auth/logout") &&
+        !path_is(req->uri, "/api/v1/auth/login")) {
+        return false; /* not the viewing token or 2FA either: those outlive the change */
     }
     if (view_only && !view_allowed(req)) {
         ESP_LOGW(TAG, "%s refused: this sign-in can only watch", req->uri);
@@ -1449,6 +1506,39 @@ static esp_err_t auth_session_get(httpd_req_t *req)
     return send_json(req, "200 OK", body);
 }
 
+/* Count a wrong password or code; from the fourth in a row each one locks
+ * further attempts out for longer, 0.5 s doubling up to 15 s. */
+static void note_failure(void)
+{
+    lock();
+    const uint32_t n = ++s_failures;
+    if (n > 3) {
+        uint32_t ms = 500u << (n - 4 > 5 ? 5 : n - 4);
+        if (ms > 15000u) {
+            ms = 15000u;
+        }
+        s_locked_until_us = esp_timer_get_time() + (int64_t)ms * 1000;
+    }
+    unlock();
+}
+
+/* Within a lockout: answer 429 at once, without looking at the credentials. */
+static bool locked_out(httpd_req_t *req, esp_err_t *out)
+{
+    lock();
+    const int64_t left_us = s_locked_until_us - esp_timer_get_time();
+    unlock();
+    if (left_us <= 0) {
+        return false;
+    }
+    static char retry[12]; /* the header must outlive this call; one server task */
+    snprintf(retry, sizeof(retry), "%lu", (unsigned long)(left_us / 1000000 + 1));
+    httpd_resp_set_hdr(req, "Retry-After", retry);
+    *out = send_json(req, "429 Too Many Requests",
+                     "{\"error\":\"too many wrong attempts, wait a few seconds\"}");
+    return true;
+}
+
 static esp_err_t auth_login_post(httpd_req_t *req)
 {
     char body[256];
@@ -1471,27 +1561,18 @@ static esp_err_t auth_login_post(httpd_req_t *req)
         return send_json(req, "400 Bad Request", "{\"error\":\"user and password are required\"}");
     }
 
-    /* The delay grows with the number of failures and is paid before the
-     * answer, so guessing costs the guesser time whether or not they are
-     * right. */
-    lock();
-    const uint32_t failures = s_failures;
-    unlock();
-    if (failures > 3) {
-        uint32_t delay_ms = 500u << (failures - 4 > 5 ? 5 : failures - 4);
-        if (delay_ms > 15000u) {
-            delay_ms = 15000u;
-        }
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    esp_err_t locked;
+    if (locked_out(req, &locked)) {
+        memset(password, 0, sizeof(password));
+        return locked;
     }
 
     /* The owner, or else the viewer: a separate password that can only watch. */
     const bool owner = strcmp(user, kvm_setting_str("sec_user")) == 0 && password_matches(password);
     const bool viewer = !owner && strcmp(user, VIEWER_USER) == 0 && viewer_matches(password);
     if (!owner && !viewer) {
-        lock();
-        const uint32_t count = ++s_failures;
-        unlock();
+        note_failure();
+        const uint32_t count = s_failures;
         ESP_LOGW(TAG, "failed login as '%s' (%lu in a row)", user, (unsigned long)count);
         memset(password, 0, sizeof(password));
         return send_json(req, "401 Unauthorized", "{\"error\":\"wrong username or password\"}");
@@ -1506,9 +1587,8 @@ static esp_err_t auth_login_post(httpd_req_t *req)
                              "{\"error\":\"enter the code from your authenticator app\",\"needCode\":true}");
         }
         if (!second_factor_ok(code, browser_time)) {
-            lock();
-            const uint32_t count = ++s_failures;
-            unlock();
+            note_failure();
+            const uint32_t count = s_failures;
             ESP_LOGW(TAG, "wrong two-factor code for '%s' (%lu in a row)", user, (unsigned long)count);
             return send_json(req, "401 Unauthorized", "{\"error\":\"wrong code\",\"needCode\":true}");
         }
@@ -1543,6 +1623,7 @@ static esp_err_t auth_logout_post(httpd_req_t *req)
         }
         unlock();
     }
+    close_dead_sockets(req->handle);
     char cookie[192];
     set_session_cookie(req, cookie, sizeof(cookie), "", true);
     return send_json(req, "200 OK", "{\"status\":\"logged out\"}");
@@ -1646,9 +1727,16 @@ static esp_err_t auth_password_post(httpd_req_t *req)
         snprintf(msg, sizeof(msg), "{\"error\":\"%s\"}", net_err);
         return send_json(req, "400 Bad Request", msg);
     }
+    esp_err_t locked;
+    if (locked_out(req, &locked)) {
+        memset(current, 0, sizeof(current));
+        memset(next, 0, sizeof(next));
+        return locked;
+    }
     if (!password_matches(current)) {
         memset(current, 0, sizeof(current));
         memset(next, 0, sizeof(next));
+        note_failure();
         return send_json(req, "403 Forbidden", "{\"error\":\"the current password is wrong\"}");
     }
     const bool first = !s_have_password;
@@ -1666,6 +1754,7 @@ static esp_err_t auth_password_post(httpd_req_t *req)
     /* Every session was established under the old password. Ending them is
      * the point of changing it. */
     session_clear_all();
+    close_dead_sockets(req->handle); /* sockets opened under the old password go too */
     char cookie[192];
     set_session_cookie(req, cookie, sizeof(cookie), "", true);
     ESP_LOGI(TAG, "password changed; all sessions ended");
@@ -1712,9 +1801,16 @@ static esp_err_t auth_viewer_post(httpd_req_t *req)
         return send_json(req, "400 Bad Request",
                          "{\"error\":\"the viewer password must be at least 8 characters\"}");
     }
+    esp_err_t locked;
+    if (locked_out(req, &locked)) {
+        memset(current, 0, sizeof(current));
+        memset(next, 0, sizeof(next));
+        return locked;
+    }
     if (!password_matches(current)) {
         memset(current, 0, sizeof(current));
         memset(next, 0, sizeof(next));
+        note_failure();
         return send_json(req, "403 Forbidden", "{\"error\":\"your current password is wrong\"}");
     }
     if (next[0] && password_matches(next)) {
@@ -1739,6 +1835,7 @@ static esp_err_t auth_viewer_post(httpd_req_t *req)
     }
     sessions_save_locked();
     unlock();
+    close_dead_sockets(req->handle);
     ESP_LOGI(TAG, "viewer password %s; view-only sign-ins ended", removed ? "removed" : "set");
     return send_json(req, "200 OK", removed ? "{\"viewer\":false}" : "{\"viewer\":true}");
 }
@@ -1810,12 +1907,14 @@ static bool read_pw_and_code(httpd_req_t *req, char *code, size_t code_cap, long
         *out = send_json(req, "400 Bad Request", "{\"error\":\"password and code are required\"}");
         return false;
     }
+    if (locked_out(req, out)) {
+        memset(password, 0, sizeof(password));
+        return false;
+    }
     const bool right = password_matches(password);
     memset(password, 0, sizeof(password));
     if (!right) {
-        lock();
-        s_failures++;
-        unlock();
+        note_failure();
         *out = send_json(req, "403 Forbidden", "{\"error\":\"the password is wrong\"}");
         return false;
     }
@@ -1897,6 +1996,7 @@ static esp_err_t auth_2fa_change(httpd_req_t *req, bool disable)
         return out;
     }
     if (!second_factor_ok(code, bt)) {
+        note_failure();
         return send_json(req, "403 Forbidden", "{\"error\":\"wrong code\"}");
     }
     if (disable) {

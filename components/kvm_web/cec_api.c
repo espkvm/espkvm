@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "http_recv.h"
 #include "cJSON.h"
 #include "kvm_auth.h"
 #include "kvm_caps.h"
@@ -127,7 +128,10 @@ static esp_err_t cec_get(httpd_req_t *req)
 static cJSON *read_body(httpd_req_t *req)
 {
     char body[160] = {0};
-    const int got = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (req->content_len == 0 || req->content_len >= sizeof(body)) {
+        return NULL;
+    }
+    const int got = kvm_recv_all(req, body, (int)req->content_len);
     return got > 0 ? cJSON_Parse(body) : NULL;
 }
 

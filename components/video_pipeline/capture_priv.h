@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "capture.h"
 #include "capture_pixfmt.h"
 #include "driver/isp_core.h"
 #include "esp_cam_ctlr.h"
@@ -285,11 +286,7 @@ void capture_debug_csi_timeout(capture_ctx_t *c, unsigned bpp, size_t fb_bytes);
 /* The CSI link as the receiver sees it, for the frame-timeout line: whether the
    clock lane runs at high speed (the source transmits) and which lanes sit in
    stop state. */
-typedef struct {
-    unsigned clk_hs, stop_d0, stop_d1, stop_clk;
-    uint32_t phy_err;
-} capture_csi_link_t;
-void capture_hw_csi_link(capture_csi_link_t *out);
+void capture_hw_csi_link(capture_csi_link_t *out); /* capture_csi_link_t: capture.h */
 
 /** CSI bits per pixel for debug logs (RGB888 -> 24 bpp BGR order in DRAM). */
 unsigned capture_csi_bpp(void);

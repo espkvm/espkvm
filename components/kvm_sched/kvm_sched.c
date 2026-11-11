@@ -8,6 +8,7 @@
  * job cannot run twice. The scripts live in the `schedules_json` setting, the
  * same shape as macros and runbooks.
  */
+#include "esp_attr.h"
 #include "kvm_sched.h"
 
 #include "cJSON.h"
@@ -43,8 +44,14 @@ static const char *TAG = "sched";
 static SemaphoreHandle_t s_lock;
 static kvm_sched_status_t s_status;
 static bool s_sntp_up;
-static char s_tz[40];
+static char s_tz[49]; /* sched_tz takes 48 */
 static int s_last_min = -1; /* the minute last evaluated; -1 = none yet */
+/* The minute last evaluated, as minutes since the epoch, kept over a restart:
+ * the clock survives esp_restart, so a "restart" schedule would otherwise run
+ * again in its own minute after the reboot it caused. */
+#define FIRED_MAGIC 0x5c4ed01eu
+static RTC_NOINIT_ATTR uint32_t s_fired_min;
+static RTC_NOINIT_ATTR uint32_t s_fired_magic;
 
 static void status_last(const char *name, const char *action)
 {
@@ -271,7 +278,11 @@ static void task(void *arg)
 
         if (on && valid && t.tm_min != s_last_min) {
             s_last_min = t.tm_min;
-            const uint16_t count = evaluate(&t);
+            const uint32_t m = (uint32_t)(now / 60);
+            const bool done_before_restart = s_fired_magic == FIRED_MAGIC && s_fired_min == m;
+            s_fired_min = m;
+            s_fired_magic = FIRED_MAGIC;
+            const uint16_t count = done_before_restart ? s_status.count : evaluate(&t);
             xSemaphoreTake(s_lock, portMAX_DELAY);
             s_status.count = count;
             xSemaphoreGive(s_lock);

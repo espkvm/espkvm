@@ -45,14 +45,14 @@ esp_err_t kvm_webrtc_offer(const char *offer, const uint8_t owner[32], char **an
                            uint32_t *id, int *status, char *err, size_t err_len);
 
 /** The browser is done with a session. */
-void kvm_webrtc_close(uint32_t id);
+void kvm_webrtc_close(uint32_t id, const uint8_t owner[32]); /* only the sign-in that made it */
 
 /**
  * Start or stop sending sound in session @p id, when its offer asked for it.
  * Off at first: the browser asks once the operator turns the sound on, and
  * the encoder runs only while some session wants it.
  */
-void kvm_webrtc_sound(uint32_t id, bool on);
+void kvm_webrtc_sound(uint32_t id, const uint8_t owner[32], bool on);
 
 /** Sessions open now. */
 int kvm_webrtc_count(void);

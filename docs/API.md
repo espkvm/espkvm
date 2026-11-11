@@ -71,7 +71,7 @@ be given a URL.
 | `GET /api/v1/system/usbprobe` | the target's USB enumeration fingerprint and the OS guessed from it |
 | `GET /api/v1/system/pinprobe?pins=19,20` | how fast each pin is switching, and the level it sat at. Only listens; `&test=<pin>` drives a 48 kHz square wave on a free pin to prove it counts |
 | `GET /api/v1/pins` | the board's expansion header, and which GPIOs it leaves free |
-| `POST`/`GET /api/v1/wifi/scan` | start a scan, then read what it found (boards with an ESP32-C6) |
+| `POST`/`GET /api/v1/wifi/scan` | start a scan, then read what it found (boards with an ESP32-C6): `status`, `aps` (`ssid`, `rssi`, `auth`, 0 = open), and `error` when it failed |
 
 ### Sign-in and certificates
 
@@ -90,7 +90,7 @@ be given a URL.
 
 | | |
 |---|---|
-| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), and `hdd` (the target's HDD LED is lit or blinking; null when it is not wired) |
+| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), `hdd` (the target's HDD LED is lit or blinking; null when it is not wired), and `csi` (the CSI link as last sampled: `clkHs`, `stop` for the data lanes, `stopClk`, `phyErr`, `ageMs`; see [TROUBLESHOOTING](TROUBLESHOOTING.md#the-hdmi-signal-is-there-but-no-picture)) |
 | `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in) |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
 | `GET /api/v1/video/frame.jpg` | one frame as a JPEG, on either codec |
@@ -158,7 +158,7 @@ These need the agent API, and answer 409 when no target is attached.
 |---|---|
 | `POST /api/v1/runbooks/run`, `/stop`, `GET /api/v1/runbooks/status` | run a saved runbook by name, stop it, see which step it is on |
 | `POST /api/v1/schedules/run`, `GET /api/v1/schedules/status` | fire a saved schedule now, or see the device clock and what last fired |
-| `POST /api/v1/notify/test`, `GET /api/v1/notify/status` | send a test notification (to every channel), or see whether the last one got through; `ready` says which channels are set up, keyed by their routing setting |
+| `POST /api/v1/notify/test`, `GET /api/v1/notify/status` | send a test notification (to every channel set up, or with `{"channel":"notify_ntfy_ev"}` to that one channel, 400 for a channel there is not), or see whether the last one got through; `ready` says which channels are set up, keyed by their routing setting |
 | `GET /api/v1/push`, `POST /api/v1/push/subscribe`, `POST /api/v1/push/remove` | Web Push: the device's key and the browsers it notifies (see NOTIFICATIONS.md) |
 | `POST /api/v1/notify/chats` | look up the Telegram chats the bot can write to; the list comes in `GET /api/v1/notify/status` |
 

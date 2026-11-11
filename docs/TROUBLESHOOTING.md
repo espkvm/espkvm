@@ -1,6 +1,6 @@
 # If it does not work
 
-Five things account for most of it, and each has a way to tell it apart from
+Six things account for most of it, and each has a way to tell it apart from
 the others without a multimeter.
 
 ## The target never sees a keyboard or a mouse
@@ -46,6 +46,15 @@ re-plug into this device, and would not come back for a television either.
 The fix for that one is on the machine, and somebody has written it up - a udev
 rule that re-applies the mode when the connector changes state:
 [check456-beep/orangepi-hdmi-fix](https://github.com/check456-beep/orangepi-hdmi-fix).
+
+## The HDMI signal is there, but no picture
+
+The log says `csi frame wait timeout`: the capture board sees the source, and nothing arrives over the ribbon. The same line says what the P4's receiver sees on the ribbon's lanes, and `GET /api/v1/video/status` has it too, as `csi`, sampled about once a second.
+
+- `stop d0=1 d1=1 clk=1` (`"stop":[1,1],"stopClk":1`) is a lane held in its idle state by the bridge. A working link reads this between frames, so the cable carries the lanes. Look at the bridge's settings instead: the mode, the colour format.
+- `stop d0=0 d1=0 clk=0` with `clk_hs=0` means nothing holds the lanes at all. The bridge talks over I2C on the same cable, so the lanes do not reach the P4: a capture board that wires its connector differently, a cable of the wrong kind, a connector that does not close on the ribbon.
+- `clk_hs=1` is the clock lane running: the bridge sends.
+- `phy_err` other than 0 means the lanes carry something the receiver cannot read, often a long or damaged cable.
 
 ## A pin you picked in Settings does nothing
 

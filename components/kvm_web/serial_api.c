@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "http_recv.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -159,6 +160,9 @@ static esp_err_t serial_ws_handler(httpd_req_t *req)
     if (pkt.len == 0) {
         return ESP_OK;
     }
+    if (pkt.len > 4096) {
+        return ESP_FAIL; /* far more than anyone types at once: close it */
+    }
     uint8_t small[260];
     uint8_t *data = pkt.len <= sizeof(small) ? small : malloc(pkt.len);
     if (!data) {
@@ -248,13 +252,9 @@ static esp_err_t serial_send_post(httpd_req_t *req)
     }
     char body[512];
     const int len = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
-    int got = 0;
-    while (got < len) {
-        const int r = httpd_req_recv(req, body + got, len - got);
-        if (r <= 0) {
-            return send_json_error(req, "400 Bad Request", "could not read the body");
-        }
-        got += r;
+    const int got = kvm_recv_all(req, body, len);
+    if (got < 0) {
+        return send_json_error(req, "400 Bad Request", "could not read the body");
     }
     body[got] = '\0';
     cJSON *j = cJSON_Parse(body);

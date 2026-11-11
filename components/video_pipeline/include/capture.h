@@ -117,6 +117,19 @@ void capture_frame_counter(uint32_t *frames, int64_t *last_us);
 bool capture_source_power_known(void);
 
 /**
+ * The CSI link as the receiver last saw it: whether the clock lane ran at high
+ * speed (the bridge transmits), which lanes sat in stop state (LP-11), and the
+ * PHY error bits. Sampled by the capture loop about once a second while frames
+ * flow, and at every frame timeout, since the registers may only be read while
+ * the receiver runs. @p age_ms is how long ago; false before the first sample.
+ */
+typedef struct {
+    unsigned clk_hs, stop_d0, stop_d1, stop_clk;
+    uint32_t phy_err;
+} capture_csi_link_t;
+bool capture_csi_link_last(capture_csi_link_t *out, uint32_t *age_ms);
+
+/**
  * Offer the source a fresh start, asked for by a person: a hotplug cycle where
  * the bridge has one, otherwise a pulse on its reset pin. To the target either
  * looks like a monitor unplugged and plugged back in.

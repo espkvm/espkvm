@@ -333,8 +333,13 @@ static void auto_pick(void)
 
 static void reset(void)
 {
+    char id_before[KVM_INSTALL_ID_LEN + 1], id_after[KVM_INSTALL_ID_LEN + 1];
+    kvm_install_id(id_before);
+    CHECK(strlen(id_before) == KVM_INSTALL_ID_LEN);
     CHECK(kvm_profiles_active() != KVM_PROFILE_DEFAULT);
     CHECK(kvm_settings_reset() == ESP_OK);
+    kvm_install_id(id_after);
+    CHECK(strcmp(id_before, id_after) == 0); /* a reset device is not a new one */
     CHECK(kvm_profiles_active() == KVM_PROFILE_DEFAULT);
     CHECK(fake_nvs_keys("kvm_prof") <= 0);
     CHECK(kvm_setting_int("mouse_mode") == 0);
@@ -451,6 +456,35 @@ static void asks_after(void)
     cJSON_Delete(p);
 }
 
+/* A table saved before "New firmware" existed: seeded below, before boot. */
+static void seed_old_table(void)
+{
+    nvs_handle_t h;
+    CHECK(nvs_open("kvm", NVS_READWRITE, &h) == ESP_OK);
+    (void)nvs_erase_key(h, "nev_release");
+    CHECK(nvs_set_i32(h, "notify_tg_ev", 63) == ESP_OK);  /* everything that existed */
+    CHECK(nvs_set_i32(h, "notify_push_ev", 0) == ESP_OK); /* every box cleared */
+    (void)nvs_erase_key(h, "notify_hook_ev");               /* never saved */
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void release_row(void)
+{
+    CHECK(kvm_setting_int("notify_tg_ev") == 127);  /* the new row joins a channel in use */
+    CHECK(kvm_setting_int("notify_push_ev") == 0);  /* a cleared channel stays cleared */
+    CHECK(kvm_setting_int("notify_hook_ev") & (1 << 6)); /* the default has it */
+    int32_t v = 0;
+    CHECK(stored_i32("kvm", "notify_tg_ev", &v) == 0 && v == 127);
+    /* Once only: a box cleared after the migration stays cleared. */
+    CHECK(kvm_setting_set_int("notify_tg_ev", 63) == ESP_OK);
+}
+
+static void release_row_again(void)
+{
+    CHECK(kvm_setting_int("notify_tg_ev") == 63);
+}
+
 int main(void)
 {
     fake_nvs_clear();
@@ -465,6 +499,9 @@ int main(void)
     bad += run(after_reset);
     bad += run(asks);
     bad += run(asks_after);
+    seed_old_table();
+    bad += run(release_row);
+    bad += run(release_row_again);
     if (bad) {
         printf("profiles: %d phase(s) failed\n", bad);
         return 1;

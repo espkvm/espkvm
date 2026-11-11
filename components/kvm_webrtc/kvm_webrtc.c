@@ -659,9 +659,15 @@ static void rx_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
+    uint8_t *buf = heap_caps_malloc(DGRAM_MAX, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "no memory for the receive buffer: WebRTC is off");
+        kvm_cap_report(KVM_CAP_WEBRTC, false, "out of memory");
+        vTaskDelete(NULL);
+        return;
+    }
     s_ready = true;
     kvm_cap_report(KVM_CAP_WEBRTC, true, NULL);
-    uint8_t *buf = heap_caps_malloc(DGRAM_MAX, MALLOC_CAP_SPIRAM);
     for (;;) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -1122,28 +1128,29 @@ esp_err_t kvm_webrtc_offer(const char *offer, const uint8_t owner[32], char **an
     return ESP_OK;
 }
 
-void kvm_webrtc_close(uint32_t id)
+void kvm_webrtc_close(uint32_t id, const uint8_t owner[32])
 {
     if (!s_mu) {
         return;
     }
     lock();
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (s_sess[i].id == id && s_sess[i].st != ST_FREE) {
+        if (s_sess[i].id == id && s_sess[i].st != ST_FREE && memcmp(s_sess[i].owner, owner, 32) == 0) {
             session_kill(&s_sess[i], "the console closed it");
         }
     }
     unlock();
 }
 
-void kvm_webrtc_sound(uint32_t id, bool on)
+void kvm_webrtc_sound(uint32_t id, const uint8_t owner[32], bool on)
 {
     if (!s_mu) {
         return;
     }
     lock();
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (s_sess[i].id == id && s_sess[i].st != ST_FREE && s_sess[i].audio) {
+        if (s_sess[i].id == id && s_sess[i].st != ST_FREE && s_sess[i].audio &&
+            memcmp(s_sess[i].owner, owner, 32) == 0) {
             s_sess[i].audio_on = on;
         }
     }

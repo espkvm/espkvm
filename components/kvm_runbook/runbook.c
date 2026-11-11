@@ -365,14 +365,22 @@ esp_err_t runbook_start(const char *name, const char *source, char *err, size_t 
     if (!name || !*name || strlen(name) >= RUNBOOK_NAME_MAX) {
         return ESP_ERR_NOT_FOUND;
     }
-    if (s_running) {
+    /* Claimed under the lock: four callers (web, MQTT, schedule, button) can
+     * start one at the same moment, and both would pass a bare check. */
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool busy = s_running;
+    s_running = true;
+    xSemaphoreGive(s_lock);
+    if (busy) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!usb_hid_ready()) {
+        s_running = false;
         return ESP_ERR_NOT_SUPPORTED;
     }
     char *src = load_script(name);
     if (!src) {
+        s_running = false;
         return ESP_ERR_NOT_FOUND;
     }
     rb_script_t *script = heap_caps_calloc(1, sizeof(*script), MALLOC_CAP_SPIRAM);
@@ -381,6 +389,7 @@ esp_err_t runbook_start(const char *name, const char *source, char *err, size_t 
         free(src);
         free(script);
         free(grid);
+        s_running = false;
         return ESP_ERR_NO_MEM;
     }
     char why[RB_ERR_MAX];
@@ -393,13 +402,13 @@ esp_err_t runbook_start(const char *name, const char *source, char *err, size_t 
         }
         free(script);
         free(grid);
+        s_running = false;
         return ESP_ERR_INVALID_ARG;
     }
 
     s_script = script;
     s_grid = grid;
     s_stop = false;
-    s_running = true;
     s_started_us = esp_timer_get_time();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_status.state = RUNBOOK_RUNNING;

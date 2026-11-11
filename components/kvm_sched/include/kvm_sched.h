@@ -23,7 +23,7 @@ typedef struct {
     bool enabled;          /* the master switch is on */
     bool clock_valid;      /* SNTP has set the time */
     char now[24];          /* local time, "YYYY-MM-DD HH:MM:SS", or "" */
-    char tz[40];           /* the POSIX TZ in force */
+    char tz[49];           /* the POSIX TZ in force */
     uint16_t count;        /* schedules defined */
     char last_name[KVM_SCHED_NAME_MAX]; /* the last one that fired */
     char last_action[16];

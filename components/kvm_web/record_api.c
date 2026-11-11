@@ -386,14 +386,16 @@ static void download_task(void *arg)
             httpd_resp_set_hdr(req, "Content-Range", range);
             left = dl->last - dl->first + 1;
         }
-        int n;
+        int n = 0;
         esp_err_t err = ESP_OK;
         while (err == ESP_OK && left &&
                (n = kvm_storage_file_read(f, buf, left < DOWNLOAD_CHUNK ? (size_t)left : DOWNLOAD_CHUNK)) > 0) {
             err = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)n);
             left -= left == UINT64_MAX ? 0 : n;
         }
-        if (err == ESP_OK) {
+        /* A card error part way: no closing chunk, so the browser sees a cut
+         * download rather than a short file that looks whole. */
+        if (err == ESP_OK && n >= 0) {
             httpd_resp_send_chunk(req, NULL, 0);
         }
     }

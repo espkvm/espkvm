@@ -78,7 +78,7 @@ Useful for what it does today, and honest about the rest.
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |
 | A command palette (Ctrl+K), your own buttons on the bar | new; the palette also finds every setting by name |
-| Notifications to Telegram or a webhook | works |
+| Notifications to Telegram, ntfy, a webhook or the browser, with a screenshot | works |
 | Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |
 | HDMI-CEC remote | works; on TC358743 boards |
 | A gamepad for a console | works on a Switch |
@@ -88,7 +88,7 @@ Useful for what it does today, and honest about the rest.
 | An agent on the target: its name and addresses, the clipboard both ways, a clean shutdown | new; needs [espkvm-agent](https://github.com/espkvm/agent) on the target |
 | HTTPS, your own certificate, Let's Encrypt over Tailscale | works |
 | Login, two-factor sign-in, reset by a button | works |
-| Wi-Fi, a setup hotspot, Ethernet with Wi-Fi as the backup | works; on boards with a Wi-Fi chip |
+| Wi-Fi with up to three known networks, a setup hotspot, Ethernet with Wi-Fi as the backup | works; on boards with a Wi-Fi chip |
 | Tailscale or WireGuard | works; off by default |
 | Home Assistant over MQTT | works; off by default |
 | Updates over the network, with rollback and a trial for remote devices | works |
@@ -271,7 +271,7 @@ components/
                   screenshots, and the keystroke subtitles
   kvm_runbook/    runbooks: scripted keys and screen waits, run on the device
   kvm_sched/      scheduler: cron lines that fire actions on the device
-  kvm_notify/     push notifications to Telegram and a webhook
+  kvm_notify/     notifications: Telegram, ntfy, webhook, Web Push
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
   kvm_webrtc/     H.264 to the browser over WebRTC (ICE-lite, DTLS-SRTP)
   kvm_net/        Ethernet, WiFi (station/AP + rescue hotspot, captive portal),

@@ -31,6 +31,7 @@ typedef enum {
     KVM_NOTIFY_CLIP,   /**< the dashcam saved a clip */
     KVM_NOTIFY_NETLOG, /**< a watched word in the target's log */
     KVM_NOTIFY_TSKEY,  /**< the tailnet key runs out soon */
+    KVM_NOTIFY_RELEASE, /**< a newer firmware release is out */
     KVM_NOTIFY_KINDS,
     KVM_NOTIFY_ALL = 31, /**< every channel: a test, the "alerts dropped" note */
 } kvm_notify_ev_t;
@@ -44,6 +45,13 @@ void kvm_notify_init(void);
  * Safe to call from any task; it copies and returns at once.
  */
 void kvm_notify_send(kvm_notify_ev_t kind, const char *title, const char *body, bool want_photo);
+
+/**
+ * Send the test message, with a screenshot, to one channel: @p route_key is the
+ * setting that routes to it, such as "notify_ntfy_ev". NULL or "" sends it to
+ * every channel set up. ESP_ERR_NOT_FOUND for a key no channel has.
+ */
+esp_err_t kvm_notify_send_test(const char *route_key);
 
 /**
  * Send a saved video: to Telegram as a video that plays in the chat (when it is
@@ -68,6 +76,13 @@ void kvm_notify_status(kvm_notify_status_t *out);
  * if @p cap is too small.
  */
 size_t kvm_notify_ready_json(char *out, size_t cap);
+
+/**
+ * Whether a notification of @p kind would go anywhere: notifications are on,
+ * and a channel that is set up has its box ticked. Lets a sender skip work that
+ * only feeds a notification, such as asking the internet whether a release is out.
+ */
+bool kvm_notify_routes(kvm_notify_ev_t kind);
 
 /**
  * Ask Telegram, with the saved bot token, which chats have written to the bot,

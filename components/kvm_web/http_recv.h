@@ -22,3 +22,23 @@ static inline bool kvm_recv_stalled(int n)
 
 /* Silences in a row before an upload is called dead - each is recv_wait_timeout. */
 #define KVM_RECV_MAX_STALLS 8
+
+/* Read exactly @p len bytes of the body, riding out silences the way uploads
+ * do. @return @p len, or -1 when the connection died or stalled too long. */
+static inline int kvm_recv_all(httpd_req_t *req, char *buf, int len)
+{
+    int got = 0;
+    int stalls = 0;
+    while (got < len) {
+        const int r = httpd_req_recv(req, buf + got, (size_t)(len - got));
+        if (kvm_recv_stalled(r) && ++stalls <= KVM_RECV_MAX_STALLS) {
+            continue;
+        }
+        if (r <= 0) {
+            return -1;
+        }
+        stalls = 0;
+        got += r;
+    }
+    return got;
+}

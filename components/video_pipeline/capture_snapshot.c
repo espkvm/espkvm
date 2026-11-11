@@ -198,16 +198,19 @@ esp_err_t capture_snapshot_jpeg(uint8_t **out, size_t *out_len, uint32_t timeout
     video_frame_viewer_leave();
 
     esp_err_t err = ESP_ERR_TIMEOUT;
+    uint8_t *late = NULL;
     portENTER_CRITICAL(&s_mu);
     if (answered) {
         err = s_err;
         *out = s_jpeg;
         *out_len = s_jpeg_len;
-        s_jpeg = NULL;
     } else {
         s_wanted = false;
+        late = s_jpeg; /* an answer that came just after the wait gave up */
     }
+    s_jpeg = NULL;
     portEXIT_CRITICAL(&s_mu);
+    free(late);
     xSemaphoreGive(s_one);
     return err;
 }

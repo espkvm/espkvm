@@ -9,8 +9,9 @@
  * audio (I2S: a word clock at exactly 44.1 or 48 kHz beside a bit clock in the
  * megahertz) on any pin the P4 can see.
  *
- * It only listens: the pulse counter takes the pin's input through the GPIO
- * matrix and leaves whatever drives the pin, and whatever it drives, alone.
+ * Mostly it listens, but the pulse counter switches the pin to its GPIO
+ * function, which takes it off an IO_MUX peripheral (SD card, Ethernet) until
+ * a restart. So pins a fixed peripheral holds are refused.
  * The one exception is &test=<pin>, which drives that pin with a 48 kHz square
  * wave for the length of the request - a known signal, to prove the probe
  * counts. Give it a pin nothing is wired to.
@@ -32,6 +33,7 @@
 #include "esp_timer.h"
 
 #include "kvm_auth.h"
+#include "kvm_board_header.h"
 #include "web_priv.h"
 
 #define PROBE_US 5000 /* 3 MHz x 5 ms = 15000 edges, inside the 16-bit counter */
@@ -89,7 +91,8 @@ static esp_err_t pinprobe_get(httpd_req_t *req)
                                        .timer_num = LEDC_TIMER_3, .freq_hz = 48000, .clk_cfg = LEDC_AUTO_CLK};
         const ledc_channel_config_t c = {.gpio_num = test_pin, .speed_mode = LEDC_LOW_SPEED_MODE,
                                          .channel = LEDC_CHANNEL_7, .timer_sel = LEDC_TIMER_3, .duty = 128};
-        if (test_pin < 0 || test_pin >= GPIO_NUM_MAX || ledc_timer_config(&t) != ESP_OK ||
+        if (test_pin < 0 || test_pin >= GPIO_NUM_MAX || kvm_board_reserved_by(test_pin) ||
+            ledc_timer_config(&t) != ESP_OK ||
             ledc_channel_config(&c) != ESP_OK) {
             return send_json_error(req, "400 Bad Request", "cannot drive that test pin");
         }
@@ -101,6 +104,14 @@ static esp_err_t pinprobe_get(httpd_req_t *req)
          tok = strtok_r(NULL, ",", &save)) {
         const int pin = atoi(tok);
         if (pin < 0 || pin >= GPIO_NUM_MAX) {
+            continue;
+        }
+        const char *held = kvm_board_reserved_by(pin);
+        if (held) {
+            n += (size_t)snprintf(out + n, sizeof(out) - n,
+                                  "%s{\"pin\":%d,\"hz\":-1,\"level\":-1,\"error\":\"held by the board\"}",
+                                  done ? "," : "", pin);
+            done++;
             continue;
         }
         int hz = 0, level = 0;

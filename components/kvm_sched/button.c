@@ -154,9 +154,9 @@ static void task(void *arg)
 
 void kvm_button_init(void)
 {
-    /* Stack in PSRAM: the actions it runs write no flash, and internal RAM is
-       what TLS sessions need. */
-    if (xTaskCreateWithCaps(task, "button", 3072, NULL, 3, NULL, MALLOC_CAP_SPIRAM) != pdPASS) {
+    /* Internal stack: actions such as the network mode or the display switch
+       write settings to flash, and a flash write asserts on a PSRAM stack. */
+    if (xTaskCreate(task, "button", 4096, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the button task");
     }
 }

@@ -120,7 +120,7 @@ esp_err_t kvm_auth_challenge(httpd_req_t *req);
  * this is the only thing left to check them against. @p session is what
  * kvm_auth_session_of() gave for the upgrade.
  */
-void kvm_auth_mark_socket(int fd, const uint8_t session[32]);
+bool kvm_auth_mark_socket(int fd, const uint8_t session[32]);
 void kvm_auth_forget_socket(int fd);
 bool kvm_auth_socket_ok(int fd);
 /** The sign-in a marked socket was opened under; false for an unknown one. */

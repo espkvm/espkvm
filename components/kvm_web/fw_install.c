@@ -24,6 +24,7 @@
 #include "freertos/task.h"
 #include "kvm_board_header.h"
 #include "kvm_display.h"
+#include "kvm_notify.h"
 #include "kvm_settings.h"
 #include "web_priv.h"
 
@@ -393,20 +394,27 @@ static void install_task(void *arg)
  * The console has always done this from the browser, which is fine while
  * somebody is looking at it. Home Assistant is not: for the device to say "a
  * newer build exists" on its own, the device has to ask. Same URL as the
- * console reads (the upd_url setting), same rule as the rest of this file - the
- * device only reaches outside when fw_fetch says it may.
+ * console reads (the upd_url setting). The device only asks when fw_fetch says
+ * it may, or when the update check is on and a notification channel wants to
+ * hear of a new release (fw_watch.c).
  *
  * Small answer. Redirects are followed by hand, as for the download: when the
  * update host moved, 0.56 and older stopped here on a 301 and never heard of a
  * newer build again.
  */
+bool fw_may_check(void)
+{
+    return kvm_setting_bool("fw_fetch") ||
+           (kvm_setting_bool("upd_check") && kvm_notify_routes(KVM_NOTIFY_RELEASE));
+}
+
 esp_err_t fw_latest_version(char *out, size_t out_len)
 {
     if (!out || out_len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
     out[0] = '\0';
-    if (!kvm_setting_bool("fw_fetch")) {
+    if (!fw_may_check()) {
         return ESP_ERR_NOT_ALLOWED;
     }
     const char *url = kvm_setting_str("upd_url");

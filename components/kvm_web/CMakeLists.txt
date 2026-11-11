@@ -5,6 +5,8 @@ idf_component_register(
         "acme.c"
         "auth.c"
         "fw_install.c"
+        "fw_watch.c"
+        "fw_version.c"
         "ota_trial.c"
         "record_api.c"
         "totp.c"

@@ -73,6 +73,7 @@ static const notify_channel_t *const s_channels[] = {
     &notify_channel_tg,
     &notify_channel_hook,
     &notify_channel_push,
+    &notify_channel_ntfy, /* appended: a waiting event's left[] keeps this order */
 };
 #define NCH (sizeof(s_channels) / sizeof(s_channels[0]))
 _Static_assert(NCH <= NOTIFY_CH_MAX, "more channels than a waiting event has room for");
@@ -192,11 +193,14 @@ static uint8_t *grab_photo(size_t *out_len)
 {
     /* Either codec: on H.264 the device makes the JPEG from the held frame. */
     uint8_t *jpeg = NULL;
-    if (capture_snapshot_jpeg(&jpeg, out_len, 3000) != ESP_OK) {
+    const esp_err_t err = capture_snapshot_jpeg(&jpeg, out_len, 3000);
+    if (err != ESP_OK) {
+        ESP_LOGI(TAG, "no screenshot for the alert: %s", esp_err_to_name(err));
         *out_len = 0;
         return NULL;
     }
     if (*out_len > NOTIFY_PHOTO_MAX) {
+        ESP_LOGI(TAG, "no screenshot for the alert: %u bytes is too big", (unsigned)*out_len);
         free(jpeg);
         *out_len = 0;
         return NULL;
@@ -349,8 +353,9 @@ static void pending_add(const notify_event_t *ev)
     for (size_t c = 0; c < NCH; c++) {
         const uint32_t t = s_channels[c]->targets();
         any_set_up |= t != 0;
-        const bool takes = ev->kind == KVM_NOTIFY_ALL ||
-                           ((uint32_t)kvm_setting_int(s_channels[c]->route_key) >> ev->kind) & 1u;
+        const bool takes = ev->only[0] ? strcmp(ev->only, s_channels[c]->route_key) == 0
+                           : ev->kind == KVM_NOTIFY_ALL ||
+                               (((uint32_t)kvm_setting_int(s_channels[c]->route_key) >> ev->kind) & 1u);
         left[c] = takes ? t : 0;
         any |= left[c] != 0;
         photo |= left[c] && s_channels[c]->photo;
@@ -377,8 +382,13 @@ static void pending_add(const notify_event_t *ev)
     memcpy(p->left, left, sizeof(left));
     if (ev->op == EV_SEND) {
         if (photo && ev->want_photo && kvm_setting_bool("notify_snap") &&
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) <= NOTIFY_PHOTO_TYPICAL + NOTIFY_PSRAM_RESERVE) {
+            ESP_LOGI(TAG, "no screenshot for the alert: %u KB of PSRAM free",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        }
+        if (photo && ev->want_photo && kvm_setting_bool("notify_snap") &&
             s_pending_photo_bytes < PENDING_PHOTO_BYTES &&
-            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > NOTIFY_PHOTO_MAX + NOTIFY_PSRAM_RESERVE) {
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > NOTIFY_PHOTO_TYPICAL + NOTIFY_PSRAM_RESERVE) {
             p->photo = grab_photo(&p->photo_len);
             if (p->photo && (s_pending_photo_bytes + p->photo_len > PENDING_PHOTO_BYTES ||
                              heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < NOTIFY_PSRAM_RESERVE)) {
@@ -561,8 +571,18 @@ const uint8_t *notify_photo(const notify_pending_t *p, size_t *len, uint8_t **lo
     }
     /* Kept on the card: back for the send only. A card that has gone
        meanwhile just means a plain message. */
-    if (p->photo_file && heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > NOTIFY_PHOTO_MAX + NOTIFY_PSRAM_RESERVE) {
-        *loaded = (uint8_t *)card_read(p->id, "jpg", NOTIFY_PHOTO_MAX, len);
+    if (p->photo_file) {
+        /* Room for this file, not for the largest one there could be. */
+        char path[96];
+        card_path(path, sizeof(path), p->id, "jpg");
+        struct stat st;
+        if (stat(path, &st) == 0 && st.st_size > 0 && st.st_size <= NOTIFY_PHOTO_MAX &&
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > (size_t)st.st_size + NOTIFY_PSRAM_RESERVE) {
+            *loaded = (uint8_t *)card_read(p->id, "jpg", NOTIFY_PHOTO_MAX, len);
+        } else {
+            ESP_LOGI(TAG, "screenshot left out: %u KB of PSRAM free",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        }
     }
     if (!*loaded) {
         *len = 0;
@@ -759,6 +779,38 @@ void kvm_notify_status(kvm_notify_status_t *out)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_status;
     xSemaphoreGive(s_lock);
+}
+
+esp_err_t kvm_notify_send_test(const char *route_key)
+{
+    notify_event_t ev = {.op = EV_SEND, .kind = KVM_NOTIFY_ALL, .want_photo = true};
+    if (route_key && route_key[0]) {
+        bool known = false;
+        for (size_t c = 0; c < NCH; c++) {
+            known |= strcmp(route_key, s_channels[c]->route_key) == 0;
+        }
+        if (!known || strlen(route_key) >= sizeof(ev.only)) {
+            return ESP_ERR_NOT_FOUND;
+        }
+        strlcpy(ev.only, route_key, sizeof(ev.only));
+    }
+    strlcpy(ev.title, "ESP-KVM test", sizeof(ev.title));
+    strlcpy(ev.body, "If you can read this, notifications work.", sizeof(ev.body));
+    return notify_post(&ev) ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+bool kvm_notify_routes(kvm_notify_ev_t kind)
+{
+    if (!kvm_setting_bool("notify_enable") || kind >= KVM_NOTIFY_KINDS) {
+        return false;
+    }
+    for (size_t c = 0; c < NCH; c++) {
+        if (s_channels[c]->targets() &&
+            (((uint32_t)kvm_setting_int(s_channels[c]->route_key) >> kind) & 1u)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 size_t kvm_notify_ready_json(char *out, size_t cap)

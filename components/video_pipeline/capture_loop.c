@@ -402,8 +402,9 @@ void capture_loop_run(capture_ctx_t *c)
             if (!c->signal_present || c->mode_too_fast) {
                 continue; /* too fast was said once, by the monitor */
             }
-            /* The link state says whether the bridge transmits at all: with
-               clk_hs=0 and every lane stopped, nothing arrives on the ribbon. */
+            /* The link state says whether the bridge drives the lanes at all:
+               a working link between frames reads every lane stopped (LP-11);
+               no lane stopped and no high-speed clock means nothing holds them. */
             capture_csi_link_t link;
             capture_hw_csi_link(&link);
             ESP_LOGW(CAPTURE_LOG_TAG,
@@ -429,6 +430,13 @@ void capture_loop_run(capture_ctx_t *c)
         }
         hdmi_recover_cooldown_until_us = 0;
         capture_hw_frames_flowing();
+        /* A reference for the timeout line: what a working link reads. */
+        static int64_t s_link_sampled_us;
+        if (esp_timer_get_time() - s_link_sampled_us > 1000000) {
+            capture_csi_link_t link;
+            capture_hw_csi_link(&link);
+            s_link_sampled_us = esp_timer_get_time();
+        }
         while (xSemaphoreTake(c->csi_done_sem, 0) == pdTRUE) {
             /* Drop stale completions; done_fb always points at the newest completed frame. */
         }

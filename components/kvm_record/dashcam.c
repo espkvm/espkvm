@@ -186,7 +186,7 @@ static void poll_task(void *arg)
 /* ---- turning a clip into an MP4 --------------------------------------------- */
 
 static QueueHandle_t s_jobs;
-static volatile uint32_t s_converting; /* queued or running */
+static _Atomic uint32_t s_converting; /* queued or running; two tasks change it */
 static portMUX_TYPE s_last_mu = portMUX_INITIALIZER_UNLOCKED;
 static char s_last_clip[64];
 

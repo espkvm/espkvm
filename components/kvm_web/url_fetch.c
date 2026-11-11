@@ -27,6 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "http_recv.h"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_tls.h"
@@ -447,13 +448,9 @@ static esp_err_t fetch_post(httpd_req_t *req)
     }
     char body[URL_MAX + 160];
     const int len = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
-    int got = 0;
-    while (got < len) {
-        const int r = httpd_req_recv(req, body + got, len - got);
-        if (r <= 0) {
-            return send_json_error(req, "400 Bad Request", "could not read the body");
-        }
-        got += r;
+    const int got = kvm_recv_all(req, body, len);
+    if (got < 0) {
+        return send_json_error(req, "400 Bad Request", "could not read the body");
     }
     body[got] = '\0';
     cJSON *j = cJSON_Parse(body);
