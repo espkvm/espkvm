@@ -94,8 +94,8 @@ CONFIG_KVM_BTN_HOLD_DEFAULT=12
 # console, a clock module) fold away in Settings, and so does the Pins tab.
 # The serial port over the target's USB cable still works.
 CONFIG_KVM_BOARD_NO_FREE_GPIO=y
-# The TC358743's audio lines are not wired to the P4 on this board.
-CONFIG_KVM_ENABLE_AUDIO=n
+# The TC358743's audio lines are not wired to the P4 on this board, so sound
+# comes only as the USB speaker (Settings > Audio > Sound over USB).
 
 # --- console ----------------------------------------------------------------
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

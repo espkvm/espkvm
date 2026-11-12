@@ -16,7 +16,7 @@ idf_component_register(
         kvm_log
         kvm_atx
         kvm_serial
-        kvm_agent
+        kvm_tools
         kvm_audio
         kvm_netlog
         kvm_webrtc

@@ -39,3 +39,21 @@ void resample_reset(resampler_t *rs, uint32_t rate);
  * frames written; @p first_us is the time of the first one.
  */
 size_t resample_block(resampler_t *rs, const kvm_audio_block_t *b, int16_t *out, int64_t *first_us);
+
+/*
+ * The USB speaker source (usb_source.c). The task is woken once per
+ * @p block_frames of sound; a take hands out one whole block or nothing.
+ */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+typedef enum { USB_TAKE_NONE, USB_TAKE_OK, USB_TAKE_GAP } usb_take_t;
+
+void usb_src_init(TaskHandle_t task, uint16_t block_frames);
+/** The target has picked the speaker and is playing to it. */
+bool usb_src_streaming(void);
+/** Throw away what waits, so nobody hears it late. */
+void usb_src_drain(void);
+/** GAP: sound was lost, so the next block starts a new epoch. */
+usb_take_t usb_src_take(int16_t *pcm, uint16_t frames, int64_t *start_us);
+uint32_t usb_src_rate(void);

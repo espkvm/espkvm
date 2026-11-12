@@ -81,6 +81,10 @@ static const char *const s_rtc_chip_choices[] = {"Auto", "Off", "DS3231", "PCF85
                                                  "PCF85063", "PCF8523"};
 static const char *const s_rtc_bus_choices[] = {"The capture board's I2C", "Its own pins"};
 static const char *const s_dashcam_store_choices[] = {"memory", "microSD"};
+/* Bit n = page n of the status display; kvm_display_driver.h KVM_DISP_PAGE_*. */
+static const char *const s_disp_pages[] = {"network", "video", "health", "picture"};
+static const char *const s_disp_pages_labels[] = {"Network", "Video", "Health",
+                                                  "Picture (colour panels)"};
 /* Index 1.. must match k_sd_steps_khz[] in kvm_storage.c. */
 static const char *const s_sd_speed_choices[] = {"auto", "40 MHz", "20 MHz", "10 MHz", "4 MHz", "2 MHz"};
 static const char *const s_log_choices[] = {"error", "warn", "info", "debug"};
@@ -142,8 +146,8 @@ static const char *const s_targetos_choices[] = {"auto", "windows", "macos", "li
 /* Must match k_bauds in kvm_serial.c. */
 static const char *const s_baud_choices[] = {"9600",   "19200",  "38400",  "57600",
                                              "115200", "230400", "460800", "921600"};
-/* Must match USB_SERIAL_AGENT in kvm_agent.c and the 1 in kvm_serial.c. */
-static const char *const s_usb_serial_choices[] = {"off", "console", "agent"};
+/* Must match USB_SERIAL_TOOLS in kvm_tools.c and the 1 in kvm_serial.c. */
+static const char *const s_usb_serial_choices[] = {"off", "console", "tools"};
 static const char *const s_pad_choices[] = {"off", "switch", "switch_alone", "xinput",
                                             "xinput_alone", "xbox"};
 /* What the button on the box does. Order must match k_actions[] in
@@ -170,7 +174,7 @@ static const char *const s_pad_labels[] = {"Off", "Nintendo Switch", "Nintendo S
 static const char *const s_netmode_labels[] = {"Ethernet", "WiFi", "Own hotspot", "Ethernet, WiFi as backup"};
 static const char *const s_fallback_labels[] = {"Keep trying", "Also start a hotspot"};
 static const char *const s_log_labels[] = {"Errors", "Warnings", "Info", "Debug"};
-static const char *const s_usb_serial_labels[] = {"Off", "Serial console", "Agent"};
+static const char *const s_usb_serial_labels[] = {"Off", "Serial console", "ESP-KVM Tools"};
 
 /* clang-format off */
 static const kvm_setting_t s_settings[] = {
@@ -251,7 +255,8 @@ static const kvm_setting_t s_settings[] = {
                 "source that refuses a list. \"480p\" offers 720x480 and nothing bigger, "
                 "for old consoles and TV boxes. \"1080p50\", the default, is \"Full\" with "
                 "1920x1080@50 first: the target sends a frame every 20 ms instead of 33, "
-                "so the pointer shows up sooner, for a frame or two a second less. Only "
+                "so the pointer shows up sooner, for a frame or two a second less. It also "
+                "offers 1280x1024 and 1600x900 at 60 Hz. Only "
                 "boards with a rev 3.x chip and a TC358743 take 50 Hz; others get "
                 "\"Full\". Text modes stay on offer either way, so a BIOS still comes "
                 "through as text.",
@@ -1040,7 +1045,7 @@ static const kvm_setting_t s_settings[] = {
                 "sees it as /dev/ttyACM0, Windows as a COM port, macOS as /dev/cu.usbmodem*. "
                 "\"Serial console\": the serial console uses it instead of the pins below; on Linux "
                 "run a login on it with \"systemctl enable --now serial-getty@ttyACM0\". "
-                "\"Agent\": it is for espkvm-agent, a small program on the target that shows "
+                "\"ESP-KVM Tools\": for the small program of that name on the target, which shows "
                 "what the machine is and shares its clipboard. Not together with a gamepad. "
                 "Takes effect after a restart.",
         .min = 0, .max = ENUM_MAX(s_usb_serial_choices), .def = 0, .choices = s_usb_serial_choices,
@@ -1101,6 +1106,16 @@ static const kvm_setting_t s_settings[] = {
         .help = "-1 until you pick one.",
         .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO, .flags = KVM_SF_PIN,
         .visible_key = "aud_enable", .visible_val = 1,
+    },
+    {
+        .key = "aud_usb", .section = "audio", .group = "Sound over USB", .type = KVM_VT_BOOL,
+        .title = "Sound over USB",
+        .help = "For a board that cannot take the sound from HDMI. The target gets a USB "
+                "speaker, \"ESP-KVM Speaker\"; pick it as the sound output there, and what "
+                "it plays comes to the console and the recordings. The target's own "
+                "speakers go quiet while it is picked, and a BIOS plays nothing to it. When "
+                "on, it is used instead of HDMI audio. Takes effect after a restart.",
+        .def = 0, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
     },
 
     /* ---- network -------------------------------------------------------- */
@@ -1777,13 +1792,12 @@ static const kvm_setting_t s_settings[] = {
         .visible_key = "disp_enable", .visible_val = 1,
     },
     {
-        .key = "disp_picture", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,
-        .title = "Picture page",
-        .help = "Adds a page with a small copy of the target's screen. It redraws ten "
-                "times a second, or twice while a browser is watching. Colour panels "
-                "only.",
-        .def = 0, .requires_cap = -1, .flags = DISP_COLOUR_FLAGS,
-        .visible_key = DISP_COLOUR_KEY, .visible_val = DISP_COLOUR_VAL,
+        .key = "disp_sleep", .section = "display", .group = "Screen", .type = KVM_VT_INT,
+        .title = "Sleep after",
+        .help = "The screen goes dark after this long, and the display button wakes it on "
+                "the page it had. An update or a notice lights it too. 0 keeps it on.",
+        .min = 0, .max = 3600, .def = 0, .unit = "s", .requires_cap = -1,
+        .visible_key = "disp_enable", .visible_val = 1,
     },
     {
         .key = "disp_rotate_180", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,
@@ -1793,6 +1807,17 @@ static const kvm_setting_t s_settings[] = {
                 "put it. Takes effect at once: the panel is re-initialised where it stands, "
                 "with no restart.",
         .def = 0, .requires_cap = -1,
+        .visible_key = "disp_enable", .visible_val = 1,
+    },
+    {
+        .key = "disp_pages", .section = "display", .group = "Pages", .type = KVM_VT_INT,
+        .title = "Shown",
+        .help = "Which status pages the display shows. The picture page is a small copy of "
+                "the target's screen on a colour panel; it redraws ten times a second, or "
+                "twice while a browser is watching. With none ticked the network page stays. "
+                "The Wi-Fi join code still comes up in hotspot mode.",
+        .min = 0, .max = 15, .def = 7, .choices = s_disp_pages, .labels = s_disp_pages_labels,
+        .requires_cap = -1, .flags = KVM_SF_MASK,
         .visible_key = "disp_enable", .visible_val = 1,
     },
     /* GC9A01 SPI pins (the I2C OLEDs need none - they share the capture bus).

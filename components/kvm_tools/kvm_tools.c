@@ -2,7 +2,7 @@
  * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "kvm_agent.h"
+#include "kvm_tools.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,13 +20,13 @@
 #include "kvm_settings.h"
 #include "usb_hid.h"
 
-static const char *TAG = "agent";
+static const char *TAG = "tools";
 
-/* usb_serial: 0 off, 1 console, 2 agent. Must match s_usb_serial_choices. */
-#define USB_SERIAL_AGENT 2
+/* usb_serial: 0 off, 1 console, 2 tools. Must match s_usb_serial_choices. */
+#define USB_SERIAL_TOOLS 2
 
-/* The agent escapes <, > and & as <: six bytes for one, at worst. */
-#define AGENT_LINE_MAX (KVM_AGENT_MAX_TEXT * 6 + 1024)
+/* The program escapes <, > and & as <: six bytes for one, at worst. */
+#define TOOLS_LINE_MAX (KVM_TOOLS_MAX_TEXT * 6 + 1024)
 #define RX_STREAM 16384
 #define TASK_STACK 4096
 #define TASK_PRIO 4
@@ -39,7 +39,7 @@ static bool s_overflow;
 static SemaphoreHandle_t s_mu;   /* status and the waiting slot */
 static SemaphoreHandle_t s_call; /* one request at a time */
 static SemaphoreHandle_t s_done; /* the answer has come */
-static kvm_agent_status_t s_st;
+static kvm_tools_status_t s_st;
 static int s_next_id = 1;
 static int s_wait_id;     /* the id being waited for, 0 for none */
 static char *s_answer;    /* its line, handed to the caller */
@@ -49,7 +49,7 @@ static char *s_answer;    /* its line, handed to the caller */
 static void on_rx(const uint8_t *data, size_t len)
 {
     if (xStreamBufferSend(s_rx, data, len, pdMS_TO_TICKS(20)) != len) {
-        ESP_LOGW(TAG, "rx overflow: dropped bytes from the agent");
+        ESP_LOGW(TAG, "rx overflow: dropped bytes from the target");
     }
 }
 
@@ -57,7 +57,7 @@ static void on_dtr(bool dtr)
 {
     xSemaphoreTake(s_mu, portMAX_DELAY);
     if (!dtr && s_st.connected) {
-        ESP_LOGI(TAG, "agent closed the port");
+        ESP_LOGI(TAG, "the program closed the port");
         s_st.connected = false;
     }
     xSemaphoreGive(s_mu);
@@ -65,7 +65,10 @@ static void on_dtr(bool dtr)
 
 static void take_hello(const cJSON *h)
 {
-    const cJSON *ver = cJSON_GetObjectItem(h, "agent");
+    const cJSON *ver = cJSON_GetObjectItem(h, "tools");
+    if (!ver) {
+        ver = cJSON_GetObjectItem(h, "agent"); /* versions before the rename */
+    }
     const cJSON *os = cJSON_GetObjectItem(h, "os");
     const cJSON *ops = cJSON_GetObjectItem(h, "ops");
     xSemaphoreTake(s_mu, portMAX_DELAY);
@@ -86,7 +89,7 @@ static void take_hello(const cJSON *h)
     }
     xSemaphoreGive(s_mu);
     if (!was) {
-        ESP_LOGI(TAG, "agent %s on %s", s_st.version, s_st.os);
+        ESP_LOGI(TAG, "ESP-KVM Tools %s on %s", s_st.version, s_st.os);
     }
 }
 
@@ -124,7 +127,7 @@ static void handle_line(char *line, size_t len)
     cJSON_Delete(j);
 }
 
-static void agent_task(void *arg)
+static void tools_task(void *arg)
 {
     (void)arg;
     uint8_t buf[512];
@@ -138,25 +141,25 @@ static void agent_task(void *arg)
                 }
                 s_len = 0;
                 s_overflow = false;
-            } else if (s_len < AGENT_LINE_MAX - 1) {
+            } else if (s_len < TOOLS_LINE_MAX - 1) {
                 s_line[s_len++] = (char)buf[i];
             } else if (!s_overflow) {
-                ESP_LOGW(TAG, "line over %d bytes from the agent, dropped", AGENT_LINE_MAX);
+                ESP_LOGW(TAG, "line over %d bytes from the target, dropped", TOOLS_LINE_MAX);
                 s_overflow = true;
             }
         }
     }
 }
 
-esp_err_t kvm_agent_init(void)
+esp_err_t kvm_tools_init(void)
 {
     if (s_rx) {
         return ESP_OK;
     }
-    if (kvm_setting_int("usb_serial") != USB_SERIAL_AGENT || !usb_hid_serial_present()) {
+    if (kvm_setting_int("usb_serial") != USB_SERIAL_TOOLS || !usb_hid_serial_present()) {
         return ESP_OK;
     }
-    s_line = heap_caps_malloc(AGENT_LINE_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_line = heap_caps_malloc(TOOLS_LINE_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_rx = xStreamBufferCreateWithCaps(RX_STREAM, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_mu = xSemaphoreCreateMutex();
     s_call = xSemaphoreCreateMutex();
@@ -165,18 +168,18 @@ esp_err_t kvm_agent_init(void)
         return ESP_ERR_NO_MEM;
     }
     /* Stack in PSRAM: the task never runs with the flash cache off. */
-    if (xTaskCreateWithCaps(agent_task, "agent", TASK_STACK, NULL, TASK_PRIO, NULL, MALLOC_CAP_SPIRAM) !=
+    if (xTaskCreateWithCaps(tools_task, "tools", TASK_STACK, NULL, TASK_PRIO, NULL, MALLOC_CAP_SPIRAM) !=
         pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     s_st.port = true;
     usb_hid_serial_set_line_state(on_dtr);
     usb_hid_serial_set_rx(on_rx);
-    ESP_LOGI(TAG, "waiting for the agent on the USB serial port");
+    ESP_LOGI(TAG, "waiting for ESP-KVM Tools on the USB serial port");
     return ESP_OK;
 }
 
-void kvm_agent_status(kvm_agent_status_t *out)
+void kvm_tools_status(kvm_tools_status_t *out)
 {
     memset(out, 0, sizeof(*out));
     if (!s_mu) {
@@ -187,7 +190,7 @@ void kvm_agent_status(kvm_agent_status_t *out)
     xSemaphoreGive(s_mu);
 }
 
-esp_err_t kvm_agent_call(const char *op, const char *params_json, int timeout_ms, char **out)
+esp_err_t kvm_tools_call(const char *op, const char *params_json, int timeout_ms, char **out)
 {
     *out = NULL;
     if (!s_mu) {

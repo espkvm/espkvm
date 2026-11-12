@@ -80,6 +80,15 @@ static SemaphoreHandle_t s_notice_lock;
 static TaskHandle_t s_task;
 /* Presses of the page button so far; the driver pages when it changes. */
 static volatile uint32_t s_page_presses;
+/* disp_sleep: the glass goes dark this long after the last wake-up (boot, the
+   button, a notice) and the next one lights it again. */
+static volatile int64_t s_wake_us;
+static volatile bool s_dark;
+
+static void wake(void)
+{
+    s_wake_us = esp_timer_get_time();
+}
 
 void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t ttl_ms)
 {
@@ -104,6 +113,9 @@ void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t
     s_notice.active = true;
     s_notice.expires_us = ttl_ms ? esp_timer_get_time() + (int64_t)ttl_ms * 1000 : 0;
     xSemaphoreGive(s_notice_lock);
+    if (changed) {
+        wake(); /* an update or the reset button must be seen */
+    }
 
     if (changed && s_task) {
         xTaskNotifyGive(s_task);
@@ -254,7 +266,7 @@ static void gather(kvm_display_status_t *st)
     st->page_presses = s_page_presses;
     const int dwell = (int)kvm_setting_int("disp_dwell");
     st->dwell_s = (uint8_t)(dwell < 0 ? 0 : dwell > 255 ? 255 : dwell);
-    st->picture_page = kvm_setting_bool("disp_picture");
+    st->pages = (uint8_t)(kvm_setting_int("disp_pages") & 0x0f);
     st->usb = usb_hid_target_suspended() ? 3 : usb_hid_ready() ? 2 : usb_hid_bus_alive() ? 1 : 0;
 
     const esp_app_desc_t *app = esp_app_get_description();
@@ -291,6 +303,7 @@ static void display_task(void *arg)
         if (ctx && (!want || sel != panel || rotation_changed)) {
             drv->detach(ctx);
             ctx = NULL;
+            s_dark = false;
         }
         if (!want) {
             if (drv || !told_off) {
@@ -322,6 +335,17 @@ static void display_task(void *arg)
 
         kvm_display_status_t st;
         gather(&st);
+        const int64_t sleep_us = (int64_t)kvm_setting_int("disp_sleep") * 1000000;
+        const bool asleep = drv->sleep && sleep_us > 0 && !st.notice[0] &&
+                            esp_timer_get_time() - s_wake_us >= sleep_us;
+        if (asleep != s_dark) {
+            drv->sleep(ctx, asleep);
+            s_dark = asleep;
+        }
+        if (asleep) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(RENDER_TICK_MS));
+            continue;
+        }
         if (drv->render(ctx, &st) != ESP_OK) {
             /* A single failed write is almost always transient - the shared I2C
              * bus busy while the encoder pegs the other core - so keep the panel
@@ -330,6 +354,7 @@ static void display_task(void *arg)
             if (++fails >= 5) {
                 drv->detach(ctx);
                 ctx = NULL;
+                s_dark = false;
                 fails = 0;
                 kvm_cap_report(KVM_CAP_DISPLAY, false, "display stopped responding");
             }
@@ -364,9 +389,10 @@ void kvm_display_next_page(void)
 {
     if (!kvm_setting_bool("disp_enable")) {
         kvm_setting_set_int("disp_enable", 1);
-    } else {
-        s_page_presses++;
+    } else if (!s_dark) {
+        s_page_presses++; /* a dark screen only wakes, on the page it had */
     }
+    wake();
     if (s_task) {
         xTaskNotifyGive(s_task);
     }
@@ -375,6 +401,7 @@ void kvm_display_next_page(void)
 void kvm_display_toggle(void)
 {
     kvm_setting_set_int("disp_enable", !kvm_setting_bool("disp_enable"));
+    wake();
     if (s_task) {
         xTaskNotifyGive(s_task);
     }
@@ -384,6 +411,7 @@ void kvm_display_init(void)
 {
     /* Pinned to core 1: the H.264 encoder saturates core 0, and the display's
      * blocking I2C writes must not fight it there or they starve and time out. */
+    wake();
     s_notice_lock = xSemaphoreCreateMutex();
     if (!s_notice_lock) {
         ESP_LOGW(TAG, "no memory for the notice lock; notices will be dropped");

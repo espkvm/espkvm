@@ -966,7 +966,7 @@ static bool session_alive_locked(const uint8_t hash[32])
  * What a view-only sign-in may reach: reading, never acting. A list of what is
  * allowed rather than of what is not, so an endpoint added later stays closed
  * to it until someone decides otherwise. Left out on purpose: the target's
- * clipboard (agent), the crash dump and the device log, and the pin probe,
+ * clipboard (ESP-KVM Tools), the crash dump and the device log, and the pin probe,
  * which drives pins although it is a GET.
  */
 static const char *const k_view_get[] = {
@@ -979,8 +979,8 @@ static const char *const k_view_get[] = {
     "/api/v1/cec",                "/api/v1/storage/images",    "/api/v1/storage/fetch",
     "/api/v1/regions",            "/api/v1/runbooks/status",   "/api/v1/schedules/status",
     "/api/v1/notify/status",      "/api/v1/serial",            "/api/v1/serial/log",
-    "/api/v1/netlog",             "/api/v1/netlog/log",        "/api/v1/agent",
-    "/api/v1/agent/info",         "/api/v1/tls",               "/api/v1/pins",
+    "/api/v1/netlog",             "/api/v1/netlog/log",        "/api/v1/tools",
+    "/api/v1/tools/info",         "/api/v1/tls",               "/api/v1/pins",
     "/api/v1/wifi/scan",          "/api/v1/viewers",
     /* The streams. Input over /ws and typing into /serial are dropped there. */
     "/ws",                        "/video",                    "/audio",

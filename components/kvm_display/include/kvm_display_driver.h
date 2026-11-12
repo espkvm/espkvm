@@ -106,9 +106,10 @@ typedef struct {
     /** Seconds each status page stays up, or 0: pages change only on the
         button. */
     uint8_t dwell_s;
-    /** A colour panel adds a page with a small copy of the target's screen,
-        see kvm_display_picture(). */
-    bool picture_page;
+    /** Which pages to show, bit n = KVM_DISP_PAGE_* n. A panel skips the
+        ones it does not have (the picture on a mono OLED), and shows the
+        logo when none is left. */
+    uint8_t pages;
     char version[32];        /**< firmware version, e.g. "v.0.20.0" */
 } kvm_display_status_t;
 
@@ -123,6 +124,37 @@ typedef struct {
  * than the tick provides can run its own timer from attach(). The core never
  * paginates or lays anything out.
  */
+/* The status pages, in the order they cycle; disp_pages has one bit each. */
+enum {
+    KVM_DISP_PAGE_NETWORK,
+    KVM_DISP_PAGE_VIDEO,
+    KVM_DISP_PAGE_HEALTH,
+    KVM_DISP_PAGE_PICTURE, /* a small copy of the target's screen, colour panels */
+    KVM_DISP_PAGE_NONE = 0xff, /* none of this panel's pages is ticked: the logo */
+};
+
+/**
+ * The page after @p cur among those set in @p pages, below @p count (the pages
+ * this panel has), wrapping around. @p cur need not be set itself: that is how
+ * a page switched off while up is left. KVM_DISP_PAGE_NONE when none is set.
+ */
+static inline uint8_t kvm_disp_page_next(uint8_t pages, uint8_t cur, uint8_t count)
+{
+    for (uint8_t i = 1; i <= count; i++) {
+        const uint8_t p = (uint8_t)((cur + i) % count);
+        if (pages & (1u << p)) {
+            return p;
+        }
+    }
+    return KVM_DISP_PAGE_NONE;
+}
+
+/** @p cur if it is still shown, else the next one that is. */
+static inline uint8_t kvm_disp_page_valid(uint8_t pages, uint8_t cur, uint8_t count)
+{
+    return cur < count && (pages & (1u << cur)) ? cur : kvm_disp_page_next(pages, cur, count);
+}
+
 typedef struct {
     const char *name;  /**< selector value (matches a "disp_type" choice) + log tag */
     const char *label; /**< human-readable name */
@@ -142,6 +174,12 @@ typedef struct {
      * usual tick of about a second. A notice still cuts the wait short.
      */
     uint32_t (*next_render_ms)(void *ctx);
+    /**
+     * Turn the glass dark (@p asleep) or back on, keeping everything attach()
+     * set up. No render() comes while it is dark; the first one after waking
+     * redraws the whole screen.
+     */
+    void (*sleep)(void *ctx, bool asleep);
 } kvm_display_driver_t;
 
 /**

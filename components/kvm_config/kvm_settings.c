@@ -226,6 +226,25 @@ static void migrate_notify_release(nvs_handle_t nvs)
     (void)nvs_commit(nvs);
 }
 
+/*
+ * The picture page had its own switch, disp_picture. It is bit 3 of the page
+ * set now; a device that had it on gets that bit, once, and the old key goes.
+ */
+static void migrate_disp_picture(nvs_handle_t nvs)
+{
+    int32_t on;
+    if (nvs_get_i32(nvs, "disp_picture", &on) != ESP_OK) {
+        return;
+    }
+    const int idx = find_index("disp_pages");
+    if (on && idx >= 0 && nvs_set_i32(nvs, "disp_pages", s_values[idx].i | (1 << 3)) == ESP_OK) {
+        s_values[idx].i |= 1 << 3;
+    }
+    (void)nvs_erase_key(nvs, "disp_picture");
+    (void)nvs_commit(nvs);
+    ESP_LOGI(TAG, "display: the picture switch moved into the page set");
+}
+
 esp_err_t kvm_settings_init(void)
 {
     if (s_values) {
@@ -274,6 +293,7 @@ esp_err_t kvm_settings_init(void)
     migrate_update_url(nvs);
     migrate_notify_routes(nvs);
     migrate_notify_release(nvs);
+    migrate_disp_picture(nvs);
     nvs_close(nvs);
     ESP_LOGI(TAG, "%u settings loaded", (unsigned)s_count);
     profiles_init();

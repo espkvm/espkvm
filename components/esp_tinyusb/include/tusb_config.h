@@ -205,6 +205,20 @@ ESP_STATIC_ASSERT(CFG_TUD_VENDOR_TX_BUFSIZE >= EP_SIZE_VENDOR, "Vendor TX buffer
 #define CFG_TUD_DFU_RUNTIME         CONFIG_TINYUSB_DFU_MODE_DFU_RUNTIME
 #define CFG_TUD_BTH                 CONFIG_TINYUSB_BTH_ENABLED
 
+/* ESP-KVM fork: a USB speaker for the target (kvm_audio usb_source.c). One
+ * 48 kHz 16-bit stereo OUT stream on the SOF clock, no feedback endpoint. The
+ * class only answers when kvm_hid puts it in the descriptor (aud_usb). The
+ * software FIFO holds about 21 ms; the reader is woken every 5 ms of sound. */
+#if CONFIG_KVM_ENABLE_AUDIO
+#define CFG_TUD_AUDIO                       1
+#define CFG_TUD_AUDIO_ENABLE_EP_OUT         1
+#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX  196 /* 1 ms at full speed, 48 frames + 1 */
+#define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ 4096
+#define CFG_TUD_AUDIO_CTRL_BUF_SZ           64
+#else
+#define CFG_TUD_AUDIO                       0
+#endif
+
 // NCM NET Mode NTB buffers configuration
 #define CFG_TUD_NCM_OUT_NTB_N         CONFIG_TINYUSB_NCM_OUT_NTB_BUFFS_COUNT
 #define CFG_TUD_NCM_IN_NTB_N          CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT

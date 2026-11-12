@@ -20,6 +20,7 @@
 #include "ff.h"
 #include "sdmmc_cmd.h"
 #include "esp_heap_caps.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 
@@ -1018,10 +1019,7 @@ static void sd_cd_init(void)
     };
     esp_err_t err = gpio_config(&io);
     if (err == ESP_OK) {
-        err = gpio_install_isr_service(0);
-        if (err == ESP_ERR_INVALID_STATE) {
-            err = ESP_OK;
-        }
+        err = kvm_board_gpio_isr_service();
     }
     if (err == ESP_OK) {
         err = gpio_isr_handler_add(CONFIG_KVM_SD_CD_GPIO, sd_cd_isr, NULL);
@@ -1043,6 +1041,23 @@ static bool sd_cd_says_card(void)
 #else
     return true;
 #endif
+}
+
+/* The switch read once at boot, before the watcher sets its interrupt up. */
+static bool sd_cd_boot_says_card(void)
+{
+#if CONFIG_KVM_SD_CD_GPIO >= 0
+    const gpio_config_t io = {
+        .pin_bit_mask = 1ULL << CONFIG_KVM_SD_CD_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE, /* as in sd_cd_init() */
+    };
+    if (gpio_config(&io) != ESP_OK) {
+        return true; /* ask the card instead */
+    }
+    esp_rom_delay_us(100); /* let the pull-up charge the line */
+#endif
+    return sd_cd_says_card();
 }
 
 static void sd_probe_task(void *arg)
@@ -1290,7 +1305,9 @@ esp_err_t kvm_storage_init(void)
     }
     slot_power_claim();
 
-    const esp_err_t err = sd_mount(SD_MOUNT_ATTEMPTS);
+    /* An empty slot by its switch is not tried: ten timeouts would only fill
+     * the boot log. The watcher mounts a card that goes in later. */
+    const esp_err_t err = sd_cd_boot_says_card() ? sd_mount(SD_MOUNT_ATTEMPTS) : ESP_ERR_NOT_FOUND;
     s_bus_released = false;
 
     /* Watches the slot whether or not a card is in it right now. */

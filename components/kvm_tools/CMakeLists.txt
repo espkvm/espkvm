@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "kvm_agent.c"
+    SRCS "kvm_tools.c"
     INCLUDE_DIRS "include"
     REQUIRES esp_common
     PRIV_REQUIRES

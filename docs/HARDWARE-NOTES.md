@@ -81,6 +81,8 @@ right in it, which on a plain wallpaper looked like a square pasted on the
 screen. The driver now starts CSI at 32 words when the line comes in faster than
 it goes out (`fit_fifo_level()` in tc358743.c).
 
+The same line-time rule lets the 16-bit profile offer 1280x1024@60 and 1600x900@60 (both 108 MHz in VESA DMT). A 1280-pixel line comes in in 11.9 us and goes out in 10.5, a 1600-pixel one in 14.8 and 13.2, so CSI keeps the default start level and the FIFO holds less than it does at 1080p30.
+
 Capturing every frame of 1080p50 costs the encoder 4 ms a frame (36 -> 40 at
 1080p): the capture writes 207 MB/s into PSRAM instead of 124, and the encoder
 is bound by PSRAM. The encoder only takes every other frame anyway, so the CSI

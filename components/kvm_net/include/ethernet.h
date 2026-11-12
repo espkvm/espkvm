@@ -18,6 +18,14 @@ esp_err_t ethernet_init(void);
 void kvm_net_advertise(const char *hostname);
 
 /**
+ * The name another device already holds. mDNS on the LAN renames this device
+ * to "<name>-2" when it finds its name taken, and Tailscale names it
+ * "<name>-1". Each buffer gets the name it ended up with there, or "" when it
+ * got the one it asked for.
+ */
+void kvm_net_name_taken(char *lan, size_t lan_len, char *tailnet, size_t tailnet_len);
+
+/**
  * Told the IPv4 address the device just got, so it can be named in the TLS
  * certificate. Returns true if that was news (the recorder logs it).
  *

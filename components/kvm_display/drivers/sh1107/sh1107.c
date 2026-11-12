@@ -46,10 +46,16 @@ static void detach(void *ctx)
     mono_oled_detach((mono_oled_t *)ctx);
 }
 
+static void panel_sleep(void *ctx, bool asleep)
+{
+    mono_oled_sleep((mono_oled_t *)ctx, asleep);
+}
+
 const kvm_display_driver_t kvm_display_sh1107 = {
     .name = "sh1107",
     .label = "SH1107",
     .attach = attach,
     .render = render,
     .detach = detach,
+    .sleep = panel_sleep,
 };

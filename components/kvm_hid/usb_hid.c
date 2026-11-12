@@ -11,6 +11,7 @@
 #include "class/hid/hid_device.h"
 #include "class/msc/msc_device.h"
 #include "driver/gpio.h"
+#include "kvm_board.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -94,12 +95,20 @@ enum {
 #define EPNUM_CDC_IN 0x86
 #define STR_CDC 8 /* its interface name in s_string_descriptor */
 
+/* The USB speaker (aud_usb): one isochronous OUT endpoint, no IN, so it fits
+ * beside everything else. Its sound goes to kvm_audio (usb_source.c). */
+#define EPNUM_AUDIO_OUT 0x07
+#define STR_AUDIO 9
+
 /* Espressif's VID with the product IDs esp_tinyusb would compute (bit 0 = CDC):
  * the plain device keeps the ID it always had, the one with a serial port gets
  * its own so a target never mixes up the two. */
 #define KVM_USB_VID 0x303A
 #define KVM_USB_PID 0x4012
 #define KVM_USB_PID_CDC 0x4013
+/* The speaker changes the device as much as the serial port does, so it adds
+ * its own bit: a target that cached the plain layout never mixes them up. */
+#define KVM_USB_PID_AUDIO_BIT 0x0020
 
 /** Report IDs on the ITF_POINTER interface. Other interfaces use none. */
 enum {
@@ -232,23 +241,27 @@ typedef struct __attribute__((packed)) {
 /* Order matters: the string index each interface names below is this array's
  * subscript. 0 is the language ID, 1..3 are the device strings, 4+ name the
  * interfaces (keyboard 4, pointer 5, relative mouse 6, virtual media 7, serial
- * port 8). The gamepad's interface has no name - nor does the real pad's. Not
+ * port 8, speaker 9). The gamepad's interface has no name - nor does the real pad's. Not
  * const: the gamepad modes swap in the pad's own names. */
 static const char *s_string_descriptor[] = {
     (char[]){0x09, 0x04},
     "ESP-KVM",
-    "ESP-KVM Keyboard/Mouse",
+    "ESP-KVM",
     "0",
     "Keyboard",
     "Pointer",
     "Relative Mouse",
     "Virtual Media",
     "ESP-KVM Serial Console",
+    "ESP-KVM Speaker",
 };
+/* esp_tinyusb refuses a table longer than its own array. */
+_Static_assert(sizeof(s_string_descriptor) / sizeof(s_string_descriptor[0]) <= 10,
+               "raise USB_STRING_DESCRIPTOR_ARRAY_SIZE in esp_tinyusb");
 
 /* The device itself when no gamepad stands in for it. bDeviceClass is patched
- * to "see the IADs" when the serial port is on: Windows needs that to bind a
- * CDC function inside a composite device. */
+ * to "see the IADs" when the serial port or the speaker is on: Windows needs
+ * that to bind a CDC or audio function inside a composite device. */
 static tusb_desc_device_t s_kvm_device_desc = {
     .bLength = sizeof(tusb_desc_device_t),
     .bDescriptorType = TUSB_DESC_DEVICE,
@@ -288,6 +301,40 @@ static const tusb_desc_device_t k_pad_device_desc = {
     .bNumConfigurations = 1,
 };
 
+#if CFG_TUD_AUDIO
+/*
+ * The speaker: an audio control interface with a fixed 48 kHz clock (entity 4),
+ * the USB stream in (terminal 1) and a desktop speaker out (terminal 3); then
+ * the streaming interface, alt 0 idle and alt 1 with 16-bit stereo PCM. The
+ * clock follows SOF, so no feedback endpoint. At high speed the endpoint is
+ * polled every microframe (6 frames, room for 7): the DWC2 driver misses OUT
+ * packets at longer intervals (found by JetKVM, whose descriptor this follows).
+ */
+#define USB_AUDIO_DESC(itf, ep, hs)                                                                \
+    TUD_AUDIO_DESC_IAD(itf, 2, 0), TUD_AUDIO_DESC_STD_AC(itf, 0, STR_AUDIO),                     \
+        TUD_AUDIO_DESC_CS_AC(0x0200, AUDIO_FUNC_DESKTOP_SPEAKER,                                  \
+                             TUD_AUDIO_DESC_CLK_SRC_LEN + TUD_AUDIO_DESC_INPUT_TERM_LEN +         \
+                                 TUD_AUDIO_DESC_OUTPUT_TERM_LEN,                                  \
+                             0),                                                                  \
+        TUD_AUDIO_DESC_CLK_SRC(4, 5, AUDIO_CTRL_R, 1, 0),                                          \
+        TUD_AUDIO_DESC_INPUT_TERM(1, AUDIO_TERM_TYPE_USB_STREAMING, 0, 4, 2, 3, 0, 0, 0),          \
+        TUD_AUDIO_DESC_OUTPUT_TERM(3, AUDIO_TERM_TYPE_OUT_DESKTOP_SPEAKER, 0, 1, 4, 0, 0),         \
+        TUD_AUDIO_DESC_STD_AS_INT((itf) + 1, 0, 0, 0), TUD_AUDIO_DESC_STD_AS_INT((itf) + 1, 1, 1, 0), \
+        TUD_AUDIO_DESC_CS_AS_INT(1, 0, AUDIO_FORMAT_TYPE_I, AUDIO_DATA_FORMAT_TYPE_I_PCM, 2, 3, 0), \
+        TUD_AUDIO_DESC_TYPE_I_FORMAT(2, 16),                                                       \
+        TUD_AUDIO_DESC_STD_AS_ISO_EP(ep, TUSB_XFER_ISOCHRONOUS | TUSB_ISO_EP_ATT_SYNCHRONOUS,      \
+                                     (hs) ? 28 : 196, 1),                                          \
+        TUD_AUDIO_DESC_CS_AS_ISO_EP(AUDIO_CS_AS_ISO_DATA_EP_ATT_NON_MAX_PACKETS_OK, 0, 0, 0)
+#define USB_AUDIO_DESC_LEN                                                                         \
+    (TUD_AUDIO_DESC_IAD_LEN + TUD_AUDIO_DESC_STD_AC_LEN + TUD_AUDIO_DESC_CS_AC_LEN +               \
+     TUD_AUDIO_DESC_CLK_SRC_LEN + TUD_AUDIO_DESC_INPUT_TERM_LEN + TUD_AUDIO_DESC_OUTPUT_TERM_LEN + \
+     2 * TUD_AUDIO_DESC_STD_AS_INT_LEN + TUD_AUDIO_DESC_CS_AS_INT_LEN +                            \
+     TUD_AUDIO_DESC_TYPE_I_FORMAT_LEN + TUD_AUDIO_DESC_STD_AS_ISO_EP_LEN +                         \
+     TUD_AUDIO_DESC_CS_AS_ISO_EP_LEN)
+#else
+#define USB_AUDIO_DESC_LEN 0
+#endif
+
 /*
  * The configuration descriptor is assembled at start-up rather than baked in,
  * because the set of USB functions is not fixed. The keyboard and pointers are
@@ -304,7 +351,7 @@ static const tusb_desc_device_t k_pad_device_desc = {
  */
 #define CFG_DESC_MAX                                                                               \
     (TUD_CONFIG_DESC_LEN + NUM_HID_ITF * TUD_HID_DESC_LEN + TUD_HID_INOUT_DESC_LEN +              \
-     XINPUT_IFACE_DESC_LEN + TUD_MSC_DESC_LEN + TUD_CDC_DESC_LEN + 64)
+     XINPUT_IFACE_DESC_LEN + TUD_MSC_DESC_LEN + TUD_CDC_DESC_LEN + USB_AUDIO_DESC_LEN + 64)
 
 /* A placeholder header: wTotalLength and bNumInterfaces are patched in once the
  * enabled blocks are known. */
@@ -367,13 +414,13 @@ static pad_kind_t s_pad_kind;
  * Assemble the configuration descriptor for the enabled functions into @p buf
  * and return its length. HID is always included (only the keyboard when
  * @p kbd_only, only the gamepad when @p pad is PAD_ALONE); @p msc_iface (the
- * speed's MSC block) is appended when @p with_msc, and the serial port's two
- * interfaces after it when @p with_cdc. The config header's wTotalLength and
+ * speed's MSC block) is appended when @p with_msc, the serial port's two
+ * interfaces after it when @p with_cdc, and the speaker's two when @p with_audio. The config header's wTotalLength and
  * bNumInterfaces are then patched to match what was actually emitted.
  */
 static size_t build_config_descriptor(uint8_t *buf, bool full_speed, bool kbd_only, pad_mode_t pad,
                                       bool with_msc, const uint8_t *msc_iface, size_t msc_len,
-                                      bool with_cdc)
+                                      bool with_cdc, bool with_audio)
 {
     size_t n = 0;
     uint8_t ifaces = 0;
@@ -431,6 +478,17 @@ static size_t build_config_descriptor(uint8_t *buf, bool full_speed, bool kbd_on
         n += sizeof(cdc);
         ifaces += 2;
     }
+#if CFG_TUD_AUDIO
+    if (with_audio) {
+        const uint8_t audio[] = {USB_AUDIO_DESC(ifaces, EPNUM_AUDIO_OUT, !full_speed)};
+        _Static_assert(sizeof(audio) == USB_AUDIO_DESC_LEN, "speaker descriptor length");
+        memcpy(buf + n, audio, sizeof(audio));
+        n += sizeof(audio);
+        ifaces += 2;
+    }
+#else
+    (void)with_audio;
+#endif
     buf[2] = (uint8_t)(n & 0xff); /* wTotalLength, little-endian */
     buf[3] = (uint8_t)(n >> 8);
     buf[4] = ifaces;              /* bNumInterfaces */
@@ -1756,10 +1814,7 @@ esp_err_t usb_hid_init(void)
         return ESP_OK;
     }
 
-    esp_err_t err = gpio_install_isr_service(0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_RETURN_ON_ERROR(err, TAG, "gpio_install_isr_service");
-    }
+    ESP_RETURN_ON_ERROR(kvm_board_gpio_isr_service(), TAG, "gpio isr service");
 
     s_hid_q = xQueueCreate(HID_QUEUE_DEPTH, sizeof(q_msg_t));
     ESP_RETURN_ON_FALSE(s_hid_q, ESP_ERR_NO_MEM, TAG, "queue");
@@ -1798,34 +1853,40 @@ esp_err_t usb_hid_init(void)
     s_msc_present = with_msc;
     /* Not beside a gamepad: the two together want one IN endpoint more than
      * this port has. */
-    /* usb_serial: 0 off, 1 the serial console, 2 the agent. */
+    /* usb_serial: 0 off, 1 the serial console, 2 ESP-KVM Tools. */
     const int32_t serial_mode = kvm_setting_int("usb_serial");
     const bool with_cdc = !s_kbd_only && s_pad == PAD_OFF && serial_mode != 0;
     s_cdc_present = with_cdc;
     if (serial_mode == 2) {
-        s_string_descriptor[STR_CDC] = "ESP-KVM Agent";
+        s_string_descriptor[STR_CDC] = "ESP-KVM Tools";
     }
+    /* The speaker: not on the old-BIOS keyboard or a pad alone, which must
+     * look like the real thing. */
+    const bool with_audio = CFG_TUD_AUDIO && !s_kbd_only && s_pad != PAD_ALONE && kvm_setting_bool("aud_usb");
     build_config_descriptor(s_fs_config_descriptor, true, s_kbd_only, s_pad, with_msc, k_msc_iface_fs,
-                            sizeof(k_msc_iface_fs), with_cdc);
+                            sizeof(k_msc_iface_fs), with_cdc, with_audio);
     build_config_descriptor(s_hs_config_descriptor, false, s_kbd_only, s_pad, with_msc, k_msc_iface_hs,
-                            sizeof(k_msc_iface_hs), with_cdc);
+                            sizeof(k_msc_iface_hs), with_cdc, with_audio);
     if (s_kbd_only) {
         ESP_LOGI(TAG, "USB functions: old BIOS mode - keyboard only, full speed");
     } else if (s_pad == PAD_ALONE) {
         ESP_LOGI(TAG, "USB functions: %s gamepad only, full speed",
                  s_pad_kind == PAD_XINPUT ? "XInput" : s_pad_kind == PAD_XID ? "original Xbox" : "HORI");
     } else {
-        ESP_LOGI(TAG, "USB functions: HID%s%s%s",
+        ESP_LOGI(TAG, "USB functions: HID%s%s%s%s",
                  s_pad != PAD_ADDED ? "" : s_pad_kind == PAD_XINPUT ? " + XInput gamepad" : " + HORI gamepad",
-                 with_msc ? " + mass storage" : "", with_cdc ? " + serial port" : "");
+                 with_msc ? " + mass storage" : "", with_cdc ? " + serial port" : "",
+                 with_audio ? " + speaker" : "");
     }
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(tinyusb_on_event);
-    if (with_cdc) {
+    if (with_cdc || with_audio) {
+        /* Both come as an interface association. */
         s_kvm_device_desc.bDeviceClass = TUSB_CLASS_MISC;
         s_kvm_device_desc.bDeviceSubClass = MISC_SUBCLASS_COMMON;
         s_kvm_device_desc.bDeviceProtocol = MISC_PROTOCOL_IAD;
-        s_kvm_device_desc.idProduct = KVM_USB_PID_CDC;
+        s_kvm_device_desc.idProduct = (with_cdc ? KVM_USB_PID_CDC : KVM_USB_PID) |
+                                      (with_audio ? KVM_USB_PID_AUDIO_BIT : 0);
     }
     tusb_cfg.descriptor.device = &s_kvm_device_desc;
     static tusb_desc_device_t xinput_dev;

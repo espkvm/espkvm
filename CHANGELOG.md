@@ -4,6 +4,24 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.83.0] - 2026-11-12
+
+### Added
+- The "1080p50" EDID profile, the default on rev 3.x boards with a TC358743, now also offers 1280x1024 and 1600x900 at 60 Hz, for a target that wants 60 Hz on a 5:4 or a smaller 16:9 screen.
+- The status display lets you pick its pages: Settings, Display, Pages, with Network, Video, Health and Picture. With none ticked it shows the ESP-KVM logo. The Picture page switch from before is now one of these, and a device that had it on keeps it.
+- The status screen can go dark after a set time: Settings, Display, Sleep after. The display button wakes it on the page it had, and an update or a notice lights it too.
+- Sound over USB. The device can show up on the target as a USB speaker, "ESP-KVM Speaker". Pick it as the sound output there, and the sound comes to the console, the recordings and the dashcam like HDMI audio does. It is for boards that cannot take the sound from HDMI: the JetKVM Mini and the M5Stack PoE-P4 with the Display In add-on. Off by default, in Settings > Audio. The idea and the descriptor come from JetKVM's Mini firmware, thanks.
+- When another device on the network or the tailnet already has this one's name, the console says so and offers to rename it. mDNS and Tailscale had been quietly adding "-2" or "-1", so two devices with the default name "espkvm" were hard to tell apart.
+
+### Changed
+- On the target the device is now called just "ESP-KVM", not "ESP-KVM Keyboard/Mouse". It has long been more than a keyboard and a mouse.
+- espkvm-agent is now ESP-KVM Tools (espkvm-tools), at github.com/espkvm/tools. "Agent" today sounds like an AI agent, and this is a small helper program for the target. The setting choice, the console window and the API path (/api/v1/tools) follow the new name. The device still talks to an older espkvm-agent, and the new installer removes the old one.
+
+### Fixed
+- A colour status screen (GC9A01 or ST7789) could stop drawing after about ten minutes and then blink every few seconds. Every frame took a copy in internal memory, and once that ran short the frames stopped. They now go to the panel straight from PSRAM.
+- The boot log no longer shows a "GPIO isr service already installed" error. It was harmless.
+- A board with a card-detect switch (JetKVM Mini, M5Stack PoE-P4) no longer tries an empty slot ten times at boot, which filled the log with errors.
+
 ## [0.82.0] - 2026-11-11
 
 ### Added

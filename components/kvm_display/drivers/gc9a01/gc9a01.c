@@ -50,8 +50,8 @@
 #define LCD_CENTER 120
 #define FB_PIXELS (LCD_W * LCD_H)
 
-#define STATUS_SCREENS 3 /* network, video, health; the picture is a fourth */
-#define PICTURE_PAGE 3
+/* network, video, health and the picture (KVM_DISP_PAGE_*); disp_pages picks */
+#define PAGE_COUNT 4
 /* How often the picture page redraws: ten times a second, or twice while a
    browser is watching, so the panel never takes PSRAM time from the stream. */
 #define PICTURE_MS 100
@@ -66,6 +66,7 @@ typedef struct {
     uint16_t *fb; /* RGB565, byte-swapped for the panel, in PSRAM */
     int bl;       /* backlight GPIO, -1 if tied to 3V3 */
     int bright;   /* backlight percent last set, 0 before the first */
+    bool bl_pwm;  /* the backlight runs on LEDC, not a plain GPIO */
     bool square;  /* the ST7789: corners outside the circle to fill */
     uint32_t presses; /* page_presses last acted on */
     bool primed;      /* presses taken from the first status, not acted on */
@@ -268,28 +269,36 @@ static void draw_icon(uint16_t *fb, int x, int y, const uint8_t g[8], int s, uin
     }
 }
 
-static void render_splash(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+/* The ESP-KVM logo from icon.svg: light ESP/KVM pixels on the dark face, framed
+ * by the ring - the icon's dark tile and light wordmark. The end of the boot
+ * splash, and the screen when no page is ticked. */
+static void render_logo(gc9a01_ctx_t *g)
 {
     fill(g->fb, rgb(8, 10, 14));
     ring(g->fb, 118, 6, rgb(90, 200, 235));
+    const int s = 9;
+    const int lw = LOGO_COLS * s, lh = LOGO_ROWS * s;
+    const int x0 = (LCD_W - lw) / 2, y0 = (LCD_H - lh) / 2;
+    const uint16_t fg = rgb(230, 237, 243);
+    for (int row = 0; row < LOGO_ROWS; row++) {
+        for (int col = 0; col < LOGO_COLS; col++) {
+            if (logo_px(col, row)) {
+                fill_rect(g->fb, x0 + col * s, y0 + row * s, s, s, fg);
+            }
+        }
+    }
+}
+
+static void render_splash(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+{
     if (g->splash > SPLASH_TICKS / 2) {
         /* Version card first. */
+        fill(g->fb, rgb(8, 10, 14));
+        ring(g->fb, 118, 6, rgb(90, 200, 235));
         text_centered(g->fb, 96, "ESP-KVM", 3, rgb(235, 238, 245));
         text_centered(g->fb, 138, st->version, 2, rgb(140, 150, 165));
     } else {
-        /* Then the ESP-KVM logo from icon.svg: light ESP/KVM pixels on the dark
-         * face, framed by the ring - the icon's dark tile and light wordmark. */
-        const int s = 9;
-        const int lw = LOGO_COLS * s, lh = LOGO_ROWS * s;
-        const int x0 = (LCD_W - lw) / 2, y0 = (LCD_H - lh) / 2;
-        const uint16_t fg = rgb(230, 237, 243);
-        for (int row = 0; row < LOGO_ROWS; row++) {
-            for (int col = 0; col < LOGO_COLS; col++) {
-                if (logo_px(col, row)) {
-                    fill_rect(g->fb, x0 + col * s, y0 + row * s, s, s, fg);
-                }
-            }
-        }
+        render_logo(g);
     }
 }
 
@@ -604,9 +613,9 @@ static void render_picture(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     }
     if (!st->video_signal || !g->pic ||
         kvm_display_picture(g->pic, LCD_W, LCD_H, &sw, &sh) != ESP_OK || sw < 2 || sh < 2) {
-        g->screen = 1;
+        g->screen = KVM_DISP_PAGE_VIDEO;
         render_status(g, st);
-        g->screen = PICTURE_PAGE;
+        g->screen = KVM_DISP_PAGE_PICTURE;
         return;
     }
     char buf[24];
@@ -646,6 +655,8 @@ static void render_picture(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 #define BL_CHANNEL LEDC_CHANNEL_1
 #define BL_BITS LEDC_TIMER_10_BIT
 
+static void backlight_duty(bool pwm, int bl, int pct);
+
 static void backlight_set(gc9a01_ctx_t *g, int pct)
 {
     if (g->bl < 0 || pct == g->bright) {
@@ -668,11 +679,21 @@ static void backlight_set(gc9a01_ctx_t *g, int pct)
             g->bright = 100;
             return;
         }
+        g->bl_pwm = true;
     }
-    const uint32_t duty = (uint32_t)(((1u << BL_BITS) - 1) * pct / 100);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL);
+    backlight_duty(g->bl_pwm, g->bl, pct);
     g->bright = pct;
+}
+
+/* Light the backlight at @p pct, 0 = dark, on whichever way it is driven. */
+static void backlight_duty(bool pwm, int bl, int pct)
+{
+    if (pwm) {
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL, (uint32_t)(((1u << BL_BITS) - 1) * pct / 100));
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, BL_CHANNEL);
+    } else {
+        gpio_set_level(bl, pct > 0);
+    }
 }
 
 typedef enum { CTRL_GC9A01, CTRL_ST7789 } lcd_ctrl_t;
@@ -734,6 +755,8 @@ static esp_err_t attach_ctrl(void **ctx, lcd_ctrl_t ctrl)
         .lcd_param_bits = 8,
         .spi_mode = 0,
         .trans_queue_depth = 10,
+        /* DMA straight out of the PSRAM frame; see flush(). */
+        .flags.psram_dma_direct = 1,
     };
     err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)CONFIG_KVM_GC9A01_SPI_HOST, &io_cfg,
                                    &g->io);
@@ -794,9 +817,12 @@ fail_fb:
  * everything downwind of it loses too: the panel logs "send color failed" every
  * second and the video encoder cannot get its reference frame.
  *
- * A band is a few kilobytes, so the worst case stops being fatal. The buffer is
- * also cache-aligned now, which is what lets the DMA read it in place and skip
- * the copy entirely - the bands are the belt to that pair of braces.
+ * The copy is skipped only when the buffer is cache-aligned AND the panel IO
+ * has psram_dma_direct set; without the flag esp_lcd asks for an internal copy
+ * of every band, up to trans_queue_depth of them at once. That ran on the
+ * JetKVM Mini for ten minutes, until internal memory ran short and the panel
+ * blinked as it re-attached every few seconds. The bands stay as a limit on
+ * what one transfer can ask for.
  */
 static esp_err_t flush(gc9a01_ctx_t *g)
 {
@@ -811,15 +837,13 @@ static esp_err_t flush(gc9a01_ctx_t *g)
     return ESP_OK;
 }
 
-/* The status pages and, when asked for, the picture. */
-static uint8_t page_count(const kvm_display_status_t *st)
-{
-    return st->picture_page ? STATUS_SCREENS + 1 : STATUS_SCREENS;
-}
-
 static void render_page(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 {
-    if (g->screen == PICTURE_PAGE) {
+    if (g->screen == KVM_DISP_PAGE_NONE) {
+        render_logo(g); /* no page ticked: nothing else, corners included */
+        return;
+    }
+    if (g->screen == KVM_DISP_PAGE_PICTURE) {
         render_picture(g, st);
     } else {
         render_status(g, st);
@@ -832,7 +856,7 @@ static void render_page(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 static uint32_t next_render_ms(void *ctx)
 {
     const gc9a01_ctx_t *g = ctx;
-    if (g->screen != PICTURE_PAGE || g->splash) {
+    if (g->screen != KVM_DISP_PAGE_PICTURE || g->splash) {
         return 0;
     }
     return g->viewers ? PICTURE_WATCHED_MS : PICTURE_MS;
@@ -843,8 +867,9 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
     gc9a01_ctx_t *g = ctx;
     const int64_t now = esp_timer_get_time();
     g->viewers = status->viewers;
-    if (g->screen >= page_count(status)) {
-        g->screen = 0; /* the picture page was switched off while up */
+    const uint8_t shown = kvm_disp_page_valid(status->pages, g->screen, PAGE_COUNT);
+    if (shown != g->screen) { /* its page was switched off while up */
+        g->screen = shown;
         g->page_us = now;
     }
     backlight_set(g, (int)kvm_setting_int("disp_bright"));
@@ -865,7 +890,7 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
         g->presses = status->page_presses;
         g->splash = 0;
         g->page_us = now;
-        g->screen = (uint8_t)((g->screen + 1) % page_count(status));
+        g->screen = kvm_disp_page_next(status->pages, g->screen, PAGE_COUNT);
         render_page(g, status);
         return flush(g);
     }
@@ -884,7 +909,7 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
        its full count of renders. */
     if (status->dwell_s && now - g->page_us >= (int64_t)status->dwell_s * 1000000 - 500000) {
         g->page_us = now;
-        g->screen = (uint8_t)((g->screen + 1) % page_count(status));
+        g->screen = kvm_disp_page_next(status->pages, g->screen, PAGE_COUNT);
     }
     return err;
 }
@@ -914,6 +939,18 @@ static void detach(void *ctx)
     free(g);
 }
 
+static void panel_sleep(void *ctx, bool asleep)
+{
+    gc9a01_ctx_t *g = ctx;
+    if (!g) {
+        return;
+    }
+    if (g->bl >= 0 && g->bright) {
+        backlight_duty(g->bl_pwm, g->bl, asleep ? 0 : g->bright);
+    }
+    esp_lcd_panel_disp_on_off(g->panel, !asleep);
+}
+
 static esp_err_t attach_gc9a01(void **ctx)
 {
     return attach_ctrl(ctx, CTRL_GC9A01);
@@ -931,6 +968,7 @@ const kvm_display_driver_t kvm_display_gc9a01 = {
     .render = render,
     .detach = detach,
     .next_render_ms = next_render_ms,
+    .sleep = panel_sleep,
 };
 
 const kvm_display_driver_t kvm_display_st7789 = {
@@ -940,6 +978,7 @@ const kvm_display_driver_t kvm_display_st7789 = {
     .render = render,
     .detach = detach,
     .next_render_ms = next_render_ms,
+    .sleep = panel_sleep,
 };
 
 #endif /* CONFIG_KVM_ENABLE_DISPLAY */

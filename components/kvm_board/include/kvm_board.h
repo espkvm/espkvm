@@ -10,6 +10,7 @@
  */
 #pragma once
 
+#include "esp_err.h"
 #include "sdkconfig.h"
 
 /* Not pins: the P4's internal LDO that powers the MIPI PHY, and the capture
@@ -57,3 +58,6 @@
 #else
 #define KVM_BOARD_SD_PWR_ACTIVE_LOW 0
 #endif
+
+/* Install the chip's one GPIO ISR service; safe to call from every driver. */
+esp_err_t kvm_board_gpio_isr_service(void);

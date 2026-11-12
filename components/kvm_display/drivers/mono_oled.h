@@ -64,6 +64,8 @@ esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status);
 
 /** Blank the panel, remove it from the bus, and free the context. */
 void mono_oled_detach(mono_oled_t *m);
+/** Display off (0xAE) or on (0xAF); RAM and settings stay. */
+void mono_oled_sleep(mono_oled_t *m, bool asleep);
 
 #ifdef __cplusplus
 }

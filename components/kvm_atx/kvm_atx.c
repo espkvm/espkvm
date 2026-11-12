@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "kvm_board.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -64,7 +65,6 @@ static QueueHandle_t s_cmd_q;
  * changed, and the status calls the disk busy for a moment after. Milliseconds
  * since boot, 32 bits so the ISR's store is one instruction. */
 static volatile uint32_t s_hdd_edge_ms;
-static bool s_isr_service;
 
 static void IRAM_ATTR hdd_edge(void *arg)
 {
@@ -193,13 +193,9 @@ static esp_err_t configure_hdd(int gpio, bool active_high)
     if (err != ESP_OK) {
         return err;
     }
-    if (!s_isr_service) {
-        err = gpio_install_isr_service(0);
-        /* Another driver may have installed it first; that one serves us too. */
-        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-            return err;
-        }
-        s_isr_service = true;
+    err = kvm_board_gpio_isr_service();
+    if (err != ESP_OK) {
+        return err;
     }
     err = gpio_set_intr_type(gpio, GPIO_INTR_ANYEDGE);
     if (err == ESP_OK) {

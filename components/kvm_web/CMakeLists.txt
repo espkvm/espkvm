@@ -1,6 +1,15 @@
 idf_component_register(
     SRCS
         "http_server.c"
+        "system_api.c"
+        "screentext_api.c"
+        "update_api.c"
+        "storage_api.c"
+        "hid_api.c"
+        "automation_api.c"
+        "ws_server.c"
+        "tls_api.c"
+        "video_ws.c"
         "tls_cert.c"
         "acme.c"
         "auth.c"
@@ -14,7 +23,7 @@ idf_component_register(
         "profiles_api.c"
         "regions_api.c"
         "serial_api.c"
-        "agent_api.c"
+        "tools_api.c"
         "netlog_api.c"
         "audio_api.c"
         "url_fetch.c"
@@ -53,7 +62,7 @@ idf_component_register(
         kvm_upload
         kvm_cec
         kvm_serial
-        kvm_agent
+        kvm_tools
         kvm_audio
         kvm_netlog
         kvm_webrtc

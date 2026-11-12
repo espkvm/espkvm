@@ -14,6 +14,6 @@
   { "id": "firebeetle2-p4", "label": "DFRobot FireBeetle 2 ESP32-P4", "image": "docs/board-firebeetle2.webp" },
   { "id": "m5-poe-p4",  "label": "M5Stack Unit PoE-P4",                "image": "docs/board-m5-poe-p4.webp" },
   { "id": "m5-poe-p4x", "label": "M5Stack Unit PoE-P4X",               "image": "docs/board-m5-poe-p4.webp", "untested": true },
-  { "id": "jetkvm-mini", "label": "JetKVM Mini",                         "untested": true, "note": "The first version for this device, still being tested. It cannot harm the device: at worst the image does not start, and you flash again over USB. Turn on USB Debugging in JetKVM's Settings, Advanced, connect the EXT port and back up the flash first with the button above." },
+  { "id": "jetkvm-mini", "label": "JetKVM Mini",                         "note": "Turn on USB Debugging in JetKVM's Settings, Advanced, connect the EXT port and back up the flash first with the button above." },
   { "id": "jetkvm-mini-w", "label": "JetKVM Mini W",                     "untested": true, "note": "The first version for this device, still being tested. It cannot harm the device: at worst the image does not start, and you flash again over USB. Turn on USB Debugging in JetKVM's Settings, Advanced, connect the EXT port and back up the flash first with the button above." }
 ]

@@ -85,7 +85,7 @@ Useful for what it does today, and honest about the rest.
 | Device profiles: pointer, gamepad and video settings for each target | new, the device picks one from HDMI-CEC or the USB guess |
 | Screen areas: react when a part of the screen changes, stops changing, matches a saved picture or turns a colour | new |
 | The target's serial console, and its log over the network | works |
-| An agent on the target: its name and addresses, the clipboard both ways, a clean shutdown | new; needs [espkvm-agent](https://github.com/espkvm/agent) on the target |
+| ESP-KVM Tools on the target: its name and addresses, the clipboard both ways, a clean shutdown | new; needs [ESP-KVM Tools](https://github.com/espkvm/tools) on the target |
 | HTTPS, your own certificate, Let's Encrypt over Tailscale | works |
 | Login, two-factor sign-in, reset by a button | works |
 | Wi-Fi with up to three known networks, a setup hotspot, Ethernet with Wi-Fi as the backup | works; on boards with a Wi-Fi chip |
@@ -94,6 +94,7 @@ Useful for what it does today, and honest about the rest.
 | Updates over the network, with rollback and a trial for remote devices | works |
 | A small status display, a battery-backed clock | works; optional |
 | HDMI audio, in the console and in recordings | new; on TC358743 boards, three wires to the P4 |
+| Sound over USB: the device as a USB speaker for the target | new; for boards without HDMI audio, such as the JetKVM Mini |
 
 Every row in detail: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#what-works-in-detail).
 
@@ -380,9 +381,7 @@ day, so I can count the devices in use (see [SETUP](docs/SETUP.md)).
 Questions, ideas and things people built go in
 [Discussions](https://github.com/orgs/espkvm/discussions).
 
-Release notes and work in progress go out on
-[Telegram](https://t.me/espkvm) and [X](https://x.com/espkvm); the short clips of
-features running are on [YouTube](https://youtube.com/@espkvm).
+To reach me, write in the [Telegram group](https://t.me/espkvm). Release notes and work in progress go out there and on [X](https://x.com/espkvm), and the short clips of features running are on [YouTube](https://youtube.com/@espkvm).
 
 ## Licence
 

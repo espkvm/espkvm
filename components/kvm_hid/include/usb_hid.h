@@ -167,7 +167,7 @@ bool usb_hid_pad_present(void);
 
 /*
  * The serial port on the target's USB cable (usb_serial), present when it was
- * on at boot, for the serial console or the agent, and no gamepad took its place. Bytes from the target go to the
+ * on at boot, for the serial console or ESP-KVM Tools, and no gamepad took its place. Bytes from the target go to the
  * callback, from TinyUSB's task. A write returns how much went into the port.
  */
 bool usb_hid_serial_present(void);

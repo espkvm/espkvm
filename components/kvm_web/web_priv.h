@@ -32,8 +32,8 @@ const httpd_uri_t *profiles_api_routes(size_t *count);
 const httpd_uri_t *regions_api_routes(size_t *count);
 /** The target's serial console: the /serial WebSocket and its REST. See serial_api.c. */
 const httpd_uri_t *serial_api_routes(size_t *count);
-/* agent_api.c: espkvm-agent on the target. */
-const httpd_uri_t *agent_api_routes(size_t *count);
+/* tools_api.c: ESP-KVM Tools on the target. */
+const httpd_uri_t *tools_api_routes(size_t *count);
 /**
  * A TLS transport for esp_http_client_config_t.transport that offers only
  * ChaCha20-Poly1305. AES-GCM goes to the hardware AES, which needs internal RAM

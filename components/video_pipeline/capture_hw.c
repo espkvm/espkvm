@@ -1009,10 +1009,7 @@ static void bridge_int_init(void)
     };
     esp_err_t err = gpio_config(&io);
     if (err == ESP_OK) {
-        err = gpio_install_isr_service(0);
-        if (err == ESP_ERR_INVALID_STATE) {
-            err = ESP_OK; /* someone installed it already */
-        }
+        err = kvm_board_gpio_isr_service();
     }
     if (err == ESP_OK) {
         err = gpio_isr_handler_add(CONFIG_KVM_BRIDGE_INT_GPIO, bridge_int_isr, NULL);

@@ -40,6 +40,9 @@ in: 1920 pixels x 16 bits over 2 lanes at 972 Mbit/s is 15.8 us, plus about
 17.8 us, so it fits; 1920x1080@60 brings one every 14.8 us and does not.
 
 1080p50 is the preferred mode of that profile ("1080p50" in the settings).
+It also lists 1280x1024@60 and 1600x900@60 as standard timings, for a source
+that wants 60 Hz and a 5:4 or a smaller 16:9 screen. The 24-bit link cannot
+carry either (108 MHz).
 The target draws and sends a frame every 20 ms instead of 33, so the pointer
 reaches the picture sooner; the encoder loses a frame or two a second to the
 extra capture traffic in PSRAM.
@@ -218,6 +221,14 @@ SECOND = {"full16": DTD_1920x1080p30}
 # 24-bit pixel clock ceiling.
 SIXTEEN_BIT = {"full16"}
 
+# More standard timings (after the 1280x720 one), with the VESA DMT timing a
+# source sends for each, which the audit checks against the CSI line time:
+# (width, height, refresh, aspect, clock kHz, htotal).
+EXTRA_STD = {
+    "full16": [(1280, 1024, 60, "5:4", 108000, 1688),
+               (1600, 900, 60, "16:9", 108000, 1800)],
+}
+
 # An EDID descriptor slot that says "nothing here", for a profile that has no
 # second timing to offer. Leaving the base's 1080p descriptor in place would
 # advertise the very mode the profile exists to avoid.
@@ -254,6 +265,8 @@ def build_profile(base: bytes, name: str) -> bytes:
 
     # Standard timings: one useful widescreen mode, the rest stay unused (0x0101).
     e[38:40] = std_timing(1280, 60, "16:9") if widescreen else bytes([0x01, 0x01])
+    for k, (w, _, hz, aspect, _, _) in enumerate(EXTRA_STD.get(name, [])):
+        e[40 + 2 * k:42 + 2 * k] = std_timing(w, hz, aspect)
 
     # The two detailed timings. The first is the preferred mode; the base's are
     # both 1920x1080@30, which is right for "full" and wrong for anything capped.
@@ -366,6 +379,11 @@ def audit(name: str, edid: bytes) -> None:
         if w > cap_w or h > cap_h:
             raise SystemExit(f"{name}: the timing at {off} ({where}) is {w}x{h}, "
                              f"above the profile's cap of {cap_w}x{cap_h}")
+    for w, h, hz, _, clock, htotal in EXTRA_STD.get(name, []):
+        line_us = htotal * 1000 / clock
+        csi_us = w * 16 / LANES / LANE_MBPS + CSI_LINE_OVERHEAD_US
+        if not sixteen or csi_us > line_us or clock > allowed_khz or w > cap_w or h > cap_h:
+            raise SystemExit(f"{name}: standard timing {w}x{h}@{hz} does not fit")
     if not sixteen and edid[117] * 10_000 > CLOCK_CEILING_KHZ:
         raise SystemExit(f"{name}: the range descriptor allows more than the link carries")
 
@@ -402,7 +420,8 @@ def describe(name: str, edid: bytes) -> str:
         if edid[off] == 0x01 and edid[off + 1] == 0x01:
             continue
         width = (edid[off] + 31) * 8
-        std.append(f"{width}x? @{(edid[off + 1] & 0x3F) + 60}")
+        num, den = [(16, 10), (4, 3), (5, 4), (16, 9)][edid[off + 1] >> 6]
+        std.append(f"{width}x{width * den // num} @{(edid[off + 1] & 0x3F) + 60}")
     out.append("  standard:    " + (", ".join(std) or "none"))
 
     for off in (54, 72):
@@ -457,7 +476,7 @@ def main() -> int:
     print(" *   1024x768  everything up to 1024x768, which is also preferred")
     print(" *   480p      720x480 preferred, 640x480 and 720x400 text - old consoles")
     print(" *   full16    \"full\" with 1920x1080@50 preferred (the \"1080p50\" setting),")
-    print(" *             for a 16-bit (YUV422) capture only")
+    print(" *             plus 1280x1024@60 and 1600x900@60, for a 16-bit (YUV422) capture only")
     print(" *")
     print(" * The capped ones are not about what the link can carry - they are about")
     print(" * what the target should send. A smaller picture encodes faster, and on")

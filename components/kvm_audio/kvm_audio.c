@@ -65,6 +65,9 @@ static work_t *s_work;
 static kvm_audio_reader_t *s_readers[MAX_READERS];
 
 static bool s_enabled;
+/* aud_usb as it was at boot: kvm_hid built the USB device from that value. */
+static bool s_usb;
+static uint64_t s_usb_index;
 static int s_bclk = -1, s_ws = -1, s_din = -1;
 static volatile bool s_reopen;
 
@@ -217,6 +220,28 @@ static void deliver(const kvm_audio_block_t *b)
     xSemaphoreGive(s_mu);
 }
 
+/* The status meter: how loud the block was and when it ended. */
+static void note_levels(const kvm_audio_block_t *b, int64_t end_us)
+{
+    const unsigned n = (unsigned)b->frames * KVM_AUDIO_CHANNELS;
+    int32_t peak = 0;
+    uint64_t energy = 0;
+    for (unsigned i = 0; i < n; i++) {
+        const int32_t v = b->pcm[i];
+        const int32_t m = abs(v);
+        if (m > peak) {
+            peak = m;
+        }
+        energy += (uint64_t)(v * v);
+    }
+    portENTER_CRITICAL(&s_isr_mu);
+    s_st.frames += b->frames;
+    s_st.peak = (float)peak / 32768.0f;
+    s_st.rms = n ? sqrtf((float)energy / (float)n) / 32768.0f : 0.0f;
+    s_st.last_us = end_us;
+    portEXIT_CRITICAL(&s_isr_mu);
+}
+
 /* Read one block and pass it on. False when the receiver had to restart. */
 static bool take_block(void)
 {
@@ -254,25 +279,66 @@ static bool take_block(void)
     b->epoch = st.epoch;
     b->start_us = st.end_us - (int64_t)s_block_frames * 1000000 / s_rate;
     const unsigned n = s_block_frames * KVM_AUDIO_CHANNELS;
-    int32_t peak = 0;
-    uint64_t energy = 0;
     for (unsigned i = 0; i < n; i++) {
-        const int16_t v = (int16_t)(s_work->raw[i] >> 16);
-        b->pcm[i] = v;
-        const int32_t m = abs((int32_t)v);
-        if (m > peak) {
-            peak = m;
-        }
-        energy += (uint64_t)((int32_t)v * v);
+        b->pcm[i] = (int16_t)(s_work->raw[i] >> 16);
     }
-    portENTER_CRITICAL(&s_isr_mu);
-    s_st.frames += s_block_frames;
-    s_st.peak = (float)peak / 32768.0f;
-    s_st.rms = sqrtf((float)energy / (float)n) / 32768.0f;
-    s_st.last_us = st.end_us;
-    portEXIT_CRITICAL(&s_isr_mu);
+    note_levels(b, st.end_us);
     deliver(b);
     return true;
+}
+
+/*
+ * The USB speaker: wait for the ISR's wake-up, pass on every whole block, and
+ * keep nothing while nobody reads or the target is not playing.
+ */
+static void usb_step(bool on)
+{
+    const bool playing = on && usb_src_streaming();
+    portENTER_CRITICAL(&s_isr_mu);
+    s_st.running = playing;
+    s_st.rate = playing ? usb_src_rate() : 0;
+    portEXIT_CRITICAL(&s_isr_mu);
+    if (!playing) {
+        usb_src_drain();
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
+        return;
+    }
+    /* Woken every 5 ms of sound; the timeout only covers a lost wake-up. */
+    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+    kvm_audio_block_t *b = &s_work->block;
+    const uint16_t frames = (uint16_t)(usb_src_rate() / 200u);
+    for (;;) {
+        int64_t start_us = 0;
+        const usb_take_t t = usb_src_take(b->pcm, frames, &start_us);
+        if (t == USB_TAKE_NONE) {
+            return;
+        }
+        if (t == USB_TAKE_GAP) {
+            portENTER_CRITICAL(&s_isr_mu);
+            s_epoch++;
+            s_overruns++;
+            s_overruns_seen = s_overruns;
+            s_st.restarts++;
+            portEXIT_CRITICAL(&s_isr_mu);
+            s_usb_index = 0;
+            continue;
+        }
+        const int64_t now = esp_timer_get_time();
+        if (s_last_read_us && now - s_last_read_us > s_st.read_gap_max_us) {
+            s_st.read_gap_max_us = (uint32_t)(now - s_last_read_us);
+        }
+        s_last_read_us = now;
+        b->frames = frames;
+        b->rate = usb_src_rate();
+        b->frame_index = s_usb_index;
+        portENTER_CRITICAL(&s_isr_mu);
+        b->epoch = s_epoch;
+        portEXIT_CRITICAL(&s_isr_mu);
+        b->start_us = start_us;
+        s_usb_index += frames;
+        note_levels(b, start_us + (int64_t)frames * 1000000 / b->rate);
+        deliver(b);
+    }
 }
 
 static bool wanted(int *bclk, int *ws, int *din)
@@ -303,6 +369,11 @@ static void audio_task(void *arg)
         }
         int bclk, ws, din;
         const bool on = wanted(&bclk, &ws, &din);
+        if (s_usb) {
+            rx_close();
+            usb_step(on);
+            continue;
+        }
         kvm_video_status_t vs;
         capture_status_get(&vs);
         const uint32_t rate = on && rate_supported(vs.audio_hz) ? vs.audio_hz : 0;
@@ -334,11 +405,15 @@ esp_err_t kvm_audio_init(void)
     if (!s_mu || !s_stamps || !s_work || opus_init() != ESP_OK) {
         return ESP_ERR_NO_MEM;
     }
+    s_usb = kvm_setting_bool("aud_usb");
     /* Stack in PSRAM: the task never runs with the flash cache off. */
     if (xTaskCreateWithCaps(audio_task, "audio", TASK_STACK, NULL, TASK_PRIO, &s_task,
                             MALLOC_CAP_SPIRAM) != pdPASS) {
         s_task = NULL;
         return ESP_ERR_NO_MEM;
+    }
+    if (s_usb) {
+        usb_src_init(s_task, (uint16_t)(usb_src_rate() / 200u));
     }
     return ESP_OK;
 }
@@ -358,7 +433,7 @@ void kvm_audio_apply(void)
     const bool silent = b && !b->i2s_audio;
 
     xSemaphoreTake(s_mu, portMAX_DELAY);
-    s_enabled = en && pins && !silent;
+    s_enabled = s_usb || (en && pins && !silent);
     s_bclk = bclk;
     s_ws = ws;
     s_din = din;
@@ -367,12 +442,18 @@ void kvm_audio_apply(void)
     xTaskNotifyGive(s_task);
 
     /* Like ATX: available means wired; switched off is the setting's own. */
-    if (silent) {
-        kvm_cap_report(KVM_CAP_AUDIO, false, "the %s on this board sends no sound out", b->name);
+    if (s_usb) {
+        kvm_cap_report(KVM_CAP_AUDIO, true, NULL);
+    } else if (silent) {
+        kvm_cap_report(KVM_CAP_AUDIO, false,
+                       "the %s on this board sends no sound out; turn on Sound over USB", b->name);
     } else if (pins) {
         kvm_cap_report(KVM_CAP_AUDIO, true, NULL);
+    } else if (!kvm_cap_available(KVM_CAP_GPIO)) {
+        kvm_cap_report(KVM_CAP_AUDIO, false, "turn on Sound over USB in Settings");
     } else {
-        kvm_cap_report(KVM_CAP_AUDIO, false, "pick the BCLK, WS and DATA pins in Settings");
+        kvm_cap_report(KVM_CAP_AUDIO, false,
+                       "pick the BCLK, WS and DATA pins in Settings, or turn on Sound over USB");
     }
 }
 

@@ -2,15 +2,15 @@
  * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
- * espkvm-agent on the target, to the browser.
+ * ESP-KVM Tools on the target, to the browser.
  *
- *   GET  /api/v1/agent            mode, whether an agent is there, its version and OS
- *   GET  /api/v1/agent/info       the machine: name, OS, uptime, addresses
- *   GET  /api/v1/agent/clipboard  {"text":"..."}
- *   POST /api/v1/agent/clipboard  {"text":"..."}
- *   POST /api/v1/agent/power      {"action":"shutdown"|"reboot"}
+ *   GET  /api/v1/tools            mode, whether the program is there, its version and OS
+ *   GET  /api/v1/tools/info       the machine: name, OS, uptime, addresses
+ *   GET  /api/v1/tools/clipboard  {"text":"..."}
+ *   POST /api/v1/tools/clipboard  {"text":"..."}
+ *   POST /api/v1/tools/power      {"action":"shutdown"|"reboot"}
  *
- * The agent's answer is passed on as it is. Its error codes become HTTP
+ * The program's answer is passed on as it is. Its error codes become HTTP
  * statuses: not_allowed 403, no_desktop and locked 409, bad_params 400,
  * anything else 502.
  */
@@ -21,16 +21,16 @@
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 
-#include "kvm_agent.h"
+#include "kvm_tools.h"
 #include "kvm_auth.h"
 #include "kvm_settings.h"
 #include "web_priv.h"
 
 #define CALL_MS 4000
 /* A clipboard text, escaped, plus the braces around it. */
-#define BODY_MAX (KVM_AGENT_MAX_TEXT * 6 + 64)
+#define BODY_MAX (KVM_TOOLS_MAX_TEXT * 6 + 64)
 
-static const char *const k_modes[] = {"off", "console", "agent"};
+static const char *const k_modes[] = {"off", "console", "tools"};
 
 static esp_err_t send_json(httpd_req_t *req, cJSON *root)
 {
@@ -42,19 +42,19 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root)
     return r;
 }
 
-static esp_err_t agent_get(httpd_req_t *req)
+static esp_err_t tools_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
     }
-    kvm_agent_status_t st;
-    kvm_agent_status(&st);
+    kvm_tools_status_t st;
+    kvm_tools_status(&st);
     if (st.port && !st.connected) {
-        /* An agent that opened the port before this side was listening has
+        /* A program that opened the port before this side was listening has
          * said its hello to nobody: ask again. */
         char *ans = NULL;
-        if (kvm_agent_call("hello", NULL, 300, &ans) == ESP_OK) {
-            kvm_agent_status(&st);
+        if (kvm_tools_call("hello", NULL, 300, &ans) == ESP_OK) {
+            kvm_tools_status(&st);
         }
         free(ans);
     }
@@ -76,16 +76,16 @@ static esp_err_t agent_get(httpd_req_t *req)
     return send_json(req, root);
 }
 
-/* Ask the agent and pass its answer on. */
+/* Ask the program and pass its answer on. */
 static esp_err_t relay(httpd_req_t *req, const char *op, const char *params)
 {
     char *line = NULL;
-    const esp_err_t err = kvm_agent_call(op, params, CALL_MS, &line);
+    const esp_err_t err = kvm_tools_call(op, params, CALL_MS, &line);
     if (err == ESP_ERR_INVALID_STATE) {
-        return send_json_error(req, "409 Conflict", "no agent is connected");
+        return send_json_error(req, "409 Conflict", "ESP-KVM Tools is not connected");
     }
     if (err == ESP_ERR_TIMEOUT) {
-        return send_json_error(req, "504 Gateway Timeout", "the agent did not answer");
+        return send_json_error(req, "504 Gateway Timeout", "ESP-KVM Tools did not answer");
     }
     if (err != ESP_OK) {
         return send_json_error(req, "500 Internal Server Error", "no memory");
@@ -93,7 +93,7 @@ static esp_err_t relay(httpd_req_t *req, const char *op, const char *params)
     cJSON *j = cJSON_Parse(line);
     free(line);
     if (!j) {
-        return send_json_error(req, "502 Bad Gateway", "the agent's answer did not parse");
+        return send_json_error(req, "502 Bad Gateway", "the answer from ESP-KVM Tools did not parse");
     }
     if (cJSON_IsTrue(cJSON_GetObjectItem(j, "ok"))) {
         cJSON *data = cJSON_DetachItemFromObject(j, "data");
@@ -119,7 +119,7 @@ static esp_err_t relay(httpd_req_t *req, const char *op, const char *params)
     return send_json(req, out);
 }
 
-static esp_err_t agent_info_get(httpd_req_t *req)
+static esp_err_t tools_info_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
@@ -127,7 +127,7 @@ static esp_err_t agent_info_get(httpd_req_t *req)
     return relay(req, "info", NULL);
 }
 
-static esp_err_t agent_clip_get(httpd_req_t *req)
+static esp_err_t tools_clip_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
@@ -162,7 +162,7 @@ static cJSON *read_body(httpd_req_t *req, esp_err_t *out)
     return j;
 }
 
-static esp_err_t agent_clip_post(httpd_req_t *req)
+static esp_err_t tools_clip_post(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
@@ -173,7 +173,7 @@ static esp_err_t agent_clip_post(httpd_req_t *req)
         return r;
     }
     const cJSON *text = cJSON_GetObjectItem(j, "text");
-    if (!cJSON_IsString(text) || strlen(text->valuestring) > KVM_AGENT_MAX_TEXT) {
+    if (!cJSON_IsString(text) || strlen(text->valuestring) > KVM_TOOLS_MAX_TEXT) {
         cJSON_Delete(j);
         return send_json_error(req, "400 Bad Request", "expected {\"text\":\"...\"}, at most 64 KB");
     }
@@ -190,7 +190,7 @@ static esp_err_t agent_clip_post(httpd_req_t *req)
     return r;
 }
 
-static esp_err_t agent_power_post(httpd_req_t *req)
+static esp_err_t tools_power_post(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
@@ -215,14 +215,14 @@ static esp_err_t agent_power_post(httpd_req_t *req)
 }
 
 static const httpd_uri_t k_routes[] = {
-    {.uri = "/api/v1/agent", .method = HTTP_GET, .handler = agent_get},
-    {.uri = "/api/v1/agent/info", .method = HTTP_GET, .handler = agent_info_get},
-    {.uri = "/api/v1/agent/clipboard", .method = HTTP_GET, .handler = agent_clip_get},
-    {.uri = "/api/v1/agent/clipboard", .method = HTTP_POST, .handler = agent_clip_post},
-    {.uri = "/api/v1/agent/power", .method = HTTP_POST, .handler = agent_power_post},
+    {.uri = "/api/v1/tools", .method = HTTP_GET, .handler = tools_get},
+    {.uri = "/api/v1/tools/info", .method = HTTP_GET, .handler = tools_info_get},
+    {.uri = "/api/v1/tools/clipboard", .method = HTTP_GET, .handler = tools_clip_get},
+    {.uri = "/api/v1/tools/clipboard", .method = HTTP_POST, .handler = tools_clip_post},
+    {.uri = "/api/v1/tools/power", .method = HTTP_POST, .handler = tools_power_post},
 };
 
-const httpd_uri_t *agent_api_routes(size_t *count)
+const httpd_uri_t *tools_api_routes(size_t *count)
 {
     *count = sizeof(k_routes) / sizeof(k_routes[0]);
     return k_routes;

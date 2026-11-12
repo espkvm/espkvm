@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +28,7 @@
 #include "kvm_board_header.h"
 #include "kvm_caps.h"
 #include "kvm_ipv6.h"
+#include "kvm_ts.h"
 #include "kvm_settings.h"
 #include "wifi.h" /* kvm_net_mode_t (net_mode enum) */
 
@@ -471,3 +473,51 @@ void kvm_eth_link(bool *up, int *mbps)
     }
 }
 #endif
+
+/* @p got is @p asked plus "-" and digits: the rename a clash causes. Any other
+   difference (Tailscale lowercases and drops odd characters) is not one. */
+static bool renamed(const char *asked, const char *got)
+{
+    const size_t n = strlen(asked);
+    if (!n || strncasecmp(asked, got, n) != 0 || got[n] != '-' || !got[n + 1]) {
+        return false;
+    }
+    for (const char *p = got + n + 1; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+void kvm_net_name_taken(char *lan, size_t lan_len, char *tailnet, size_t tailnet_len)
+{
+    lan[0] = tailnet[0] = '\0';
+    const char *host = kvm_setting_str("net_hostname");
+    if (!host || !host[0]) {
+        host = CONFIG_KVM_MDNS_HOSTNAME;
+    }
+    char cur[MDNS_NAME_BUF_LEN] = "";
+    if (mdns_hostname_get(cur) == ESP_OK && renamed(host, cur)) {
+        strlcpy(lan, cur, lan_len);
+    }
+
+    kvm_ts_status_t ts;
+    kvm_ts_status(&ts);
+    if (!ts.up || !ts.name[0]) {
+        return;
+    }
+    char label[64];
+    strlcpy(label, ts.name, sizeof(label));
+    char *dot = strchr(label, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+    const char *asked = kvm_setting_str("ts_hostname");
+    if (!asked || !asked[0]) {
+        asked = host;
+    }
+    if (renamed(asked, label)) {
+        strlcpy(tailnet, label, tailnet_len);
+    }
+}
