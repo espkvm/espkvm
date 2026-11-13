@@ -112,7 +112,8 @@ console is closed (see [NOTIFICATIONS](NOTIFICATIONS.md#new-firmware)).
 With the check on, the browser also tells check.espkvm.io once a day a random id
 of the device (not taken from the hardware; erasing the flash makes a new one),
 its board, its version and the chip revision. That is how I count the devices in use. Nothing else
-is sent. The code that counts them is in
+is sent. check.espkvm.io passes the counts on to Google Analytics, under a hash
+of the id, never the id itself or your address. The code that counts them is in
 [espkvm/check](https://github.com/espkvm/check).
 
 ## Reaching it from outside: Tailscale or WireGuard

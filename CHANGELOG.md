@@ -4,6 +4,17 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.83.1] - 2026-11-13
+
+### Added
+- Power on over USB. The power menu, the "No signal" screen, the buttons on the box, schedules and Home Assistant can send the USB wake signal that a keyboard key sends. It wakes a sleeping target. A target that is off turns on only if its BIOS has an option like "Power On by USB Keyboard" and keeps the USB port powered when off. Fast Startup in Windows has to be off for that. `POST /api/v1/power/usb`.
+- A menu on the status screen, worked with the buttons on the box. Set a button's press or hold to "menu on the screen". In the menu a short press goes to the next item and a hold picks it: power on over USB, Wake-on-LAN, the ATX buttons, a screenshot, a dashcam clip, screen off, the network mode, a restart. Reset, force off, a restart and a network change ask for a second hold. Back at the end closes it. The screen says whether the action worked, and why not. It works on every status display.
+- On the JetKVM Mini both side buttons can now be set up in Settings, Buttons. The top one (SW3) still flips the status pages and turns the screen off. The bottom one (SW2) opens the menu. It stays the password-reset button at start-up.
+- A square colour status screen (the round GC9A01, the JetKVM Mini's ST7789) turns in quarters: Settings, Display, Turned, with upright, 90° either way and upside down. For a box standing on its side. A device that had the screen upside down keeps it. The OLEDs still have Upside down.
+
+### Changed
+- The help of "Offer firmware updates" now says that check.espkvm.io passes the device count on to Google Analytics. It goes under a hash of the random id, never the id or your address.
+
 ## [0.83.0] - 2026-11-12
 
 ### Added

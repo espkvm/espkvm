@@ -245,6 +245,28 @@ static void migrate_disp_picture(nvs_handle_t nvs)
     ESP_LOGI(TAG, "display: the picture switch moved into the page set");
 }
 
+/*
+ * The colour panels turned over with disp_rotate_180. They turn in quarters
+ * now, with disp_rotate; a device that had one upside down keeps it so. The
+ * old key stays: it is still the OLEDs' switch.
+ */
+static void migrate_disp_rotate(nvs_handle_t nvs)
+{
+    int32_t v;
+    if (nvs_get_i32(nvs, "disp_rotate", &v) == ESP_OK) {
+        return;
+    }
+    const int old = find_index("disp_rotate_180");
+    const int idx = find_index("disp_rotate");
+    if (old < 0 || idx < 0 || !s_values[old].i) {
+        return;
+    }
+    if (nvs_set_i32(nvs, "disp_rotate", 2) == ESP_OK && nvs_commit(nvs) == ESP_OK) {
+        s_values[idx].i = 2;
+        ESP_LOGI(TAG, "display: upside down moved to the quarter-turn setting");
+    }
+}
+
 esp_err_t kvm_settings_init(void)
 {
     if (s_values) {
@@ -294,6 +316,7 @@ esp_err_t kvm_settings_init(void)
     migrate_notify_routes(nvs);
     migrate_notify_release(nvs);
     migrate_disp_picture(nvs);
+    migrate_disp_rotate(nvs);
     nvs_close(nvs);
     ESP_LOGI(TAG, "%u settings loaded", (unsigned)s_count);
     profiles_init();

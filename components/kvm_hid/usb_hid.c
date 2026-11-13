@@ -10,6 +10,7 @@
 #include "class/hid/hid.h"
 #include "class/hid/hid_device.h"
 #include "class/msc/msc_device.h"
+#include "device/dcd.h"
 #include "driver/gpio.h"
 #include "kvm_board.h"
 #include "esp_check.h"
@@ -1484,6 +1485,37 @@ static void wake_target_if_asleep(void)
     }
 }
 
+/*
+ * Power on over USB, from the power menu, a button, a schedule or Home
+ * Assistant.
+ *
+ * Unlike the wake above, this sends the wake signal even when the target never
+ * enabled remote wakeup. A machine that is fully off does not enable anything:
+ * a BIOS set to power on from the keyboard just watches the port for the
+ * signal. The signal is only sent while the bus is idle, so a running target
+ * never sees it. A port the target left without power hears nothing at all,
+ * and then the device usually has no power either.
+ */
+static uint8_t s_rhport; /* the controller TinyUSB runs on, set by usb_hid_init */
+
+usb_hid_power_t usb_hid_power_on(void)
+{
+    if (tud_mounted() && !tud_suspended()) {
+        return USB_HID_POWER_AWAKE;
+    }
+    if (!tud_remote_wakeup()) {
+        dcd_remote_wakeup(s_rhport);
+    }
+    ESP_LOGI(TAG, "sent the USB wake signal to power the target on");
+    for (int i = 0; i < 300; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (tud_mounted() && !tud_suspended()) {
+            return USB_HID_POWER_WOKE;
+        }
+    }
+    return USB_HID_POWER_NO_ANSWER;
+}
+
 static void dispatch(const q_msg_t *m)
 {
     /* Every kind of input counts as a nudge: moving the mouse wakes a machine
@@ -1880,6 +1912,7 @@ esp_err_t usb_hid_init(void)
     }
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG(tinyusb_on_event);
+    s_rhport = (uint8_t)tusb_cfg.port;
     if (with_cdc || with_audio) {
         /* Both come as an interface association. */
         s_kvm_device_desc.bDeviceClass = TUSB_CLASS_MISC;

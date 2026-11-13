@@ -48,6 +48,7 @@ esp_err_t api_system_coredump_get(httpd_req_t *req);
 esp_err_t api_system_coredump_delete(httpd_req_t *req);
 esp_err_t api_system_restart_post(httpd_req_t *req);
 esp_err_t api_power_wake_post(httpd_req_t *req);
+esp_err_t api_power_usb_post(httpd_req_t *req);
 esp_err_t api_power_click_post(httpd_req_t *req);
 esp_err_t api_power_hold_post(httpd_req_t *req);
 esp_err_t api_power_reset_post(httpd_req_t *req);

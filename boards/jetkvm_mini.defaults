@@ -21,7 +21,7 @@
 #            backlight 4. 240x240 of glass on a 240x320 controller, colours
 #            inverted, RGB order.
 #   Buttons: SW2 on 47 and SW3 on 23, active low behind 10K pull-ups. SW2 is
-#            the button for the password reset here.
+#            the button for the password reset here, and the menu after start.
 #   Log:     USB Serial/JTAG on the EXT port (GPIO 24/25). There is no UART
 #            bridge on the board.
 #
@@ -79,15 +79,23 @@ CONFIG_KVM_DISP_BL_GPIO=4
 CONFIG_KVM_DISP_FIXED=y
 CONFIG_KVM_DISP_BRIGHT_DEFAULT=40
 
-# --- the second button ------------------------------------------------------
-# SW3 is button 1 in Settings, Buttons: a short press shows the
-# next status page, holding it turns the screen off or on. Both can be
-# changed there, to the target's power button for one.
-CONFIG_KVM_BTN_COUNT=1
+# --- the buttons ------------------------------------------------------------
+# Both side buttons are buttons in Settings, Buttons, and what each does can be
+# changed there. SW3 (top) is button 1: a short press shows the next status
+# page, holding it turns the screen off or on. SW2 (bottom) is button 2: a
+# short press opens the menu on the screen. SW2 is also the password-reset
+# button, but that is read only at start-up.
+CONFIG_KVM_BTN_COUNT=2
 CONFIG_KVM_BTN1_FIXED=y
+CONFIG_KVM_BTN1_NAME="Top button (SW3)"
 CONFIG_KVM_BTN_GPIO_DEFAULT=23
 CONFIG_KVM_BTN_PRESS_DEFAULT=11
 CONFIG_KVM_BTN_HOLD_DEFAULT=12
+CONFIG_KVM_BTN2_FIXED=y
+CONFIG_KVM_BTN2_NAME="Bottom button (SW2)"
+CONFIG_KVM_BTN2_GPIO_DEFAULT=47
+CONFIG_KVM_BTN2_PRESS_DEFAULT=14
+CONFIG_KVM_BTN2_HOLD_DEFAULT=0
 
 # --- what the box does not have ---------------------------------------------
 # No pins come out of it, so the add-ons wired to GPIOs (ATX, a UART serial

@@ -573,9 +573,9 @@ goes rather than in a list of numbers.
 </table>
 
 Both are off by default &mdash; turn the display on in Settings and choose its type.
-Either can be turned upside down there too: an enclosure does not always leave the
-connector facing the way the picture wants it, and the switch applies at once,
-without a restart.
+The OLED can be turned upside down there too, and the round LCD by a quarter,
+a half or three quarters: an enclosure does not always leave the connector facing
+the way the picture wants it. Both apply at once, without a restart.
 
 The LCD needs five free GPIOs, and which ones are free depends on the board - so
 a build offers a set that is known to work there, and you only change them if you

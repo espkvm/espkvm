@@ -144,6 +144,7 @@ These need the agent API, and answer 409 when no target is attached.
 |---|---|
 | `POST /api/v1/power/click`, `/hold`, `/reset` | ATX: tap power, hold power for a hard off, tap reset |
 | `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
+| `POST /api/v1/power/usb` | send the USB wake signal, as a keyboard key does: wakes a sleeping target, and one that is off if its BIOS powers on from USB. Waits up to 3 s and answers `{"status":"awake"\|"woke"\|"no answer"}` |
 | `GET /api/v1/cec` | HDMI-CEC: the devices on the line (name, vendor, power state) and the last messages |
 | `POST /api/v1/cec/key`, `/power`, `/send`, `/scan` | send a remote key (`{"key":"up"}`), `{"action":"standby"\|"wake"}`, a raw message (`{"hex":"04 8f"}`), or look for devices again; `"la"` picks a device other than the active one |
 | `GET /api/v1/serial` | the target's serial console: on or off, pins, speed, byte counts |

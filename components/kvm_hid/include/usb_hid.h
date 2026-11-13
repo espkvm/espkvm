@@ -84,6 +84,21 @@ bool usb_hid_target_suspended(void);
  */
 bool usb_hid_bus_alive(void);
 
+/** What @ref usb_hid_power_on found and did. */
+typedef enum {
+    USB_HID_POWER_AWAKE,     /**< the target was running, nothing sent */
+    USB_HID_POWER_WOKE,      /**< wake signal sent and the bus came back */
+    USB_HID_POWER_NO_ANSWER, /**< wake signal sent, the target did not answer in 3 s */
+} usb_hid_power_t;
+
+/**
+ * Turn the target on over USB, the way a keyboard key does on a board whose
+ * BIOS allows it. Sends the USB wake signal even when the target did not ask
+ * for it, which is what a machine that is fully off and set to power on from
+ * the keyboard listens for. Blocks up to 3 s waiting for the bus to come back.
+ */
+usb_hid_power_t usb_hid_power_on(void);
+
 /**
  * Absolute pointer position in 0..@ref USB_HID_ABS_MAX, origin top-left.
  * @param wheel vertical scroll clicks, @param pan horizontal scroll clicks.

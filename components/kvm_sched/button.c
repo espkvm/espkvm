@@ -7,7 +7,8 @@
  * task polls them every 20 ms - a button is slow, and polling needs no
  * interrupt and no debounce timer - and tells a short press from a long hold.
  * The hold fires as soon as it has been held long enough, so the person knows
- * it took; a press fires on release.
+ * it took; a press fires on release. A button set to "menu" opens the menu on
+ * the status screen (menu.c), and while it is open the buttons work it.
  *
  * NOT tried with real hardware yet.
  */
@@ -20,6 +21,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
+#include "kvm_menu.h"
 #include "kvm_settings.h"
 #include "sdkconfig.h"
 
@@ -34,7 +36,8 @@ static const char *TAG = "button";
 static const char *const k_actions[] = {"", "power", "poweroff", "reset", "wol",
                                         "runbook", "clip", "screenshot",
                                         "hotspot", "netnext", "netswap",
-                                        "displaypage", "displaytoggle"};
+                                        "displaypage", "displaytoggle", "usbwake",
+                                        "menu"};
 
 static const char *action_of(const char *key)
 {
@@ -68,10 +71,19 @@ typedef struct {
 
 static void fire(int i, const char *key)
 {
+    /* An open menu takes every button: a press moves on, a hold picks. */
+    if (kvm_menu_is_open()) {
+        if (key == k_keys[i].hold) {
+            kvm_menu_pick();
+        } else {
+            kvm_menu_next();
+        }
+        return;
+    }
     const char *action = action_of(key);
     if (action[0]) {
         ESP_LOGI(TAG, "button %d %s: %s", i + 1, key, action);
-        kvm_action_run("button", action, kvm_setting_str(k_keys[i].runbook), "button");
+        (void)kvm_action_run("button", action, kvm_setting_str(k_keys[i].runbook), "button", NULL, 0);
     }
 }
 
@@ -149,6 +161,7 @@ static void task(void *arg)
             configure(i, &btn[i]);
             poll(i, &btn[i], now);
         }
+        kvm_menu_tick();
     }
 }
 

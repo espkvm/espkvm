@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "sched_cron.c" "kvm_sched.c" "button.c"
+    SRCS "sched_cron.c" "kvm_sched.c" "button.c" "menu.c"
     INCLUDE_DIRS "include"
     REQUIRES
         esp_common
@@ -15,5 +15,6 @@ idf_component_register(
         kvm_runbook
         kvm_record
         kvm_display
+        kvm_hid
         esp_driver_gpio
 )

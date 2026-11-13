@@ -772,6 +772,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/tls/cert", .method = HTTP_DELETE, .handler = api_tls_cert_delete},
         {.uri = "/api/v1/tls/acme", .method = HTTP_POST, .handler = api_tls_acme_post},
         {.uri = "/api/v1/power/wake", .method = HTTP_POST, .handler = api_power_wake_post},
+        {.uri = "/api/v1/power/usb", .method = HTTP_POST, .handler = api_power_usb_post},
         {.uri = "/api/v1/power/click", .method = HTTP_POST, .handler = api_power_click_post},
         {.uri = "/api/v1/power/hold", .method = HTTP_POST, .handler = api_power_hold_post},
         {.uri = "/api/v1/power/reset", .method = HTTP_POST, .handler = api_power_reset_post},

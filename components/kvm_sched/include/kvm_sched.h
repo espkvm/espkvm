@@ -12,6 +12,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,12 +33,14 @@ typedef struct {
 
 /**
  * Carry out one device action, the same set a schedule can fire: "wol",
- * "power", "reset", "poweroff", "runbook" (@p arg is its name), "clip" (save
+ * "usbwake" (power on over USB), "power", "reset", "poweroff", "runbook" (@p arg is its name), "clip" (save
  * the dashcam's last seconds), "screenshot", "restart". @p name labels it in
  * the log and the status ("button", a schedule's name); @p source says who
  * asked. Quick: a runbook starts its own task. An empty action does nothing.
+ * False when it could not be done, with a short reason in @p why (may be NULL).
  */
-void kvm_action_run(const char *name, const char *action, const char *arg, const char *source);
+bool kvm_action_run(const char *name, const char *action, const char *arg, const char *source,
+                    char *why, size_t why_len);
 
 /** Start the scheduler task and register the capability. Call once at boot. */
 void kvm_sched_init(void);

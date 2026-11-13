@@ -103,6 +103,11 @@ static const char *const s_display_choices[] = {
     "SSD1309 128x64 (M5Stack Unit Glass2, untested)",
     "ST7789 240x240 (JetKVM Mini)",
 };
+/* How far the square colour panels turn, clockwise. */
+static const char *const s_disp_rotate[] = {"0", "90", "180", "270"};
+static const char *const s_disp_rotate_labels[] = {
+    "Upright", "90° clockwise", "Upside down", "90° anticlockwise",
+};
 /* The disp_type values that are SPI LCDs: GC9A01 (2) and ST7789 (15). Their
    pins show for both; the OLED's own I2C pins for everything else. */
 #define DISP_SPI_TYPES ((1 << 2) | (1 << 15))
@@ -133,6 +138,15 @@ static const char *const s_display_choices[] = {
 #define CONFIG_KVM_BTN_PRESS_DEFAULT 0
 #define CONFIG_KVM_BTN_HOLD_DEFAULT 0
 #endif
+#ifndef CONFIG_KVM_BTN2_GPIO_DEFAULT
+#define CONFIG_KVM_BTN2_GPIO_DEFAULT -1
+#define CONFIG_KVM_BTN2_PRESS_DEFAULT 0
+#define CONFIG_KVM_BTN2_HOLD_DEFAULT 0
+#endif
+#ifndef CONFIG_KVM_BTN1_NAME
+#define CONFIG_KVM_BTN1_NAME "Button 1"
+#define CONFIG_KVM_BTN2_NAME "Button 2"
+#endif
 #ifndef CONFIG_KVM_DISP_BRIGHT_DEFAULT
 #define CONFIG_KVM_DISP_BRIGHT_DEFAULT 100
 #endif
@@ -156,7 +170,8 @@ static const char *const s_btn_action_choices[] = {"nothing", "power", "power of
                                                    "wake (WoL)", "runbook", "save clip", "screenshot",
                                                    "hotspot on/off", "next network mode",
                                                    "Ethernet / WiFi", "next display page",
-                                                   "display on/off"};
+                                                   "display on/off", "power on over USB",
+                                                   "menu on the screen"};
 /* Read by the console only; how long its vibration tick lasts on a phone. */
 static const char *const s_haptic_choices[] = {"light", "medium", "strong"};
 static const char *const s_touch_kbd_choices[] = {"console", "phone"};
@@ -950,7 +965,10 @@ static const kvm_setting_t s_settings[] = {
     "screenshot to the card. On a board with WiFi it can also change the connection, which "   \
     "restarts the device: \"hotspot on/off\" goes to its own hotspot and back to the mode it " \
     "had, \"next network mode\" steps through them all, \"Ethernet / WiFi\" swaps the two. "   \
-    "\"next display page\" and \"display on/off\" drive the status display."
+    "\"next display page\" and \"display on/off\" drive the status display. "                 \
+    "\"power on over USB\" sends the wake signal a keyboard sends. \"menu on the screen\" "    \
+    "opens a menu on the status display: a short press moves to the next item, a hold picks " \
+    "it, and Back at the end closes it."
 #define BTN_HOLD_HELP "What holding it for 1.5 s does. It fires as soon as it has been held long enough, so you know it took."
 #define BTN_RUNBOOK_HELP "The name of the runbook, for either action set to \"runbook\"."
 #define BTN_HIGH_HELP                                                                      \
@@ -1004,13 +1022,18 @@ static const kvm_setting_t s_settings[] = {
 #define BTN1_SHOW NULL, 0, 0, "btn_gpio"
 #define BTN2_PREV "btn_gpio"
 #endif
-#if CONFIG_KVM_BTN_COUNT >= 2
-#define BTN2_SHOW BTN2_PREV, -1, KVM_SF_SHOW_NE
+#if CONFIG_KVM_BTN2_FIXED
+#define BTN2_SHOW "btn2_gpio", -2, 0, NULL
+#define BTN3_PREV NULL
+#elif CONFIG_KVM_BTN_COUNT >= 2
+#define BTN2_SHOW BTN2_PREV, -1, KVM_SF_SHOW_NE, "btn2_gpio"
+#define BTN3_PREV "btn2_gpio"
 #else
-#define BTN2_SHOW "btn2_gpio", -2, 0
+#define BTN2_SHOW "btn2_gpio", -2, 0, "btn2_gpio"
+#define BTN3_PREV "btn2_gpio"
 #endif
 #if CONFIG_KVM_BTN_COUNT >= 3
-#define BTN3_SHOW "btn2_gpio", -1, KVM_SF_SHOW_NE
+#define BTN3_SHOW BTN3_PREV, -1, KVM_SF_SHOW_NE
 #else
 #define BTN3_SHOW "btn3_gpio", -2, 0
 #endif
@@ -1019,10 +1042,11 @@ static const kvm_setting_t s_settings[] = {
 #else
 #define BTN4_SHOW "btn4_gpio", -2, 0
 #endif
-    BTN_ROWS_X("Button 1", "btn_gpio", "btn_press", "btn_hold", "btn_runbook", "btn_active_high",
+    BTN_ROWS_X(CONFIG_KVM_BTN1_NAME, "btn_gpio", "btn_press", "btn_hold", "btn_runbook", "btn_active_high",
                CONFIG_KVM_BTN_GPIO_DEFAULT, CONFIG_KVM_BTN_PRESS_DEFAULT, CONFIG_KVM_BTN_HOLD_DEFAULT, BTN1_SHOW),
-    BTN_ROWS_X("Button 2", "btn2_gpio", "btn2_press", "btn2_hold", "btn2_runbook", "btn2_high", -1, 0, 0,
-               BTN2_SHOW, "btn2_gpio"),
+    BTN_ROWS_X(CONFIG_KVM_BTN2_NAME, "btn2_gpio", "btn2_press", "btn2_hold", "btn2_runbook", "btn2_high",
+               CONFIG_KVM_BTN2_GPIO_DEFAULT, CONFIG_KVM_BTN2_PRESS_DEFAULT, CONFIG_KVM_BTN2_HOLD_DEFAULT,
+               BTN2_SHOW),
     BTN_ROWS_X("Button 3", "btn3_gpio", "btn3_press", "btn3_hold", "btn3_runbook", "btn3_high", -1, 0, 0,
                BTN3_SHOW, "btn3_gpio"),
     BTN_ROWS_X("Button 4", "btn4_gpio", "btn4_press", "btn4_hold", "btn4_runbook", "btn4_high", -1, 0, 0,
@@ -1613,7 +1637,8 @@ static const kvm_setting_t s_settings[] = {
         .help = "The browser asks the address below whether a newer build exists and offers to "
                 "install it. With the project's own address it also tells check.espkvm.io, at "
                 "most once a day, this device's random id, its board, its version and the chip revision, so "
-                "the author can count the devices in use. The id is not taken from the hardware; "
+                "the author can count the devices in use. The counts also go on to Google "
+                "Analytics, under a hash of the id, never the id or your address. The id is not taken from the hardware; "
                 "erasing the flash makes a new one. The device itself asks only when New firmware "
                 "is ticked for a channel under Notifications: once a day, and it sends nothing "
                 "about itself when it does.",
@@ -1802,12 +1827,22 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "disp_rotate_180", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,
         .title = "Upside down",
-        .help = "Turn the picture on the status display through 180 degrees, for a panel "
+        .help = "Turn the picture on the OLED through 180 degrees, for a panel "
                 "mounted the other way up because of where its connector or its enclosure "
                 "put it. Takes effect at once: the panel is re-initialised where it stands, "
                 "with no restart.",
-        .def = 0, .requires_cap = -1,
-        .visible_key = "disp_enable", .visible_val = 1,
+        .def = 0, .requires_cap = -1, .flags = KVM_SF_SHOW_NE | KVM_SF_SHOW_IN,
+        .visible_key = "disp_type", .visible_val = DISP_OLED_SHOW,
+    },
+    {
+        .key = "disp_rotate", .section = "display", .group = "Screen", .type = KVM_VT_ENUM,
+        .title = "Turned",
+        .help = "Turn the picture on the square colour panel by a quarter, a half or three "
+                "quarters, for a panel mounted on its side or the other way up. Takes effect "
+                "at once, with no restart.",
+        .min = 0, .max = ENUM_MAX(s_disp_rotate), .def = 0, .choices = s_disp_rotate,
+        .labels = s_disp_rotate_labels, .requires_cap = -1, .flags = DISP_COLOUR_FLAGS,
+        .visible_key = DISP_COLOUR_KEY, .visible_val = DISP_COLOUR_VAL,
     },
     {
         .key = "disp_pages", .section = "display", .group = "Pages", .type = KVM_VT_INT,

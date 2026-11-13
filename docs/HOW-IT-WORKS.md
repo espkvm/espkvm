@@ -48,7 +48,7 @@
 | The target's serial console | new, not tried on hardware yet; Settings &rarr; Power &rarr; Serial console. A UART on two pins you pick, a VT100 terminal in the console that keeps the boot messages, and a REST tail for scripts. 3.3 V consoles wire straight in, RS-232 through a MAX3232 module; [wiring.md](wiring.md#serial-console) |
 | The target's log over the network (netconsole / syslog) | new, not tried on hardware yet; Settings &rarr; Network &rarr; Netconsole. The device listens on UDP, keeps 64 KB, shows it live and can notify on phrases like "Kernel panic". No wiring, and it works when the target's disk is gone. The lines are unauthenticated, so they only ever raise a notification, never an action |
 | The device's own log, live | new; Diagnostics &rarr; Live log. 64 KB that follows as lines arrive, with levels and search; the download still has the run before a restart |
-| Small status display (IP, link, capture, health) | works; optional. An I2C OLED or a round GC9A01, pins assigned from the console, and the picture can be turned upside down for a panel mounted that way |
+| Small status display (IP, link, capture, health) | works; optional. An I2C OLED or a round GC9A01, pins assigned from the console, and the picture can be turned for a panel mounted on its side or upside down |
 | A viewing token for dashboards | works; off until you make one. Opens the stream and the figures, and nothing that can touch the target |
 | Home Assistant integration over MQTT | works; off by default, auto-discovered. Sensors, buttons, an update entity, a camera holding a still of the screen |
 | VPN - WireGuard or native Tailscale | works; off by default, pick one in Settings. Tailscale needs no port forward or gateway |

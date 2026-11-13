@@ -1021,6 +1021,26 @@ esp_err_t api_power_wake_post(httpd_req_t *req)
 }
 
 /*
+ * Power the target on over USB: the wake signal a keyboard sends. Wakes a
+ * sleeping target, and one that is off if its BIOS powers on from the keyboard.
+ * The answer says whether the bus came back within 3 s.
+ */
+esp_err_t api_power_usb_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    static const char *const status[] = {
+        [USB_HID_POWER_AWAKE] = "{\"status\":\"awake\"}",
+        [USB_HID_POWER_WOKE] = "{\"status\":\"woke\"}",
+        [USB_HID_POWER_NO_ANSWER] = "{\"status\":\"no answer\"}",
+    };
+    const usb_hid_power_t r = usb_hid_power_on();
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, status[r]);
+}
+
+/*
  * ATX power control. Each action queues a single button pulse on the device and
  * returns at once; the pulse itself (up to a five-second hard-off hold) runs on
  * the ATX worker task, not here, so the response is never held for its length.

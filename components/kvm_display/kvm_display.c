@@ -276,6 +276,13 @@ static void gather(kvm_display_status_t *st)
     take_notice(st);
 }
 
+/* Both turn settings in one number: the OLEDs' upside down and the colour
+   panels' quarter turns. A change to either re-initialises the panel. */
+static int32_t rotation(void)
+{
+    return kvm_setting_int("disp_rotate") * 2 + (kvm_setting_bool("disp_rotate_180") ? 1 : 0);
+}
+
 static void display_task(void *arg)
 {
     (void)arg;
@@ -288,14 +295,14 @@ static void display_task(void *arg)
        failure - a user reported exactly that against a display he had not
        switched on. */
     bool told_off = false;
-    bool rotate_180 = kvm_setting_bool("disp_rotate_180");
+    int32_t turn = rotation();
 
     for (;;) {
         const bool want = kvm_setting_bool("disp_enable");
         const kvm_panel_t *sel = kvm_panel_selected();
-        const bool new_rotate_180 = kvm_setting_bool("disp_rotate_180");
-        const bool rotation_changed = new_rotate_180 != rotate_180;
-        rotate_180 = new_rotate_180;
+        const int32_t new_turn = rotation();
+        const bool rotation_changed = new_turn != turn;
+        turn = new_turn;
 
         /* Drop the panel if switched off, another one was picked, or the
            orientation changed. Compare panels, not drivers: a new size

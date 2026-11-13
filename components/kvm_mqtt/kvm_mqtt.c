@@ -755,6 +755,7 @@ static void publish_discovery(void)
     } else {
         disco_clear("button", "btn_wol");
     }
+    disco_button("btn_usb_wake", "Power on over USB", "usbwake", "mdi:usb", NULL);
     disco_button("btn_restart", "Restart ESP-KVM", "restart", "mdi:restart", "diagnostic");
     publish_area_discovery();
 
@@ -999,6 +1000,8 @@ static void handle_command(esp_mqtt_event_handle_t e)
         (void)kvm_cec_standby(-1);
     } else if (strcmp(action, "wol") == 0) {
         kvm_wol_send(kvm_setting_str("pwr_wol_mac"));
+    } else if (strcmp(action, "usbwake") == 0) {
+        (void)usb_hid_power_on();
     } else if (strcmp(action, "restart") == 0) {
         pub(s_avail_topic, "offline", 1);
         vTaskDelay(pdMS_TO_TICKS(300)); /* let the offline notice go out first */

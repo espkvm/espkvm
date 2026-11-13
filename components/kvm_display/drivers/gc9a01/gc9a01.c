@@ -777,16 +777,22 @@ static esp_err_t attach_ctrl(void **ctx, lcd_ctrl_t ctrl)
     esp_lcd_panel_reset(g->panel);
     esp_lcd_panel_init(g->panel);
     esp_lcd_panel_invert_color(g->panel, true); /* both controllers want inversion on */
-    const bool upside_down = kvm_setting_bool("disp_rotate_180");
+    /* Quarter turns clockwise, done by the controller: swap the axes for 90 and
+       270, then mirror. The mirror bits flip the glass's own columns and rows,
+       so a module wired X-mirrored (the GC9A01) just has X the other way. */
+    const int quarter = (int)kvm_setting_int("disp_rotate") & 3;
+    bool mx = quarter == 1 || quarter == 2;
+    const bool my = quarter == 2 || quarter == 3;
     if (ctrl == CTRL_ST7789) {
-        /* 240x240 of glass on a 240x320 RAM: upright it starts at row 0,
-           turned over the last 80 rows come first (JetKVM's own table). */
-        esp_lcd_panel_set_gap(g->panel, 0, upside_down ? 80 : 0);
-        esp_lcd_panel_mirror(g->panel, upside_down, upside_down);
+        /* 240x240 of glass on a 240x320 RAM: the glass is the first 240 rows,
+           so a mirrored row order starts 80 later - on y at 180, on x once the
+           axes swap at 270 (JetKVM's own table). */
+        esp_lcd_panel_set_gap(g->panel, quarter == 3 ? 80 : 0, quarter == 2 ? 80 : 0);
     } else {
-        /* The module's default is X-mirrored; turning it over means both axes. */
-        esp_lcd_panel_mirror(g->panel, !upside_down, upside_down);
+        mx = !mx;
     }
+    esp_lcd_panel_swap_xy(g->panel, quarter & 1);
+    esp_lcd_panel_mirror(g->panel, mx, my);
     esp_lcd_panel_disp_on_off(g->panel, true);
 
     g->square = ctrl == CTRL_ST7789;

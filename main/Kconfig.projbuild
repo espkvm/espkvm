@@ -337,8 +337,8 @@ menu "ESP-KVM"
             range 1 4
             default 4
             help
-                1 on a closed box with one spare button of its own (the JetKVM
-                Mini's SW3), 4 on a board with free pins for more.
+                2 on a closed box with two buttons of its own (the JetKVM
+                Mini's SW3 and SW2), 4 on a board with free pins for more.
 
         config KVM_BTN1_FIXED
             bool "Button 1 is the board's own, on KVM_BTN_GPIO_DEFAULT"
@@ -366,6 +366,37 @@ menu "ESP-KVM"
             default 0
             help
                 12 is "display on/off".
+
+        config KVM_BTN1_NAME
+            string "What Settings calls button 1"
+            default "Button 1"
+
+        config KVM_BTN2_FIXED
+            bool "Button 2 is the board's own, on KVM_BTN2_GPIO_DEFAULT"
+            default n
+            help
+                As KVM_BTN1_FIXED, for a second button of the board's own. It
+                may be the password-reset button: that one is read only at
+                start-up, so it is free to be a button after that.
+
+        config KVM_BTN2_GPIO_DEFAULT
+            int "Default GPIO of button 2 (btn2_gpio, -1 if none)"
+            range -1 ENV_GPIO_RANGE_MAX
+            default -1
+
+        config KVM_BTN2_PRESS_DEFAULT
+            int "Default action of button 2's short press"
+            default 0
+            help
+                14 is "menu on the screen".
+
+        config KVM_BTN2_HOLD_DEFAULT
+            int "Default action of button 2's long press"
+            default 0
+
+        config KVM_BTN2_NAME
+            string "What Settings calls button 2"
+            default "Button 2"
 
         config KVM_BUTTON_GPIO
             int "BOOT button GPIO for password reset (-1 if none)"

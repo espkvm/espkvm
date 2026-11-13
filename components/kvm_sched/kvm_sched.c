@@ -20,6 +20,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "kvm_atx.h"
+#include "usb_hid.h"
+#include "kvm_menu.h"
 #include "kvm_caps.h"
 #include "kvm_display.h"
 #include "kvm_record.h"
@@ -148,38 +150,62 @@ static bool net_switch(const char *name, const char *action)
 }
 
 /* Carry out one action. Everything here is quick except a runbook, which starts
-   its own task and returns at once. */
-static void dispatch(const char *name, const char *action, const char *arg, const char *source)
+   its own task and returns at once. False with a short reason in @p why when it
+   could not be done. */
+static bool dispatch(const char *name, const char *action, const char *arg, const char *source,
+                     char *why, size_t why_len)
 {
+    char none[1];
+    if (!why || !why_len) {
+        why = none;
+        why_len = sizeof(none);
+    }
+    why[0] = '\0';
+    bool ok = true;
     ESP_LOGI(TAG, "%s: %s%s%s (%s)", name, action, arg && arg[0] ? " " : "", arg ? arg : "", source);
     if (strcmp(action, "wol") == 0) {
-        kvm_wol_send(kvm_setting_str("pwr_wol_mac"));
+        if (kvm_wol_send(kvm_setting_str("pwr_wol_mac")) != ESP_OK) {
+            snprintf(why, why_len, "no target MAC");
+            ok = false;
+        }
+    } else if (strcmp(action, "usbwake") == 0) {
+        if (usb_hid_power_on() == USB_HID_POWER_NO_ANSWER) {
+            ESP_LOGW(TAG, "%s: the target did not answer the USB wake signal", name);
+            snprintf(why, why_len, "no answer yet");
+            ok = false;
+        }
     } else if (strcmp(action, "power") == 0) {
-        kvm_atx_power_click();
+        ok = kvm_atx_power_click() == ESP_OK;
     } else if (strcmp(action, "reset") == 0) {
-        kvm_atx_reset();
+        ok = kvm_atx_reset() == ESP_OK;
     } else if (strcmp(action, "poweroff") == 0) {
-        kvm_atx_power_hold();
+        ok = kvm_atx_power_hold() == ESP_OK;
     } else if (strcmp(action, "runbook") == 0) {
         const esp_err_t err = runbook_start(arg ? arg : "", source, NULL, 0);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s: runbook \"%s\": %s", name, arg ? arg : "", esp_err_to_name(err));
+            snprintf(why, why_len, "runbook did not start");
+            ok = false;
         }
     } else if (strcmp(action, "clip") == 0) {
-        char why[96] = "";
-        if (!kvm_record_event(source, why, sizeof(why))) {
+        if (!kvm_record_event(source, why, why_len)) {
             ESP_LOGW(TAG, "%s: no clip saved: %s", name, why);
+            ok = false;
         }
     } else if (strcmp(action, "screenshot") == 0) {
-        char file[64] = "", why[96] = "";
-        if (kvm_record_screenshot(file, sizeof(file), why, sizeof(why)) != ESP_OK) {
+        char file[64] = "";
+        if (kvm_record_screenshot(file, sizeof(file), why, why_len) != ESP_OK) {
             ESP_LOGW(TAG, "%s: no screenshot: %s", name, why);
+            ok = false;
         }
     } else if (strcmp(action, "hotspot") == 0 || strcmp(action, "netnext") == 0 ||
                strcmp(action, "netswap") == 0) {
         if (!net_switch(name, action)) {
-            return;
+            snprintf(why, why_len, "not on this board");
+            return false;
         }
+    } else if (strcmp(action, "menu") == 0) {
+        kvm_menu_open();
     } else if (strcmp(action, "displaypage") == 0) {
         kvm_display_next_page();
     } else if (strcmp(action, "displaytoggle") == 0) {
@@ -190,9 +216,11 @@ static void dispatch(const char *name, const char *action, const char *arg, cons
         esp_restart();
     } else {
         ESP_LOGW(TAG, "%s: unknown action \"%s\"", name, action);
-        return;
+        snprintf(why, why_len, "unknown action");
+        return false;
     }
     status_last(name, action);
+    return ok;
 }
 
 /* Walk the schedules and fire the ones matching @p t. */
@@ -219,7 +247,7 @@ static uint16_t evaluate(const struct tm *t)
             continue;
         }
         dispatch(jn->valuestring, ja->valuestring, cJSON_IsString(jarg) ? jarg->valuestring : NULL,
-                 "schedule");
+                 "schedule", NULL, 0);
     }
     cJSON_Delete(list);
     return count;
@@ -291,12 +319,13 @@ static void task(void *arg)
     }
 }
 
-void kvm_action_run(const char *name, const char *action, const char *arg, const char *source)
+bool kvm_action_run(const char *name, const char *action, const char *arg, const char *source,
+                    char *why, size_t why_len)
 {
     if (!action || !action[0]) {
-        return;
+        return true;
     }
-    dispatch(name ? name : source, action, arg, source);
+    return dispatch(name ? name : source, action, arg, source, why, why_len);
 }
 
 void kvm_sched_init(void)
@@ -329,7 +358,7 @@ esp_err_t kvm_sched_run(const char *name)
         const cJSON *jarg = cJSON_GetObjectItem(item, "arg");
         if (cJSON_IsString(jn) && cJSON_IsString(ja) && strcmp(jn->valuestring, name) == 0) {
             dispatch(jn->valuestring, ja->valuestring,
-                     cJSON_IsString(jarg) ? jarg->valuestring : NULL, "console");
+                     cJSON_IsString(jarg) ? jarg->valuestring : NULL, "console", NULL, 0);
             rc = ESP_OK;
             break;
         }

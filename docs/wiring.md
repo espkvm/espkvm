@@ -171,8 +171,20 @@ a runbook, save a dashcam clip, a screenshot. On a board with WiFi there are
 three more, and each restarts the device into the new mode: "hotspot on/off"
 (to its own hotspot, and back to the mode it had), "next network mode" (every
 mode the board has, in turn) and "Ethernet / WiFi". A button to ground needs nothing
-else: the pin's own pull-up holds it high until it is pressed. Not tried with
-real hardware yet.
+else: the pin's own pull-up holds it high until it is pressed. Up to four
+buttons, each with its own pin and actions (`btn2_*`, `btn3_*`, `btn4_*`).
+
+Two more actions: "power on over USB" sends the wake signal a keyboard key
+sends, and "menu on the screen" opens a menu on the status display. In the
+menu a short press of any button moves to the next item and a hold picks it.
+Reset, a hard off, a restart and a network change ask for a second hold. The
+last item is Back, and the menu closes by itself after 20 s without a press.
+The screen shows whether the action worked, and why not when it did not.
+
+On the JetKVM Mini both side buttons are buttons here, with their pins fixed:
+the top one (SW3) shows the next status page on a press and turns the screen
+off or on when held, the bottom one (SW2) opens the menu. The bottom one is
+also the password-reset button, which is read only at start-up.
 
 # Serial console
 
