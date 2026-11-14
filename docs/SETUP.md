@@ -127,7 +127,7 @@ imported. WireGuard is a split tunnel - it makes its
 own key on the device and shows the public half in the VPN tab, to register on
 your hub.
 
-Tailscale does not need an auth key. Turn it on with the key field empty and the VPN tab shows **Sign in to Tailscale**: the link opens Tailscale's page, you approve the device with your account, and it joins a few seconds later. An auth key still works the same way as before, for a device you set up without a browser. **Log out of the tailnet** makes the device forget its keys, so the next start asks again.
+Tailscale does not need an auth key. Turn it on with the key field empty and the VPN tab shows **Sign in to Tailscale**: the link opens Tailscale's page, you approve the device with your account, and it joins a few seconds later. An auth key still works the same way as before, for a device you set up without a browser. **Log out of the tailnet** makes the device forget its keys, so the next start asks again. It works only from the local network: over Tailscale itself it is refused, because nobody could then reach the sign-in link.
 
 The same tab lists the other devices on the tailnet: whose they are, whether traffic to each goes straight or through a Tailscale relay (and which one), and the last round trip. A slow console over Tailscale is usually a relay. The list of open consoles names a tailnet device and its owner instead of a 100.x address.
 
@@ -135,3 +135,9 @@ Two settings use what Tailscale knows about who is connecting:
 
 - **Console only over Tailscale**: while the device is on the tailnet, the console answers only to tailnet addresses. The setup hotspot still works, and when Tailscale is down the console answers on the LAN again, so a broken tailnet does not lock you out.
 - **Sign in these tailnet users** and **Let these tailnet users watch**: Tailscale logins (`alice@example.com`), separated by commas. A browser on one of their devices is signed in as the owner, or as the viewer, with no password and no code. This works only after a password of your own is set.
+
+## Changing the network of a device far away
+
+A change to Wi-Fi, the address, the connection mode, Tailscale or WireGuard goes on trial. For 10 minutes after it takes effect (at once, or after the restart the setting needs), the device checks that it is still on the network: the gateway answers, and the VPN is up if the change touched it or came over it. If not, it puts the old settings back and restarts. Opening the console in that time keeps the change too; for a change made over a VPN, only a sign-in over a VPN counts. A wrong Wi-Fi password typed from the other side of the world costs 10 minutes, not a trip.
+
+The second half of the safety net is a watchdog. With no working network for 30 minutes the device restarts, then after 1, 2 and 4 hours, then every 6 hours, and starts over once the network has been back for 30 minutes. That covers a router that came back in a state the device did not recover from, or a Wi-Fi chip that stopped answering. It never restarts while a recording runs, during an update, or while the Ethernet cable is simply unplugged. Both are in Settings &rarr; Network &rarr; Safety net, on by default.

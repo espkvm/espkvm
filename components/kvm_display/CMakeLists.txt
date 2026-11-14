@@ -21,6 +21,7 @@ idf_component_register(
         kvm_net
         kvm_config
         kvm_hid
+        kvm_cec
         esp_netif
         esp_timer
         esp_app_format

@@ -72,6 +72,9 @@ typedef struct {
 /** Fill @p out with the current WiFi state. Safe to call at any time. */
 void kvm_wifi_status(kvm_wifi_status_t *out);
 
+/** True when a WiFi mode was chosen but the co-processor did not start. */
+bool kvm_wifi_coproc_failed(void);
+
 /**
  * Start an asynchronous scan for nearby WiFi networks. Non-blocking: it runs on
  * a worker, and only a running WiFi station can scan; other modes finish with

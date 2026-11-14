@@ -22,6 +22,7 @@
 
 #include "capture.h"
 #include "kvm_rtc.h"
+#include "kvm_net_guard.h"
 #include "kvm_display.h"
 #include "kvm_log.h"
 #include "ethernet.h"
@@ -786,6 +787,10 @@ void app_main(void)
      * to the TLS layer so the console certificate is valid over Tailscale. */
     kvm_ts_set_identity_cb(kvm_tls_set_tailnet);
     ESP_ERROR_CHECK(kvm_ts_init());
+
+    /* The safety net: a network change on trial, and a restart when the
+     * network has been gone for long (kvm_net_guard.h). */
+    kvm_net_guard_start();
 
     /*
      * Now the peripherals a warm esp_restart() does not power-cycle. USB is not

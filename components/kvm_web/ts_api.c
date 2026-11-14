@@ -17,6 +17,7 @@
 #include "kvm_settings.h"
 #include "kvm_ts.h"
 #include "web_priv.h"
+#include "kvm_net_guard.h"
 
 static esp_err_t send_json(httpd_req_t *req, cJSON *root)
 {
@@ -109,6 +110,14 @@ static esp_err_t ts_logout_post(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {
         return kvm_auth_challenge(req);
+    }
+    /* Logging out forgets the keys, and joining again needs somebody to open
+     * a login link the console shows - which nobody can reach over a tailnet
+     * the device has just left. */
+    if (kvm_net_guard_via_tailscale(req)) {
+        return send_json_error(req, "409 Conflict",
+                               "You are connected over Tailscale. Logging out would cut this connection "
+                               "for good. Log out from the local network.");
     }
     if (kvm_ts_logout() != ESP_OK) {
         return send_json_error(req, "503 Service Unavailable", "Tailscale is not running");

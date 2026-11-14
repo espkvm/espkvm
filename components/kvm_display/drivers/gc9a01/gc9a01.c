@@ -38,6 +38,7 @@
 
 #include "font5x7.h"
 #include "icons.h"
+#include "icons16.h"
 #include "kvm_display_driver.h"
 #include "logo.h"
 #include "kvm_settings.h"
@@ -269,6 +270,54 @@ static void draw_icon(uint16_t *fb, int x, int y, const uint8_t g[8], int s, uin
     }
 }
 
+/* The colours of the 16x16 marks (icons16.h), one letter each. */
+static uint16_t icon16_colour(char ch)
+{
+    switch (ch) {
+    case 'K': return rgb(20, 22, 26);    /* the penguin's black */
+    case 'W': return rgb(240, 242, 245); /* white */
+    case 'Y': return rgb(245, 185, 40);  /* the beak and the feet */
+    case 'G': return rgb(130, 138, 150); /* an outline that shows on the dark face */
+    case 'B': return rgb(0, 164, 239);   /* Windows blue */
+    case 'L': return rgb(205, 210, 218); /* the apple */
+    case 'N': return rgb(61, 220, 132);  /* Android green */
+    case 'C': return rgb(0, 190, 225);   /* the left Joy-Con */
+    case 'R': return rgb(255, 75, 80);   /* the right Joy-Con */
+    case 'S': return rgb(26, 159, 255);  /* the Steam Deck's dot */
+    default: return 0;
+    }
+}
+
+/* What the target is, as a 16x16 colour mark, or NULL when unknown. */
+static const char (*icon16_os(const char *os))[17]
+{
+    static const struct {
+        const char *os;
+        const char (*icon)[17];
+    } k[] = {
+        {"windows", icon16_windows}, {"macos", icon16_macos},   {"linux", icon16_linux},
+        {"android", icon16_android}, {"switch", icon16_switch}, {"steamdeck", icon16_steamdeck},
+    };
+    for (unsigned i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+        if (strcmp(os, k[i].os) == 0) {
+            return k[i].icon;
+        }
+    }
+    return NULL;
+}
+
+/* A 16x16 colour mark, top-left (x, y); '.' leaves the face as it is. */
+static void draw_icon16(uint16_t *fb, int x, int y, const char (*g)[17])
+{
+    for (int row = 0; row < 16; row++) {
+        for (int col = 0; col < 16; col++) {
+            if (g[row][col] != '.') {
+                put_px(fb, x + col, y + row, icon16_colour(g[row][col]));
+            }
+        }
+    }
+}
+
 /* The ESP-KVM logo from icon.svg: light ESP/KVM pixels on the dark face, framed
  * by the ring - the icon's dark tile and light wordmark. The end of the boot
  * splash, and the screen when no page is ticked. */
@@ -452,7 +501,13 @@ static void render_corners(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     static const char *const usb_word[] = {"OFF", "...", "ON", "SLP"};
     const uint16_t usb_col[] = {red, amber, green, amber};
     const uint8_t u = st->usb < 4 ? st->usb : 0;
-    corner(g->fb, 0, "USB", usb_word[u], usb_col[u]);
+    const char (*os)[17] = u == 2 ? icon16_os(st->target_os) : NULL;
+    if (os) { /* working, and the target's OS is known: its mark says both */
+        text_at(g->fb, 4, 4, "USB", 1, rgb(120, 130, 145), false);
+        draw_icon16(g->fb, 4, 14, os);
+    } else {
+        corner(g->fb, 0, "USB", usb_word[u], usb_col[u]);
+    }
 
     snprintf(buf, sizeof(buf), "%dC", st->temp_c);
     corner(g->fb, 1, "TEMP", buf, st->temp_c < 60 ? white : st->temp_c < 75 ? amber : red);
@@ -535,6 +590,17 @@ static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
             text_centered(g->fb, 150, buf, 2, grey);
         } else {
             text_centered(g->fb, 110, "NO SIGNAL", 3, red);
+        }
+        {
+            /* The target's OS under it, its mark and its name as one centred line. */
+            const char *name = os_name(st->target_os);
+            const char (*os)[17] = icon16_os(st->target_os);
+            if (name && os) {
+                const int w = 16 + 6 + (int)strlen(name) * 12;
+                const int x = LCD_CENTER - w / 2;
+                draw_icon16(g->fb, x, 175, os);
+                text_at(g->fb, x + 22, 177, name, 2, grey, false);
+            }
         }
         break;
     default: /* health */

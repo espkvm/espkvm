@@ -714,6 +714,12 @@ void __wrap_eh_host_port_task_delay_us(uint32_t us)
 }
 
 static bool s_unclaimed;
+static bool s_coproc_failed;
+
+bool kvm_wifi_coproc_failed(void)
+{
+    return s_coproc_failed;
+}
 
 void kvm_wifi_set_unclaimed(bool unclaimed)
 {
@@ -732,7 +738,8 @@ esp_err_t kvm_wifi_init(void)
     (void)esp_event_loop_create_default();
 
     if (coproc_wifi_up() != ESP_OK) {
-        return ESP_OK; /* WiFi is optional; the warning is already logged */
+        s_coproc_failed = true; /* the network watchdog restarts sooner for this */
+        return ESP_OK;          /* WiFi is optional; the warning is already logged */
     }
     /* A device nobody has claimed starts as the open setup hotspot, the same
      * one a board with Ethernet falls back to: only the page that sets the
@@ -958,6 +965,11 @@ void kvm_wifi_scan_json(char *buf, size_t len)
 }
 
 #else /* !CONFIG_KVM_WIFI */
+
+bool kvm_wifi_coproc_failed(void)
+{
+    return false;
+}
 
 void kvm_wifi_set_unclaimed(bool unclaimed)
 {

@@ -34,6 +34,7 @@
 #include "web_priv.h" /* kvm_web_clock_from_browser */
 #include "totp.h"
 #include "kvm_ts.h"
+#include "kvm_net_guard.h"
 
 #define TAG "auth"
 
@@ -1060,6 +1061,7 @@ bool kvm_auth_check(httpd_req_t *req)
         return false;
     }
     if (!kvm_auth_required()) {
+        kvm_net_guard_seen(req);
         return true;
     }
     char token[TOKEN_CHARS + 1] = {0};
@@ -1092,6 +1094,7 @@ bool kvm_auth_check(httpd_req_t *req)
         ESP_LOGW(TAG, "%s refused: this sign-in can only watch", req->uri);
         return false;
     }
+    kvm_net_guard_seen(req); /* the device is reachable; see kvm_net_guard.h */
     return true;
 }
 
@@ -2226,6 +2229,8 @@ void kvm_auth_check_reset_button(kvm_auth_reset_ui_cb_t ui)
                 if (kvm_setting_set_int("net_dhcp", 1) == ESP_OK) {
                     ESP_LOGW(TAG, "network reverted to DHCP");
                 }
+                /* A network change on trial would put back what this just undid. */
+                kvm_net_guard_forget();
                 /*
                  * And back onto the wired link. A WiFi network that moved,
                  * changed its passphrase or simply is not there any more locks

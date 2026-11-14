@@ -299,6 +299,7 @@ struct tc358743 {
     bool csi_uyvy422;
     uint16_t fifo_set; /* FIFOCTL as last written */
     tc358743_edid_profile_t edid_profile;
+    kvm_bridge_edid_id_t edid_id;
     bool i2c_ok; /* tracks I2C health so a wedged bus is logged once, not per-register */
     uint32_t i2c_fails; /* failed transfers, so a reading can tell it is not real */
     bool analog_on; /* ANA_CTL set since HDMI mode was last seen */
@@ -702,6 +703,48 @@ static void hpd_set(tc358743_t *d, bool on)
     wr8_and_or(d, HPD_CTL, (uint8_t)~MASK_HPD_OUT0, on ? MASK_HPD_OUT0 : 0);
 }
 
+/* The operator's monitor name and IDs over the built-in ones, in block 0,
+ * then its checksum again. The layout is EDID 1.3/1.4: maker at 8-9,
+ * product 10-11 and serial 12-15 little-endian, the name in the 0xFC
+ * descriptor (gen_edid.py puts one in every profile). */
+static void edid_apply_id(uint8_t *e, const kvm_bridge_edid_id_t *id)
+{
+    if (id->mfr[0]) {
+        const uint16_t m = (uint16_t)(((id->mfr[0] - '@') & 31) << 10 |
+                                      ((id->mfr[1] - '@') & 31) << 5 | ((id->mfr[2] - '@') & 31));
+        e[8] = (uint8_t)(m >> 8);
+        e[9] = (uint8_t)m;
+    }
+    if (id->has_product) {
+        e[10] = (uint8_t)id->product;
+        e[11] = (uint8_t)(id->product >> 8);
+    }
+    if (id->has_serial) {
+        for (int i = 0; i < 4; i++) {
+            e[12 + i] = (uint8_t)(id->serial >> (8 * i));
+        }
+    }
+    if (id->name[0]) {
+        for (int off = 54; off <= 108; off += 18) {
+            if (e[off] == 0 && e[off + 1] == 0 && e[off + 2] == 0 && e[off + 3] == 0xFC) {
+                /* 13 bytes: the name, 0x0A after a short one, spaces after that. */
+                const size_t n = strnlen(id->name, 13);
+                memset(e + off + 5, ' ', 13);
+                memcpy(e + off + 5, id->name, n);
+                if (n < 13) {
+                    e[off + 5 + n] = 0x0A;
+                }
+                break;
+            }
+        }
+    }
+    uint8_t sum = 0;
+    for (int i = 0; i < 127; i++) {
+        sum += e[i];
+    }
+    e[127] = (uint8_t)(0x100 - sum);
+}
+
 /**
  * Load EDID into internal RAM (HPD must stay low, source must not DDC during this).
  * Caller raises HPD after PLL/CSI and any other sink setup (Linux: delayed hotplug ~143 ms).
@@ -735,11 +778,14 @@ static void edid_write_builtin(tc358743_t *d)
         break;
     }
     ESP_LOGI(TAG, "EDID profile: %s", what);
+    uint8_t edid[TC358743_EDID_TOTAL_LEN];
+    memcpy(edid, bin, sizeof(edid));
+    edid_apply_id(edid, &d->edid_id);
     const uint16_t edid_len = TC358743_EDID_TOTAL_LEN;
     wr8(d, EDID_LEN1, edid_len & 0xff);
     wr8(d, EDID_LEN2, edid_len >> 8);
     for (uint16_t i = 0; i < edid_len; i += 128) {
-        i2c_write_reg(d, EDID_RAM + i, bin + i, 128);
+        i2c_write_reg(d, EDID_RAM + i, edid + i, 128);
     }
     vTaskDelay(pdMS_TO_TICKS(10));
 }
@@ -841,6 +887,13 @@ esp_err_t tc358743_set_edid_profile(tc358743_t *d, tc358743_edid_profile_t profi
 {
     ESP_RETURN_ON_FALSE(d, ESP_ERR_INVALID_ARG, TAG, "dev");
     d->edid_profile = profile;
+    return ESP_OK;
+}
+
+esp_err_t tc358743_set_edid_id(tc358743_t *d, const kvm_bridge_edid_id_t *id)
+{
+    ESP_RETURN_ON_FALSE(d && id, ESP_ERR_INVALID_ARG, TAG, "args");
+    d->edid_id = *id;
     return ESP_OK;
 }
 

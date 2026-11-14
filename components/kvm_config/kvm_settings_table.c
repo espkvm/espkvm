@@ -184,6 +184,10 @@ static const char *const s_codec_labels[] = {"MJPEG", "H.264"};
 static const char *const s_layout_labels[] = {"English (US)", "Russian", "Czech", "Ukrainian", "Lithuanian"};
 static const char *const s_media_labels[] = {"Auto", "CD-ROM", "Disk"};
 static const char *const s_targetos_labels[] = {"Detect", "Windows", "macOS", "Linux", "Android"};
+static const char *const s_usbname_choices[] = {"espkvm", "plain", "custom"};
+static const char *const s_edidid_choices[] = {"espkvm", "plain", "custom"};
+static const char *const s_edidid_labels[] = {"ESP-KVM", "Plain (HDMI)", "Custom"};
+static const char *const s_usbname_labels[] = {"ESP-KVM", "Plain (Generic USB Device)", "Custom"};
 static const char *const s_pad_labels[] = {"Off", "Nintendo Switch", "Nintendo Switch, pad only",
                                            "Xbox 360 (XInput)", "Xbox 360, pad only", "Original Xbox"};
 static const char *const s_netmode_labels[] = {"Ethernet", "WiFi", "Own hotspot", "Ethernet, WiFi as backup"};
@@ -1324,6 +1328,27 @@ static const kvm_setting_t s_settings[] = {
         .def = 1, .requires_cap = KVM_CAP_WIFI, .flags = KVM_SF_REBOOT,
     },
 
+    /* The safety net for a device nobody can walk up to (kvm_web/net_guard.c). */
+    {
+        .key = "net_trial", .section = "network", .group = "Safety net", .type = KVM_VT_BOOL,
+        .title = "Undo a network change that cuts the device off",
+        .help = "After a change to Wi-Fi, the address, Tailscale or WireGuard, the device "
+                "checks for 10 minutes that it is still on the network (and on the VPN, if "
+                "the change came over it). If not, it puts the old settings back and "
+                "restarts. Opening the console in that time also keeps the change.",
+        .def = 1, .requires_cap = -1,
+    },
+    {
+        .key = "net_watchdog", .section = "network", .group = "Safety net", .type = KVM_VT_BOOL,
+        .title = "Restart when the network is gone for long",
+        .help = "With no working network for 30 minutes, the device restarts, then waits "
+                "longer each time: 1, 2 and 4 hours, then every 6 hours. It does not "
+                "restart while a recording runs or while the Ethernet cable is simply "
+                "unplugged. If the Wi-Fi chip does not start at all, the first restarts "
+                "come after 2 and 5 minutes.",
+        .def = 1, .requires_cap = -1,
+    },
+
     /* ---- vpn / wireguard ------------------------------------------------- */
     {
         .key = "nc_enable", .section = "network", .group = "Netconsole", .type = KVM_VT_BOOL,
@@ -1631,6 +1656,94 @@ static const kvm_setting_t s_settings[] = {
     },
 
     /* ---- system --------------------------------------------------------- */
+    {
+        .key = "usb_name", .section = "system", .group = "Seen by the target", .type = KVM_VT_ENUM,
+        .title = "USB name on the target",
+        .help = "What the target's device list calls this device. \"Plain\": Generic USB "
+                "Device, USB Disk, USB Speaker. \"Custom\": names and USB IDs of your own. "
+                "Takes effect after a restart.",
+        .min = 0, .max = ENUM_MAX(s_usbname_choices), .def = 0, .choices = s_usbname_choices,
+        .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT, .labels = s_usbname_labels,
+    },
+    {
+        .key = "usb_mfr", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "USB manufacturer",
+        .help = "Up to 32 plain Latin characters. The virtual drive shows the first 8. "
+                "Empty: ESP-KVM.",
+        .def_str = "ESP-KVM", .max_len = 32, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
+        .visible_key = "usb_name", .visible_val = 2,
+    },
+    {
+        .key = "usb_product", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "USB product",
+        .help = "Up to 32 plain Latin characters. The virtual drive shows the first 16. "
+                "Empty: ESP-KVM.",
+        .def_str = "ESP-KVM", .max_len = 32, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
+        .visible_key = "usb_name", .visible_val = 2,
+    },
+    {
+        .key = "usb_sn", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "USB serial number",
+        .help = "Empty: made from the device's MAC address, so it differs between devices.",
+        .def_str = "", .max_len = 32, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
+        .visible_key = "usb_name", .visible_val = 2,
+    },
+    {
+        .key = "usb_vid", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "USB vendor ID",
+        .help = "4 hex digits. 303A is Espressif's. ESP-KVM Tools on the "
+                "target finds the device by these IDs, so with other IDs it does not see it. "
+                "Use only an ID that is yours to use.",
+        .def_str = "303A", .max_len = 6, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
+        .visible_key = "usb_name", .visible_val = 2,
+    },
+    {
+        .key = "usb_pid", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "USB product ID",
+        .help = "4 hex digits. Empty: one of 4012, 4013, 4032 or 4033, by the serial port "
+                "and speaker settings. A set ID stays the same when those change, and "
+                "Windows may then need the device removed in Device Manager once.",
+        .def_str = "", .max_len = 6, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
+        .visible_key = "usb_name", .visible_val = 2,
+    },
+    {
+        .key = "edid_ident", .section = "system", .group = "Seen by the target", .type = KVM_VT_ENUM,
+        .title = "Monitor name on the target",
+        .help = "What the target's display settings call this device. \"Plain\": a monitor "
+                "named HDMI, with no product code or serial number. \"Custom\": a name and "
+                "codes of your own. A change makes it a new monitor to the target, which may "
+                "then pick another resolution. Takes effect after a restart.",
+        .min = 0, .max = ENUM_MAX(s_edidid_choices), .def = 0, .choices = s_edidid_choices,
+        .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT, .labels = s_edidid_labels,
+    },
+    {
+        .key = "edid_name", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "Monitor name",
+        .help = "Up to 13 plain Latin characters. Empty: ESP-KVM.",
+        .def_str = "ESP-KVM", .max_len = 13, .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT,
+        .visible_key = "edid_ident", .visible_val = 2,
+    },
+    {
+        .key = "edid_mfr", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "Monitor maker code",
+        .help = "3 letters, the maker's PnP ID, such as ESP. Empty: ESP.",
+        .def_str = "ESP", .max_len = 3, .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT,
+        .visible_key = "edid_ident", .visible_val = 2,
+    },
+    {
+        .key = "edid_product", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "Monitor product code",
+        .help = "Up to 4 hex digits. Empty: 8888.",
+        .def_str = "8888", .max_len = 4, .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT,
+        .visible_key = "edid_ident", .visible_val = 2,
+    },
+    {
+        .key = "edid_serial", .section = "system", .group = "Seen by the target", .type = KVM_VT_STR,
+        .title = "Monitor serial number",
+        .help = "A number up to 4294967295. Empty: 2290649088.",
+        .def_str = "2290649088", .max_len = 10, .requires_cap = KVM_CAP_EDID, .flags = KVM_SF_REBOOT,
+        .visible_key = "edid_ident", .visible_val = 2,
+    },
     {
         .key = "upd_check", .section = "system", .group = "Updates", .type = KVM_VT_BOOL,
         .title = "Offer firmware updates",

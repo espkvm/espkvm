@@ -100,6 +100,11 @@ typedef struct {
     /** The USB link to the target: 0 no bus (cable out, target off),
         1 a bus but not enumerated yet, 2 working, 3 the target is asleep. */
     uint8_t usb;
+    /** What the target is, as the console's OS button says it
+        (web/src/state/targetKind.ts): "switch", "steamdeck" or "android" from
+        its HDMI-CEC name, else "windows", "macos", "linux" or "android" from
+        the USB guess while USB works. "" when unknown. */
+    char target_os[12];
     /** Presses of the display's page button so far: a driver that pages
         moves on when this changes. */
     uint32_t page_presses;

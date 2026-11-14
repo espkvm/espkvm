@@ -47,6 +47,22 @@ The fix for that one is on the machine, and somebody has written it up - a udev
 rule that re-applies the mode when the connector changes state:
 [check456-beep/orangepi-hdmi-fix](https://github.com/check456-beep/orangepi-hdmi-fix).
 
+## A VGA, DVI or DisplayPort target
+
+Many servers have only VGA. An active VGA-to-HDMI converter works, but the target talks to the converter, not to the KVM. It reads the converter's EDID instead of the one the device offers, so the device's mode list and the EDID profiles in Settings do nothing. The target may pick a mode the capture cannot take: no picture, or a "too fast" note in the console.
+
+Set the mode on the target yourself. 1280x720 or 1024x768 at 60 Hz, or 1080p at 30 Hz, always fit. On Linux with X11, xrandr can add a mode the target does not list:
+
+```
+xrandr --newmode "1280x720_60.00" 74.50 1280 1344 1472 1664 720 723 728 748 -hsync +vsync
+xrandr --addmode DP-2 "1280x720_60.00"
+xrandr --output DP-2 --mode "1280x720_60.00"
+```
+
+Use the output name `xrandr` prints for that port, and run it on the target's own screen, not over SSH. Put the lines in `.profile` to keep them. A BIOS screen stays at whatever the converter takes, which is usually fine.
+
+A passive DVI-to-HDMI adapter or cable is only a different plug: the target sees the device's EDID, and nothing changes. The same goes for a DisplayPort port marked DP++ with a passive adapter. An active DisplayPort-to-HDMI adapter behaves like the VGA converter above.
+
 ## The HDMI signal is there, but no picture
 
 The log says `csi frame wait timeout`: the capture board sees the source, and nothing arrives over the ribbon. The same line says what the P4's receiver sees on the ribbon's lanes, and `GET /api/v1/video/status` has it too, as `csi`, sampled about once a second.

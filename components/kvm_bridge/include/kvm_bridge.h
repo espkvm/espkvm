@@ -72,6 +72,19 @@ typedef enum {
     KVM_BRIDGE_EDID_FULL_16BPP,
 } kvm_bridge_edid_profile_t;
 
+/**
+ * What the target's OS calls this "monitor". An empty string or a false
+ * has_ keeps the built-in value.
+ */
+typedef struct {
+    char mfr[4];   /**< 3-letter PnP code, A-Z */
+    char name[14]; /**< up to 13 printable ASCII characters */
+    bool has_product;
+    bool has_serial;
+    uint16_t product;
+    uint32_t serial;
+} kvm_bridge_edid_id_t;
+
 /** One HDMI-CEC frame: header (initiator << 4 | destination), opcode, operands. */
 typedef struct {
     uint8_t len;
@@ -97,6 +110,7 @@ typedef enum {
 typedef struct {
     esp_err_t (*init_streaming)(void *dev);
     esp_err_t (*set_edid_profile)(void *dev, kvm_bridge_edid_profile_t profile);
+    esp_err_t (*set_edid_id)(void *dev, const kvm_bridge_edid_id_t *id);
     void (*set_csi_uyvy422)(void *dev, bool uyvy422);
     esp_err_t (*enable_hdmi_output)(void *dev);
     esp_err_t (*hotplug_reset)(void *dev);
@@ -197,6 +211,11 @@ static inline esp_err_t kvm_bridge_set_edid_profile(const kvm_bridge_t *b,
                                                     kvm_bridge_edid_profile_t p)
 {
     return b->ops->set_edid_profile ? b->ops->set_edid_profile(b->dev, p) : ESP_OK;
+}
+static inline esp_err_t kvm_bridge_set_edid_id(const kvm_bridge_t *b,
+                                               const kvm_bridge_edid_id_t *id)
+{
+    return b->ops->set_edid_id ? b->ops->set_edid_id(b->dev, id) : ESP_OK;
 }
 static inline void kvm_bridge_set_csi_uyvy422(const kvm_bridge_t *b, bool uyvy422)
 {

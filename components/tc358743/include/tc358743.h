@@ -87,6 +87,8 @@ esp_err_t tc358743_init_streaming(tc358743_t *dev);
  * @ref tc358743_init_streaming, which is what writes EDID into the bridge.
  */
 esp_err_t tc358743_set_edid_profile(tc358743_t *dev, tc358743_edid_profile_t profile);
+/** The monitor's name and IDs in the EDID, written at the next init_streaming. */
+esp_err_t tc358743_set_edid_id(tc358743_t *dev, const kvm_bridge_edid_id_t *id);
 
 /**
  * Select MIPI CSI-2 pixel packing after init_streaming (before HDMI HPD / cam start).

@@ -652,6 +652,21 @@ esp_err_t kvm_cec_send(const uint8_t *msg, int len, const char **result)
     return err;
 }
 
+bool kvm_cec_source_id(char *name, int name_len, uint32_t *vendor)
+{
+    name[0] = '\0';
+    *vendor = 0xffffffff;
+    const int la = s_running ? kvm_cec_target() : -1;
+    if (la < 0) {
+        return false;
+    }
+    xSemaphoreTake(s_mu, portMAX_DELAY);
+    snprintf(name, name_len, "%s", s_dev[la].name);
+    *vendor = s_dev[la].vendor;
+    xSemaphoreGive(s_mu);
+    return true;
+}
+
 bool kvm_cec_source(char *name, int name_len, const char **power)
 {
     *power = "unknown";

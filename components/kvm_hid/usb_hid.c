@@ -4,6 +4,8 @@
  */
 #include "usb_hid.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -15,6 +17,7 @@
 #include "kvm_board.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -1013,12 +1016,31 @@ static uint32_t msc_block_size(void)
     return s_msc_cdrom ? 2048u : 512u;
 }
 
+/* Setting usb_name: ESP-KVM's own names, plain ones, or the operator's own. */
+enum { USB_NAME_ESPKVM, USB_NAME_PLAIN, USB_NAME_CUSTOM };
+static int s_usb_name;
+static char s_msc_cust_vendor[9], s_msc_cust_product[17];
+
+/* The drive's SCSI names, space-padded as SCSI wants them. */
+static void msc_names(uint8_t vendor[8], uint8_t product[16])
+{
+    if (s_usb_name == USB_NAME_CUSTOM) {
+        memcpy(vendor, s_msc_cust_vendor, 8);
+        memcpy(product, s_msc_cust_product, 16);
+    } else if (s_usb_name == USB_NAME_PLAIN) {
+        memcpy(vendor, "Generic ", 8);
+        memcpy(product, s_msc_cdrom ? "USB CD-ROM      " : "USB Disk        ", 16);
+    } else {
+        memcpy(vendor, "ESP-KVM ", 8);
+        memcpy(product, "Virtual Media   ", 16);
+    }
+}
+
 void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16],
                         uint8_t product_rev[4])
 {
     (void)lun;
-    memcpy(vendor_id, "ESP-KVM ", 8);
-    memcpy(product_id, "Virtual Media   ", 16);
+    msc_names(vendor_id, product_id);
     memcpy(product_rev, "1.0 ", 4);
 }
 
@@ -1153,8 +1175,7 @@ uint32_t tud_msc_inquiry2_cb(uint8_t lun, scsi_inquiry_resp_t *resp, uint32_t bu
     (void)bufsize;
     resp->peripheral_device_type = s_msc_cdrom ? SCSI_PDT_CD_DVD : SCSI_PDT_DIRECT_ACCESS;
     resp->is_removable = 1;
-    memcpy(resp->vendor_id, "ESP-KVM ", 8);
-    memcpy(resp->product_id, "Virtual Media   ", 16);
+    msc_names(resp->vendor_id, resp->product_id);
     memcpy(resp->product_rev, "1.0 ", 4);
     return sizeof(scsi_inquiry_resp_t);
 }
@@ -1840,6 +1861,43 @@ void usb_hid_release_all(void)
     }
 }
 
+/* Printable ASCII only: SCSI names allow nothing else, and a host shows the
+ * rest badly. Empty after that gives @p def. */
+static void ascii_copy(char *dst, size_t cap, const char *src, const char *def)
+{
+    size_t n = 0;
+    for (; *src && n + 1 < cap; src++) {
+        if (*src >= 0x20 && *src <= 0x7e) {
+            dst[n++] = *src;
+        }
+    }
+    dst[n] = '\0';
+    while (n > 0 && dst[n - 1] == ' ') {
+        dst[--n] = '\0';
+    }
+    if (n == 0) {
+        strlcpy(dst, def, cap);
+    }
+}
+
+/* A USB ID as 4 hex digits, "0x" allowed. Empty, zero or junk: false. */
+static bool parse_usb_id(const char *s, uint16_t *out)
+{
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+    }
+    char *end;
+    const unsigned long v = strtoul(s, &end, 16);
+    if (end == s || *end != '\0' || v == 0 || v > 0xFFFF) {
+        if (*s) {
+            ESP_LOGW(TAG, "USB ID '%s' is not 4 hex digits, keeping the default", s);
+        }
+        return false;
+    }
+    *out = (uint16_t)v;
+    return true;
+}
+
 esp_err_t usb_hid_init(void)
 {
     if (s_hid_q) {
@@ -1889,8 +1947,38 @@ esp_err_t usb_hid_init(void)
     const int32_t serial_mode = kvm_setting_int("usb_serial");
     const bool with_cdc = !s_kbd_only && s_pad == PAD_OFF && serial_mode != 0;
     s_cdc_present = with_cdc;
-    if (serial_mode == 2) {
+    /* The names the target lists. ESP-KVM Tools finds its port by the USB
+     * IDs, not by these. */
+    s_usb_name = kvm_setting_int("usb_name");
+    static char cust_mfr[33], cust_product[33], cust_serial[33];
+    if (s_usb_name == USB_NAME_CUSTOM) {
+        ascii_copy(cust_mfr, sizeof(cust_mfr), kvm_setting_str("usb_mfr"), "ESP-KVM");
+        ascii_copy(cust_product, sizeof(cust_product), kvm_setting_str("usb_product"), "ESP-KVM");
+        ascii_copy(cust_serial, sizeof(cust_serial), kvm_setting_str("usb_sn"), "");
+        snprintf(s_msc_cust_vendor, sizeof(s_msc_cust_vendor), "%-8.8s", cust_mfr);
+        snprintf(s_msc_cust_product, sizeof(s_msc_cust_product), "%-16.16s", cust_product);
+        s_string_descriptor[1] = cust_mfr;
+        s_string_descriptor[2] = cust_product;
+    } else if (s_usb_name == USB_NAME_PLAIN) {
+        s_string_descriptor[1] = "Generic";
+        s_string_descriptor[2] = "USB Device";
+    }
+    if (s_usb_name != USB_NAME_ESPKVM) {
+        s_string_descriptor[STR_CDC] = "USB Serial";
+        s_string_descriptor[STR_AUDIO] = "USB Speaker";
+    } else if (serial_mode == 2) {
         s_string_descriptor[STR_CDC] = "ESP-KVM Tools";
+    }
+    /* A serial number of its own, from the MAC: with "0" on every device, two
+     * of them on one computer looked like one device to Windows. */
+    static char usb_serial[13];
+    uint8_t mac[6];
+    if (cust_serial[0]) {
+        s_string_descriptor[3] = cust_serial;
+    } else if (esp_efuse_mac_get_default(mac) == ESP_OK) {
+        snprintf(usb_serial, sizeof(usb_serial), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2],
+                 mac[3], mac[4], mac[5]);
+        s_string_descriptor[3] = usb_serial;
     }
     /* The speaker: not on the old-BIOS keyboard or a pad alone, which must
      * look like the real thing. */
@@ -1921,12 +2009,23 @@ esp_err_t usb_hid_init(void)
         s_kvm_device_desc.idProduct = (with_cdc ? KVM_USB_PID_CDC : KVM_USB_PID) |
                                       (with_audio ? KVM_USB_PID_AUDIO_BIT : 0);
     }
+    if (s_usb_name == USB_NAME_CUSTOM) {
+        /* The operator's own IDs, the same for every set of interfaces. */
+        uint16_t id;
+        if (parse_usb_id(kvm_setting_str("usb_vid"), &id)) {
+            s_kvm_device_desc.idVendor = id;
+        }
+        if (parse_usb_id(kvm_setting_str("usb_pid"), &id)) {
+            s_kvm_device_desc.idProduct = id;
+        }
+    }
     tusb_cfg.descriptor.device = &s_kvm_device_desc;
     static tusb_desc_device_t xinput_dev;
     if (s_pad != PAD_OFF && s_pad_kind == PAD_HORI) {
         tusb_cfg.descriptor.device = &k_pad_device_desc;
         s_string_descriptor[1] = "HORI CO.,LTD.";
         s_string_descriptor[2] = "POKKEN CONTROLLER";
+        s_string_descriptor[3] = "0"; /* the pad as it always was */
     } else if (s_pad != PAD_OFF && s_pad_kind == PAD_XID) {
         /* No strings: the real pad has none, and the console never asks. */
         tusb_cfg.descriptor.device = &xid_device_desc;
@@ -1941,6 +2040,7 @@ esp_err_t usb_hid_init(void)
         tusb_cfg.descriptor.device = &xinput_dev;
         s_string_descriptor[1] = "\xc2\xa9Microsoft Corporation";
         s_string_descriptor[2] = "Controller";
+        s_string_descriptor[3] = "0";
     }
     tusb_cfg.descriptor.full_speed_config = s_fs_config_descriptor;
     tusb_cfg.descriptor.string = s_string_descriptor;

@@ -498,6 +498,12 @@ static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_
         } else {
             row_add(&r, 0, "NO SIGNAL");
         }
+        {
+            const char *name = os_name(st->target_os); /* detail: dropped first */
+            if (name) {
+                row_add(&r, 2, "%s", name);
+            }
+        }
         break;
 
     default: /* health */

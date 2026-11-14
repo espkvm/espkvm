@@ -35,6 +35,7 @@
 #include "esp_chip_info.h"
 #include "esp_ota_ops.h"
 #include "kvm_ota_trial.h"
+#include "kvm_net_guard.h"
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -336,7 +337,9 @@ esp_err_t api_settings_put(httpd_req_t *req)
     body[got] = '\0';
 
     char err[128];
+    kvm_net_guard_before_put(body, req); /* keeps the way back for a link change */
     esp_err_t res = kvm_settings_apply_json(body, err, sizeof(err));
+    kvm_net_guard_after_put(res == ESP_OK);
     free(body);
     if (res != ESP_OK) {
         return send_json_error(req, res == ESP_ERR_NOT_FOUND ? "404 Not Found" : "400 Bad Request",
@@ -696,12 +699,12 @@ esp_err_t api_system_info_get(httpd_req_t *req)
     nvs_stats_t nvs = {0};
     (void)nvs_get_stats(NULL, &nvs);
 
-    char body[3072];
+    char body[3328];
     int n = snprintf(body, sizeof(body),
                      "{\"project\":\"%s\",\"version\":\"%s\",\"built\":\"%s %s\","
                      "\"boardId\":\"%s\","
                      "\"idf\":\"%s\",\"partition\":\"%s\",\"updatable\":%s,\"ota\":%s,"
-                     "\"trialSeconds\":%u,"
+                     "\"trialSeconds\":%u,\"netTrialSeconds\":%u,\"netReverted\":\"%s\","
                      "\"uptimeSeconds\":%llu,\"heapFree\":%u,\"psramFree\":%u,\"psramLargest\":%u,"
                      "\"internalFree\":%u,\"internalLargest\":%u,\"internalMin\":%u,\"dmaFree\":%u,"
                      "\"tempC\":%d.%01u,\"thermal\":\"%s\","
@@ -723,7 +726,8 @@ esp_err_t api_system_info_get(httpd_req_t *req)
                      app->project_name, app->version, app->date, app->time, kvm_board_id(),
                      app->idf_ver,
                      running ? running->label : "?", next ? "true" : "false", ota_json,
-                     (unsigned)kvm_ota_trial_left(),
+                     (unsigned)kvm_ota_trial_left(), (unsigned)kvm_net_guard_trial_left(),
+                     kvm_net_guard_last_revert(), /* a fixed text, no quotes */
                      (unsigned long long)(esp_timer_get_time() / 1000000),
                      (unsigned)esp_get_free_heap_size(),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -1088,5 +1092,6 @@ esp_err_t api_settings_reset_post(httpd_req_t *req)
         return kvm_auth_challenge(req);
     }
     (void)kvm_settings_reset();
+    kvm_net_guard_forget(); /* nothing to put back over a reset */
     return send_json_owned(req, kvm_settings_values_json());
 }

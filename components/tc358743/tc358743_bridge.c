@@ -23,6 +23,11 @@ static esp_err_t op_set_edid_profile(void *dev, kvm_bridge_edid_profile_t p)
     return tc358743_set_edid_profile((tc358743_t *)dev, (tc358743_edid_profile_t)p);
 }
 
+static esp_err_t op_set_edid_id(void *dev, const kvm_bridge_edid_id_t *id)
+{
+    return tc358743_set_edid_id((tc358743_t *)dev, id);
+}
+
 static void op_set_csi_uyvy422(void *dev, bool uyvy422)
 {
     tc358743_set_csi_uyvy422((tc358743_t *)dev, uyvy422);
@@ -96,6 +101,7 @@ static esp_err_t op_cec_poll(void *dev, kvm_bridge_cec_frame_t *rx, bool *got_rx
 static const kvm_bridge_ops_t s_ops = {
     .init_streaming = op_init_streaming,
     .set_edid_profile = op_set_edid_profile,
+    .set_edid_id = op_set_edid_id,
     .set_csi_uyvy422 = op_set_csi_uyvy422,
     .enable_hdmi_output = op_enable_hdmi_output,
     .hotplug_reset = op_hotplug_reset,

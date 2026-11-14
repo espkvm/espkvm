@@ -90,6 +90,10 @@ esp_err_t kvm_cec_send(const uint8_t *msg, int len, const char **result);
  *  as a word ("on", "standby", "unknown"). False when CEC is off or nobody is there. */
 bool kvm_cec_source(char *name, int name_len, const char **power);
 
+/** The same device's OSD name ("" when not known) and vendor id (0xffffffff when not
+ *  known). False when CEC is off or nobody is there. */
+bool kvm_cec_source_id(char *name, int name_len, uint32_t *vendor);
+
 /** Ask the task to look for devices again now. */
 void kvm_cec_rescan(void);
 

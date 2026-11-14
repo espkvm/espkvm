@@ -2,7 +2,23 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
-## [Unreleased]
+## [0.84.0] - 2026-11-14
+
+### Added
+- A network change goes on trial. After a change to Wi-Fi, the address, the connection mode, Tailscale or WireGuard, the device checks for 10 minutes that it is still on the network: the gateway answers, and the VPN is up if the change touched it or came over it. If not, it puts the old settings back and restarts. Opening the console in that time also keeps the change, but a change made over a VPN is kept only by a sign-in over a VPN. Settings, Network, Safety net. `netTrialSeconds` and `netReverted` in `/api/v1/system/info`.
+- A network watchdog. With no working network for 30 minutes the device restarts, then after 1, 2 and 4 hours, then every 6 hours. If the Wi-Fi chip did not start at all, the first restarts come after 2 and 5 minutes. It does not restart while a recording runs, during an update, or while the Ethernet cable is just unplugged. Settings, Network, Safety net.
+- "USB name on the target" in Settings, System, "Seen by the target": the device can show up on the target as a plain Generic USB Device, with a USB Disk and a USB Speaker, instead of ESP-KVM. "Custom" takes your own manufacturer, product, serial number and USB IDs. ESP-KVM Tools finds the device by its USB IDs, so it does not see it with other ones.
+- "Monitor name on the target" in the same place: ESP-KVM, Plain (a monitor named HDMI) or Custom, with your own name, maker code, product code and serial number. Boards with a TC358743 only, the others keep the bridge's own EDID.
+- The status display shows what the target is, as the console's OS button does: Windows, macOS, Linux, Android, a Nintendo Switch or a Steam Deck, from its HDMI-CEC name or the USB guess. Its mark and name are on the video page, in colour on a colour screen, and on a square screen such as the JetKVM Mini's the mark takes the place of ON in the USB corner.
+
+### Changed
+- The device now has a serial number of its own on USB, made from its MAC address. It was "0" on every device, so two of them on one computer looked like one device to Windows. After the update Windows finds the device once as new, and the serial port may get another COM number.
+- Logging out of Tailscale over Tailscale is refused, with a note to do it from the local network. It forgot the keys, and joining again needs a login link that nobody can reach over a tailnet the device has just left.
+- The TV remote is in the command palette even with HDMI-CEC off, and turns it on from there.
+
+### Fixed
+- Full screen on a phone without the bars: the picture no longer goes under the camera cutout and the round corners at the top.
+- A phone on its side keeps more height for the picture: the touch buttons stand in a column at the right of the picture, the on-screen keyboard's buttons sit beside the keys, and the keys are shorter. The keyboard keeps clear of a camera cutout at the side, and the panel buttons on the left scroll instead of spilling over it.
 
 ## [0.83.1] - 2026-11-13
 

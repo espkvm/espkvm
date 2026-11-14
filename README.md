@@ -88,8 +88,10 @@ Useful for what it does today, and honest about the rest.
 | ESP-KVM Tools on the target: its name and addresses, the clipboard both ways, a clean shutdown | new; needs [ESP-KVM Tools](https://github.com/espkvm/tools) on the target |
 | HTTPS, your own certificate, Let's Encrypt over Tailscale | works |
 | Login, two-factor sign-in, reset by a button | works |
+| The name the target sees for the USB devices and the monitor: ESP-KVM, plain or your own | new |
 | Wi-Fi with up to three known networks, a setup hotspot, Ethernet with Wi-Fi as the backup | works; on boards with a Wi-Fi chip |
 | Tailscale or WireGuard | works; off by default |
+| A network change that cuts the device off goes back by itself; a network watchdog | new |
 | Home Assistant over MQTT | works; off by default |
 | Updates over the network, with rollback and a trial for remote devices | works |
 | A small status display, a battery-backed clock | works; optional |

@@ -12,6 +12,7 @@
 #include "kvm_display.h"
 
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -26,6 +27,7 @@
 
 #include "capture.h"
 #include "kvm_caps.h"
+#include "kvm_cec.h"
 #include "kvm_display_driver.h"
 #include "kvm_ipv6.h"
 #include "kvm_panels.h"
@@ -196,6 +198,32 @@ static void build_join_qr(char *out, size_t cap, const char *ssid, const char *p
     }
 }
 
+/* What the target is, the same answer as the console's OS button
+   (web/src/state/targetKind.ts): a Switch or a Steam Deck enumerates much like
+   Linux, but over HDMI-CEC both name themselves, so that wins over the USB
+   guess. A TV stick has no USB to us at all, only its CEC name. */
+static void target_kind(char *out, size_t len, bool usb_up)
+{
+    char name[16];
+    uint32_t vendor;
+    const char *kind = "";
+    if (kvm_cec_source_id(name, sizeof(name), &vendor)) {
+        if (vendor == 0x0009bf || strncasecmp(name, "nintendo", 8) == 0) {
+            kind = "switch";
+        } else if (vendor == 0xe0319e || strncasecmp(name, "steamdeck", 9) == 0 ||
+                   strncasecmp(name, "steam deck", 10) == 0) {
+            kind = "steamdeck";
+        } else if (strncasecmp(name, "mi tv stick", 11) == 0) {
+            kind = "android";
+        }
+    }
+    if (!kind[0] && usb_up) {
+        const char *os = usb_hid_target_os();
+        kind = strcmp(os, "unknown") != 0 ? os : "";
+    }
+    snprintf(out, len, "%s", kind);
+}
+
 static void gather(kvm_display_status_t *st)
 {
     memset(st, 0, sizeof(*st));
@@ -268,6 +296,7 @@ static void gather(kvm_display_status_t *st)
     st->dwell_s = (uint8_t)(dwell < 0 ? 0 : dwell > 255 ? 255 : dwell);
     st->pages = (uint8_t)(kvm_setting_int("disp_pages") & 0x0f);
     st->usb = usb_hid_target_suspended() ? 3 : usb_hid_ready() ? 2 : usb_hid_bus_alive() ? 1 : 0;
+    target_kind(st->target_os, sizeof(st->target_os), st->usb == 2);
 
     const esp_app_desc_t *app = esp_app_get_description();
     snprintf(st->version, sizeof(st->version), "%s", app ? app->version : "?");

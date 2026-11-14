@@ -5,6 +5,9 @@
  *
  * Derived from the p4kvm project: https://github.com/jrowny/p4kvm
  */
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include "capture_priv.h"
 #include "kvm_regions.h"
 
@@ -604,6 +607,50 @@ static void mode_name(char *out, size_t len, uint32_t w, uint32_t h, const kvm_b
     }
 }
 
+/* The monitor's name and IDs from the settings. Anything that does not fit
+ * the EDID's format stays at the built-in value. */
+static void edid_id_from_settings(kvm_bridge_edid_id_t *id)
+{
+    memset(id, 0, sizeof(*id));
+    const int32_t mode = kvm_setting_int("edid_ident");
+    if (mode == 1) { /* Plain */
+        strlcpy(id->name, "HDMI", sizeof(id->name));
+        id->has_product = id->has_serial = true;
+        return;
+    }
+    if (mode != 2) {
+        return;
+    }
+    const char *m = kvm_setting_str("edid_mfr");
+    if (strlen(m) == 3 && isalpha((unsigned char)m[0]) && isalpha((unsigned char)m[1]) &&
+        isalpha((unsigned char)m[2])) {
+        for (int i = 0; i < 3; i++) {
+            id->mfr[i] = (char)toupper((unsigned char)m[i]);
+        }
+    } else if (m[0]) {
+        ESP_LOGW(CAPTURE_LOG_TAG, "monitor maker '%s' is not 3 letters, keeping ESP", m);
+    }
+    size_t n = 0;
+    for (const char *c = kvm_setting_str("edid_name"); *c && n < 13; c++) {
+        if (*c >= 0x20 && *c <= 0x7e) {
+            id->name[n++] = *c;
+        }
+    }
+    char *end;
+    const char *p = kvm_setting_str("edid_product");
+    const unsigned long prod = strtoul(p, &end, 16);
+    if (*p && *end == '\0' && prod <= 0xFFFF) {
+        id->product = (uint16_t)prod;
+        id->has_product = true;
+    }
+    const char *sn = kvm_setting_str("edid_serial");
+    const unsigned long long ser = strtoull(sn, &end, 10);
+    if (*sn && *end == '\0' && ser <= 0xFFFFFFFFull) {
+        id->serial = (uint32_t)ser;
+        id->has_serial = true;
+    }
+}
+
 capture_ctx_t *capture_hw_init_start(void)
 {
     esp_ldo_channel_handle_t ldo = NULL;
@@ -664,6 +711,9 @@ capture_ctx_t *capture_hw_init_start(void)
         edid_choice = KVM_BRIDGE_EDID_FULL;
     }
     (void)kvm_bridge_set_edid_profile(&s_cap.bridge, (kvm_bridge_edid_profile_t)edid_choice);
+    kvm_bridge_edid_id_t edid_id;
+    edid_id_from_settings(&edid_id);
+    (void)kvm_bridge_set_edid_id(&s_cap.bridge, &edid_id);
     if (s_cap.bridge.ops->set_edid_profile) {
         kvm_cap_report(KVM_CAP_EDID, true, NULL);
     } else {
