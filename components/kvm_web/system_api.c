@@ -405,8 +405,11 @@ esp_err_t api_video_status_get(httpd_req_t *req)
                  link.clk_hs, link.stop_d0, link.stop_d1, link.stop_clk, link.phy_err, link_age);
     }
 
-    /* Worst case with every string field full is about 1560. */
-    char body[1720];
+    char mem[112];
+    (void)web_mem_guard_json(mem, sizeof(mem));
+
+    /* Worst case with every string field full is about 1660. */
+    char body[1820];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,\"audioHz\":%u,"
@@ -438,7 +441,10 @@ esp_err_t api_video_status_get(httpd_req_t *req)
                         reloads the settings when this moves. */
                      "\"profile\":%u,"
                      /* The target's HDD LED, null when it is not wired. */
-                     "\"hdd\":%s%s}",
+                     "\"hdd\":%s,"
+                     /* Internal RAM ran low and connections were closed, null
+                        when not: see mem_guard.c. */
+                     "\"memLow\":%s%s}",
                      capture_source_power_known() ? "true" : "false",
                      st.signal ? "true" : "false", (unsigned)st.hres, (unsigned)st.vres,
                      st.interlaced ? "true" : "false", (unsigned)st.input_hz,
@@ -465,7 +471,7 @@ esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)rec.clips_converting, rec.last_clip, shot_blocked ? "\"" : "",
                      shot_blocked ? shot_blocked : "null", shot_blocked ? "\"" : "",
                      (unsigned)kvm_profiles_active(),
-                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false", csi);
+                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false", mem, csi);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
     }

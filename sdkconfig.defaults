@@ -117,6 +117,13 @@ CONFIG_MBEDTLS_SSL_DTLS_SRTP=y
 # lock (microlink wraps them via ml_lwip_lock.h). BSD-socket users are unaffected.
 CONFIG_LWIP_TCPIP_CORE_LOCKING=y
 
+# lwIP buffers in PSRAM. TCP keeps each sent segment until it is acked, and with
+# slow acks (Wi-Fi, a phone over Tailscale) a few console loads at 64 KB each took
+# internal RAM to 1 KB: TLS stopped opening sessions and the console could not
+# reach the device. Measured on the Function EV over Wi-Fi and on the JetKVM Mini
+# over Ethernet.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
 # MJPEG pushes large JPEG segments; lwIP defaults (~5.8 KiB) cause backpressure/resets on Ethernet.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
 CONFIG_LWIP_TCP_WND_DEFAULT=65535

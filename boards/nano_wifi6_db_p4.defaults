@@ -81,10 +81,6 @@ CONFIG_SLAVE_IDF_TARGET_ESP32C5=y
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C5=y
 # SDIO transport buffers in PSRAM: internal RAM runs out under a large upload.
 CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y
-# lwIP buffers in PSRAM too. TCP keeps each sent segment until it is acked, and
-# over Wi-Fi acks come slowly: loading the console took internal RAM from 85 KB
-# to 1 KB and TLS stopped opening sessions (measured on the Function EV).
-CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # As everywhere else: esp-hosted must not bring the link up from its boot
 # constructor, or it races the microSD for the one SD host controller.
 CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n

@@ -1462,13 +1462,14 @@ static esp_err_t auth_session_get(httpd_req_t *req)
     bool authenticated = false;
     bool must_change = false;
     bool view_only = false;
+    bool by_cookie = false;
 
     const bool had_cookie = cookie_token(req, token, sizeof(token));
     if (had_cookie) {
         lock();
         const session_t *s = session_find(token);
         if (s) {
-            authenticated = true;
+            authenticated = by_cookie = true;
             must_change = s->must_change;
             view_only = s->view_only;
         }
@@ -1485,8 +1486,17 @@ static esp_err_t auth_session_get(httpd_req_t *req)
         authenticated = true;
     }
     if (!authenticated && kvm_auth_required()) {
-        ESP_LOGI(TAG, "session check: %s", had_cookie ? "cookie holds no session I know"
-                                                      : "no cookie sent");
+        char ip[48];
+        kvm_web_peer_ip(httpd_req_to_sockfd(req), ip, sizeof(ip));
+        ESP_LOGI(TAG, "session check from %s: %s", ip,
+                 had_cookie ? "cookie holds no session I know" : "no cookie sent");
+    }
+    /* The session lives 12 hours from its last use, the cookie 12 hours from
+       when it was set. Setting it again here, at every console start, keeps
+       the browser from dropping a cookie the device still knows. */
+    char cookie[192];
+    if (by_cookie) {
+        set_session_cookie(req, cookie, sizeof(cookie), token, false);
     }
 
     char body[384];
@@ -1609,8 +1619,10 @@ static esp_err_t auth_login_post(httpd_req_t *req)
     set_session_cookie(req, cookie, sizeof(cookie), token, false);
     char out[64];
     snprintf(out, sizeof(out), "{\"mustChange\":%s}", must_change ? "true" : "false");
-    ESP_LOGI(TAG, "logged in as '%s'%s%s", user, must_change ? " with the default password" : "",
-             viewer ? " (view only)" : "");
+    char ip[48];
+    kvm_web_peer_ip(httpd_req_to_sockfd(req), ip, sizeof(ip));
+    ESP_LOGI(TAG, "logged in as '%s' from %s%s%s", user, ip,
+             must_change ? " with the default password" : "", viewer ? " (view only)" : "");
     return send_json(req, "200 OK", out);
 }
 

@@ -104,7 +104,7 @@ uint8_t s_text_client_count;
  *  subscribers so "who is holding the encoder busy" has an answer. */
 volatile int s_stream_workers;
 
-/* Long MJPEG response must not run on the httpd select() thread; see httpd_req_async_handler_begin(). */
+/* Long MJPEG response must not run on the httpd select() thread; see web_async_begin(). */
 #define STREAM_WORKER_STACK (12 * 1024)
 #define STREAM_WORKER_PRIO (tskIDLE_PRIORITY + 5)
 
@@ -112,8 +112,8 @@ volatile int s_stream_workers;
 static SemaphoreHandle_t s_xmit_mu;
 
 /**
- * While httpd_req_async_handler_begin() is in effect, the session fd is not in the server's select()
- * set, so disconnects are invisible until we send or call httpd_req_async_handler_complete(), that
+ * While web_async_begin() is in effect, the session fd is not in the server's select()
+ * set, so disconnects are invisible until we send or call web_async_complete(), that
  * can exhaust session slots (accept errno 23 / ENFILE). Peek the TCP socket from this task instead.
  */
 static bool stream_peer_disconnected(httpd_req_t *req)
@@ -238,7 +238,7 @@ static void stream_worker_task(void *arg)
     const int fd = httpd_req_to_sockfd(req);
     httpd_handle_t server = req->handle;
     httpd_resp_sendstr_chunk(req, NULL);
-    if (httpd_req_async_handler_complete(req) != ESP_OK) {
+    if (web_async_complete(req) != ESP_OK) {
         ESP_LOGW(TAG, "stream async complete failed on fd %d", fd);
     }
     /*
@@ -1028,7 +1028,7 @@ static void video_sender_start(int index, int fd, uint32_t gen)
  * the log was kept for was long gone from it. So: say it, then say it again at
  * most once a minute, with a count of what was skipped.
  */
-static void log_refusal(const char *why)
+static void log_refusal(httpd_req_t *req, const char *why)
 {
     static int64_t last_us;
     static uint32_t skipped;
@@ -1038,10 +1038,12 @@ static void log_refusal(const char *why)
         skipped++;
         return;
     }
+    char ip[48];
+    kvm_web_peer_ip(httpd_req_to_sockfd(req), ip, sizeof(ip));
     if (skipped) {
-        ESP_LOGW(TAG, "websocket refused: %s (and %" PRIu32 " more)", why, skipped);
+        ESP_LOGW(TAG, "websocket from %s refused: %s (and %" PRIu32 " more)", ip, why, skipped);
     } else {
-        ESP_LOGW(TAG, "websocket refused: %s", why);
+        ESP_LOGW(TAG, "websocket from %s refused: %s", ip, why);
     }
     skipped = 0;
     last_us = now;
@@ -1056,11 +1058,11 @@ esp_err_t ws_pre_handshake(httpd_req_t *req)
      * this device is refused before the session is even looked at.
      */
     if (!kvm_auth_origin_ok(req)) {
-        log_refusal("another site opened it");
+        log_refusal(req, "another site opened it");
         return ESP_FAIL;
     }
     if (!kvm_auth_check(req)) {
-        log_refusal("no session");
+        log_refusal(req, "no session");
         return ESP_FAIL;
     }
     /* Frames carry no headers, so the socket itself is the credential from
@@ -1068,7 +1070,7 @@ esp_err_t ws_pre_handshake(httpd_req_t *req)
     uint8_t session[32];
     (void)kvm_auth_session_of(req, session);
     if (!kvm_auth_mark_socket(httpd_req_to_sockfd(req), session)) {
-        log_refusal("too many sockets");
+        log_refusal(req, "too many sockets");
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -1188,7 +1190,7 @@ esp_err_t stream_get(httpd_req_t *req)
     }
 
     httpd_req_t *async_req = NULL;
-    res = httpd_req_async_handler_begin(req, &async_req);
+    res = web_async_begin(req, &async_req);
     if (res != ESP_OK) {
         ESP_LOGW(TAG, "stream async begin: %s", esp_err_to_name(res));
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "stream busy");
@@ -1198,7 +1200,7 @@ esp_err_t stream_get(httpd_req_t *req)
     BaseType_t created = xTaskCreateWithCaps(stream_worker_task, "kvm_stream", STREAM_WORKER_STACK, async_req,
                                              STREAM_WORKER_PRIO, NULL, MALLOC_CAP_SPIRAM);
     if (created != pdPASS) {
-        httpd_req_async_handler_complete(async_req);
+        web_async_complete(async_req);
         return httpd_resp_send_custom_err(req, "503 Service Unavailable", "stream task");
     }
     return ESP_OK;

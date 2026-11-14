@@ -329,7 +329,7 @@ static void upload_finish(httpd_req_t *req)
 {
     const int fd = httpd_req_to_sockfd(req);
     httpd_handle_t server = req->handle;
-    httpd_req_async_handler_complete(req);
+    web_async_complete(req);
     /* A finished upload is not worth keeping alive, and leaving it in the pool
      * risks the same ENOTCONN accumulation the stream guards against. */
     if (server && fd >= 0) {
@@ -557,7 +557,7 @@ esp_err_t api_storage_upload_post(httpd_req_t *req)
     ctx->offset = offset;
 
     /* Hand the socket to the worker; the control task returns at once. */
-    esp_err_t res = httpd_req_async_handler_begin(req, &ctx->req);
+    esp_err_t res = web_async_begin(req, &ctx->req);
     if (res != ESP_OK) {
         ESP_LOGW(TAG, "upload async begin: %s", esp_err_to_name(res));
         free(ctx);
@@ -565,7 +565,7 @@ esp_err_t api_storage_upload_post(httpd_req_t *req)
     }
     if (xTaskCreate(upload_worker_task, "kvm_upload", UPLOAD_WORKER_STACK, ctx, UPLOAD_WORKER_PRIO,
                     NULL) != pdPASS) {
-        httpd_req_async_handler_complete(ctx->req);
+        web_async_complete(ctx->req);
         free(ctx);
         return send_json_error(req, "503 Service Unavailable", "upload task");
     }

@@ -576,7 +576,11 @@ httpd_handle_t http_server_start(void)
     cfg.stack_size = 12 * 1024;
     /* Prefer draining TCP slightly above capture so multipart frames reach the browser. */
     cfg.task_priority = tskIDLE_PRIORITY + 6;
-    cfg.send_wait_timeout = 30;
+    /* The same for sending: a browser that stops reading (a phone gone to the
+     * background or out of coverage) held the one task for 30 s a send, and
+     * the console in every other tab could not reach the device. A peer that
+     * is still there takes at least some bytes in 10 s. */
+    cfg.send_wait_timeout = 10;
     /* One task serves every session, so this is how long one peer that stops
      * mid-request keeps everyone else waiting (#25). Uploads survive a short
      * value now: the body reads wait out a silence, see http_recv.h. */
@@ -714,6 +718,7 @@ httpd_handle_t http_server_start(void)
         return NULL;
     }
     s_httpd = h;
+    web_mem_guard_start();
     video_ws_init(h);
     usb_hid_set_led_callback(on_hid_leds, NULL);
 

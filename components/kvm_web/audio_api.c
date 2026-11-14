@@ -162,7 +162,7 @@ static void clip_task(void *arg)
         httpd_resp_send(c->req, (const char *)wav, (ssize_t)used);
     }
     free(wav);
-    httpd_req_async_handler_complete(c->req);
+    web_async_complete(c->req);
     free(c);
     vTaskDelete(NULL);
 }
@@ -195,14 +195,14 @@ static esp_err_t audio_clip_get(httpd_req_t *req)
                                err == ESP_ERR_NO_MEM ? "no memory" : "HDMI audio is off or busy");
     }
     /* Seconds of waiting would tie up the control task; it goes to a worker. */
-    if (httpd_req_async_handler_begin(req, &c->req) != ESP_OK) {
+    if (web_async_begin(req, &c->req) != ESP_OK) {
         kvm_audio_close(c->reader);
         free(c);
         return send_json_error(req, "503 Service Unavailable", "busy");
     }
     if (xTaskCreate(clip_task, "kvm_audio_clip", CLIP_STACK, c, CLIP_PRIO, NULL) != pdPASS) {
         kvm_audio_close(c->reader);
-        httpd_req_async_handler_complete(c->req);
+        web_async_complete(c->req);
         free(c);
         return send_json_error(req, "503 Service Unavailable", "clip task");
     }

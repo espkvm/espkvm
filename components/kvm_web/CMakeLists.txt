@@ -18,6 +18,7 @@ idf_component_register(
         "fw_version.c"
         "ota_trial.c"
         "net_guard.c"
+        "mem_guard.c"
         "record_api.c"
         "totp.c"
         "cec_api.c"

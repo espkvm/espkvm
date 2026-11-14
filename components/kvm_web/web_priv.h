@@ -23,6 +23,20 @@ const httpd_uri_t *cec_api_routes(size_t *count);
 const httpd_uri_t *ts_api_routes(size_t *count);
 /** Web Push: the key and the subscribed browsers. See push_api.c. */
 const httpd_uri_t *push_api_routes(size_t *count);
+/*
+ * mem_guard.c: closes request-only connections when internal RAM runs low.
+ * Every response sent from a task of its own goes through these two instead of
+ * httpd_req_async_handler_begin/complete, so the guard leaves it alone.
+ */
+esp_err_t web_async_begin(httpd_req_t *req, httpd_req_t **out);
+esp_err_t web_async_complete(httpd_req_t *req);
+void web_mem_guard_start(void);
+/** Socket @p fd has just sent or received something. */
+void web_io_note(int fd);
+/** Socket @p fd is closed: its number may come back as a new connection. */
+void web_io_forget(int fd);
+/** The low-memory episode in progress as JSON, or null. */
+int web_mem_guard_json(char *out, size_t cap);
 /** The client's address on socket @p fd as text ("?" when unknown). */
 void kvm_web_peer_ip(int fd, char *out, size_t cap);
 /** Device profiles. See profiles_api.c. */

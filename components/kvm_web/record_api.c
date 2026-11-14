@@ -342,7 +342,7 @@ static void download_finish(httpd_req_t *req)
 {
     const int fd = httpd_req_to_sockfd(req);
     httpd_handle_t server = req->handle;
-    httpd_req_async_handler_complete(req);
+    web_async_complete(req);
     if (server && fd >= 0) {
         (void)httpd_sess_trigger_close(server, fd);
     }
@@ -465,14 +465,14 @@ static esp_err_t captures_file_get(httpd_req_t *req)
         dl->size = size;
     }
     /* A file of any size would tie up the control task; it goes to a worker. */
-    if (httpd_req_async_handler_begin(req, &dl->req) != ESP_OK) {
+    if (web_async_begin(req, &dl->req) != ESP_OK) {
         free(dl);
         return send_json_error(req, "503 Service Unavailable", "download busy");
     }
     s_downloads++;
     if (xTaskCreate(download_task, "kvm_download", DOWNLOAD_STACK, dl, DOWNLOAD_PRIO, NULL) != pdPASS) {
         s_downloads--;
-        httpd_req_async_handler_complete(dl->req);
+        web_async_complete(dl->req);
         free(dl);
         return send_json_error(req, "503 Service Unavailable", "download task");
     }

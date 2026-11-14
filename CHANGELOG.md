@@ -2,6 +2,26 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
+## [Unreleased]
+
+## [0.84.1] - 2026-11-15
+
+### Added
+- When the chip's internal RAM runs low, the device closes idle web connections that only carry requests, and the picture keeps going. The log says when it starts, what it closed and when it is over, and the console shows a warning mark at the bottom while it lasts.
+- Drop a file on the console to put it on the microSD card, or drop a text file on the other half to type it on the target. The text goes into the Input panel first, and you press Type it.
+- The screen of a phone or tablet stays on while the picture plays.
+- The installed console's icon shows how many notifications from the device are still unread. Opening the console clears it.
+- With the mouse captured, Chrome sends the mouse's own movement without the acceleration of your computer. The target accelerates it once, not twice.
+
+### Fixed
+- In Chrome on Android, after the phone's keyboard was hidden with Back, the keyboard button needed two taps to bring it back. Now one.
+- In 0.84.0 the diagnostics (the temperature), the target OS and the power buttons on the left opened no popup, only a dimmed screen. The popups show again, also in a low window.
+- On boards with Ethernet only, such as the JetKVM Mini and the P4-ETH, a phone opening the console over a slow link (Tailscale on mobile data) could use up the chip's internal RAM. New connections then failed and the console said it could not reach the device. The network buffers now go to PSRAM on every board, as they already did on the Wi-Fi ones.
+- A browser that stopped reading, such as a phone that went to the background, held the web server for up to 30 s a send, and every other console waited. Now it is 10 s.
+- A session that ended while the console was opening showed "Cannot reach the device". Now it shows the sign-in form.
+- The browser dropped the sign-in cookie 12 hours after the sign-in even when the console was in use all that time. The device now renews it each time the console opens.
+- The device log says which address a sign-in, a failed session check or a refused WebSocket came from.
+
 ## [0.84.0] - 2026-11-14
 
 ### Added

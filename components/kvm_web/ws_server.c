@@ -287,6 +287,7 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
         }
         if (ret > 0) {
             done += (size_t)ret;
+            web_io_note(sockfd);
         } else if (ret != 0 && ret != ESP_TLS_ERR_SSL_WANT_WRITE && ret != ESP_TLS_ERR_SSL_WANT_READ) {
             break;
         } else {
@@ -295,6 +296,50 @@ static int locked_ssl_send(httpd_handle_t hd, int sockfd, const char *buf, size_
     }
     tx_unlock(slot);
     return done == buf_len ? (int)done : HTTPD_SOCK_ERR_FAIL;
+}
+
+/* Reads, as the server's own would do them, with a note of when a session last
+ * moved anything, for mem_guard.c: it closes only sessions that are idle. */
+static int noted_ssl_recv(httpd_handle_t hd, int sockfd, char *buf, size_t buf_len, int flags)
+{
+    (void)flags;
+    const https_transport_head_t *ctx = httpd_sess_get_transport_ctx(hd, sockfd);
+    if (!ctx || !ctx->tls) {
+        return HTTPD_SOCK_ERR_FAIL;
+    }
+    const int ret = (int)esp_tls_conn_read(ctx->tls, buf, buf_len);
+    if (ret > 0) {
+        web_io_note(sockfd);
+    }
+    return ret;
+}
+
+static int noted_http_recv(httpd_handle_t hd, int sockfd, char *buf, size_t buf_len, int flags)
+{
+    (void)hd;
+    if (!buf) {
+        return HTTPD_SOCK_ERR_INVALID;
+    }
+    const int ret = (int)recv(sockfd, buf, buf_len, flags);
+    if (ret > 0) {
+        web_io_note(sockfd);
+        return ret;
+    }
+    if (ret == 0) {
+        return 0;
+    }
+    switch (errno) {
+    case EAGAIN:
+    case EINTR:
+        return HTTPD_SOCK_ERR_TIMEOUT;
+    case EINVAL:
+    case EBADF:
+    case EFAULT:
+    case ENOTSOCK:
+        return HTTPD_SOCK_ERR_INVALID;
+    default:
+        return HTTPD_SOCK_ERR_FAIL;
+    }
 }
 
 /* The same for plain HTTP (the hotspot): a blocking send() with a timeout
@@ -309,6 +354,7 @@ static int locked_http_send(httpd_handle_t hd, int sockfd, const char *buf, size
         const ssize_t ret = send(sockfd, buf + done, buf_len - done, flags);
         if (ret > 0) {
             done += (size_t)ret;
+            web_io_note(sockfd);
         } else if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
             break;
         } else {
@@ -527,8 +573,10 @@ esp_err_t http_sess_open_cb(httpd_handle_t hd, int sockfd)
     }
     /* Every write to this session - ours and the server's own - now takes its
      * write lock and is finished in full. See locked_ssl_send. */
-    (void)httpd_sess_set_send_override(hd, sockfd,
-        httpd_sess_get_transport_ctx(hd, sockfd) ? locked_ssl_send : locked_http_send);
+    const bool tls = httpd_sess_get_transport_ctx(hd, sockfd) != NULL;
+    (void)httpd_sess_set_send_override(hd, sockfd, tls ? locked_ssl_send : locked_http_send);
+    (void)httpd_sess_set_recv_override(hd, sockfd, tls ? noted_ssl_recv : noted_http_recv);
+    web_io_note(sockfd);
     bool listed = false;
     for (int i = 0; i < TX_MAX_SOCKETS; i++) {
         if (s_tx_fds[i] == sockfd) {
@@ -553,6 +601,7 @@ void http_sess_close_cb(httpd_handle_t hd, int sockfd)
 {
     (void)hd;
     bool was_control_session = false;
+    web_io_forget(sockfd);
 
     /*
      * Nothing may write into this session from here on: the server frees its

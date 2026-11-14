@@ -52,6 +52,16 @@ self.addEventListener("fetch", (e) => {
   }
 });
 
+/* The installed app's icon carries the number of notifications still in the
+ * tray. The console clears it when it is opened. */
+function badge() {
+  if (!self.navigator.setAppBadge) return Promise.resolve();
+  return self.registration
+    .getNotifications()
+    .then((list) => (list.length ? self.navigator.setAppBadge(list.length) : self.navigator.clearAppBadge()))
+    .catch(() => {});
+}
+
 /* Web Push from the device (Settings, Notifications, "This browser"). The
  * device sends {title, body, device, at}; shown even with no console open. */
 self.addEventListener("push", (e) => {
@@ -68,19 +78,26 @@ self.addEventListener("push", (e) => {
       icon: "/icon-192.png",
       timestamp: m.at ? m.at * 1000 : Date.now(),
       data: { url: "/" },
-    }),
+    }).then(badge),
   );
+});
+
+self.addEventListener("notificationclose", (e) => {
+  e.waitUntil(badge());
 });
 
 /* A click opens the console, or brings an open one to the front. */
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   e.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      for (const c of list) {
-        if ("focus" in c) return c.focus();
-      }
-      return self.clients.openWindow("/");
-    }),
+    Promise.all([
+      badge(),
+      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+        for (const c of list) {
+          if ("focus" in c) return c.focus();
+        }
+        return self.clients.openWindow("/");
+      }),
+    ]),
   );
 });
