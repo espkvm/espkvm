@@ -24,6 +24,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "mbedtls/net_sockets.h"
@@ -348,10 +349,47 @@ static bool vencrypt_socket_wait(void *ctx, bool writing)
     }
 }
 
+/*
+ * The identity comes from NVS, a flash read, and the cache is off while the
+ * flash is read: a task whose stack is in PSRAM must not do it (IDF asserts in
+ * spi_flash_disable_interrupts_caches_and_other_cpu). The VNC task's stack is
+ * in PSRAM, so a short task with an internal stack does the read.
+ */
+typedef struct {
+    kvm_tls_identity_t *out;
+    esp_err_t err;
+    SemaphoreHandle_t done;
+} identity_job_t;
+
+static void identity_task(void *arg)
+{
+    identity_job_t *job = arg;
+    job->err = kvm_tls_identity_get(job->out, true);
+    xSemaphoreGive(job->done);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t identity_get(kvm_tls_identity_t *out)
+{
+    identity_job_t job = {.out = out, .err = ESP_FAIL, .done = xSemaphoreCreateBinary()};
+    if (!job.done) {
+        return ESP_ERR_NO_MEM;
+    }
+    /* As much stack as the HTTPS server task, which makes the same call: it
+     * signs a new leaf when the address changed. */
+    if (xTaskCreate(identity_task, "vnc_id", 12 * 1024, &job, VNC_TASK_PRIO, NULL) != pdPASS) {
+        vSemaphoreDelete(job.done);
+        return ESP_ERR_NO_MEM;
+    }
+    (void)xSemaphoreTake(job.done, portMAX_DELAY);
+    vSemaphoreDelete(job.done);
+    return job.err;
+}
+
 static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadline_us)
 {
     kvm_tls_identity_t identity;
-    if (kvm_tls_identity_get(&identity, true) != ESP_OK) {
+    if (identity_get(&identity) != ESP_OK) {
         ESP_LOGE(TAG, "could not load the device TLS identity for VeNCrypt");
         return false;
     }
