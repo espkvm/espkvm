@@ -920,14 +920,75 @@ static bool discard_bytes(vnc_conn_t *conn, uint32_t len, uint32_t generation)
     return true;
 }
 
-static bool client_loop(int fd, uint32_t generation, const char *ip)
+static void set_client_timeouts(int fd);
+
+/* The listening socket, so a session can see someone else knocking. */
+static int s_listener = -1;
+
+/* Accept one connection: -1 when there was none or it came over the hotspot
+ * with that not allowed. */
+static int accept_client(int listener, char *ip, size_t ip_cap)
 {
+    struct sockaddr_in peer;
+    socklen_t peer_len = sizeof(peer);
+    const int client = accept(listener, (struct sockaddr *)&peer, &peer_len);
+    if (client < 0) return -1;
+    set_client_timeouts(client);
+    struct sockaddr_in local = {0};
+    socklen_t local_len = sizeof(local);
+    if (!kvm_setting_bool("vnc_hotspot") &&
+        getsockname(client, (struct sockaddr *)&local, &local_len) == 0 &&
+        kvm_wifi_is_ap_address(local.sin_addr.s_addr)) {
+        ESP_LOGI(TAG, "rejected client from hotspot (enable vnc_hotspot to allow it)");
+        close(client);
+        return -1;
+    }
+    inet_ntoa_r(peer.sin_addr, ip, ip_cap);
+    return client;
+}
+
+static void conn_close(vnc_conn_t *conn)
+{
+    vnc_tls_free(conn);
+    shutdown(conn->fd, SHUT_RDWR);
+    close(conn->fd);
+    conn->fd = -1;
+}
+
+/*
+ * Wait up to a second for the next message. Meanwhile a new client may knock:
+ * there is one session at a time, and a client left open somewhere would
+ * otherwise keep everyone else out. 1: a message is there. 0: nothing yet.
+ * 2: someone is at the listener.
+ */
+static int wait_message(const vnc_conn_t *conn)
+{
+    if (conn->tls && mbedtls_ssl_get_bytes_avail(&conn->tls->ssl) > 0) return 1;
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(conn->fd, &fds);
+    int top = conn->fd;
+    if (s_listener >= 0) {
+        FD_SET(s_listener, &fds);
+        if (s_listener > top) top = s_listener;
+    }
+    struct timeval wait = {.tv_sec = 1, .tv_usec = 0};
+    if (select(top + 1, &fds, NULL, NULL, &wait) <= 0) return 0;
+    if (s_listener >= 0 && FD_ISSET(s_listener, &fds)) return 2;
+    return FD_ISSET(conn->fd, &fds) ? 1 : 0;
+}
+
+/* Closes its connection (and any it took over) before it returns. */
+static bool client_loop(int fd, uint32_t generation, const char *first_ip)
+{
+    char ip[16];
+    strlcpy(ip, first_ip, sizeof(ip));
     vnc_conn_t conn = {.fd = fd};
     uint16_t width, height;
     const int64_t handshake_deadline = esp_timer_get_time() +
                                        (int64_t)VNC_HANDSHAKE_TIMEOUT_MS * 1000;
     if (!rfb_handshake(&conn, generation, handshake_deadline, &width, &height)) {
-        vnc_tls_free(&conn);
+        conn_close(&conn);
         return false;
     }
     viewer_set(ip, conn.tls != NULL);
@@ -938,6 +999,35 @@ static bool client_loop(int fd, uint32_t generation, const char *ip)
     uint32_t last_seq = video_frame_seq();
     bool alive = true;
     while (alive && generation == s_generation) {
+        const int ready = wait_message(&conn);
+        if (ready == 0) continue;
+        if (ready == 2) {
+            /* The newcomer takes over only once it has signed in: an
+             * unauthenticated connection must not be able to end a session. */
+            char new_ip[16];
+            const int nfd = accept_client(s_listener, new_ip, sizeof(new_ip));
+            if (nfd < 0) continue;
+            vnc_conn_t next = {.fd = nfd};
+            uint16_t nw, nh;
+            const int64_t deadline = esp_timer_get_time() + (int64_t)VNC_HANDSHAKE_TIMEOUT_MS * 1000;
+            if (!rfb_handshake(&next, generation, deadline, &nw, &nh)) {
+                ESP_LOGI(TAG, "client from %s did not sign in; %s keeps the session", new_ip, ip);
+                conn_close(&next);
+                continue;
+            }
+            ESP_LOGI(TAG, "client from %s took over from %s", new_ip, ip);
+            usb_hid_vnc_release();
+            conn_close(&conn);
+            conn = next;
+            width = nw;
+            height = nh;
+            strlcpy(ip, new_ip, sizeof(ip));
+            memset(&state, 0, sizeof(state));
+            has_frame = false;
+            last_seq = video_frame_seq();
+            viewer_set(ip, conn.tls != NULL);
+            continue;
+        }
         uint8_t type;
         if (!recv_exact(&conn, &type, 1, generation)) {
             ESP_LOGD(TAG, "client closed while waiting for an RFB message");
@@ -1025,7 +1115,7 @@ static bool client_loop(int fd, uint32_t generation, const char *ip)
         capture_vnc_snapshot_end();
     }
     video_frame_viewer_leave();
-    vnc_tls_free(&conn);
+    conn_close(&conn);
     return alive;
 }
 
@@ -1120,27 +1210,14 @@ static void vnc_task(void *arg)
         struct timeval wait = {.tv_sec = 1, .tv_usec = 0};
         const int ready = select(listener + 1, &readfds, NULL, NULL, &wait);
         if (ready <= 0 || !FD_ISSET(listener, &readfds)) continue;
-        struct sockaddr_in peer;
-        socklen_t peer_len = sizeof(peer);
-        const int client = accept(listener, (struct sockaddr *)&peer, &peer_len);
-        if (client < 0) continue;
-        set_client_timeouts(client);
-        struct sockaddr_in local = {0};
-        socklen_t local_len = sizeof(local);
-        if (!kvm_setting_bool("vnc_hotspot") &&
-            getsockname(client, (struct sockaddr *)&local, &local_len) == 0 &&
-            kvm_wifi_is_ap_address(local.sin_addr.s_addr)) {
-            ESP_LOGI(TAG, "rejected client from hotspot (enable vnc_hotspot to allow it)");
-            close(client);
-            continue;
-        }
         char ip[16];
-        inet_ntoa_r(peer.sin_addr, ip, sizeof(ip));
+        const int client = accept_client(listener, ip, sizeof(ip));
+        if (client < 0) continue;
         ESP_LOGI(TAG, "client connected from %s", ip);
+        s_listener = listener;
         const bool clean = client_loop(client, generation, ip);
+        s_listener = -1;
         viewer_clear();
-        shutdown(client, SHUT_RDWR);
-        close(client);
         ESP_LOGI(TAG, "client disconnected%s", clean ? "" : " (protocol or network error)");
     }
 }
