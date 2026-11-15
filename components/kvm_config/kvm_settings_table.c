@@ -262,7 +262,7 @@ static const kvm_setting_t s_settings[] = {
     },
     {
         .key = "vnc_port", .section = "video", .group = "VNC server", .type = KVM_VT_INT,
-        .title = "TCP port",
+        .title = "VNC port",
         .help = "5900 is what VNC clients try when no port is given.",
         .min = 1, .max = 65535, .def = 5900, .requires_cap = -1,
     },
