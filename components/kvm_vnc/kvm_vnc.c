@@ -1057,16 +1057,24 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
             }
             state.tight = false;
             state.desktop_size = false;
+            /* The client picks the JPEG quality: a level 0-9 (-32..-23, the
+             * TurboVNC table below) or an exact 0-100 (-512..-412). TigerVNC's
+             * automatic mode lowers it on a slow link. */
+            static const uint8_t level_quality[10] = {15, 29, 41, 42, 62, 77, 79, 86, 92, 100};
+            int quality = 80, fine = -1;
             for (unsigned i = 0; i < count; i++) {
                 uint8_t enc[4];
                 if (!recv_exact(&conn, enc, sizeof(enc), generation)) { alive = false; break; }
-                const uint32_t value = be32(enc);
+                const int32_t value = (int32_t)be32(enc);
                 if (value == 7) state.tight = true;
-                if (value == (uint32_t)-223) state.desktop_size = true;
+                if (value == -223) state.desktop_size = true;
+                if (value >= -32 && value <= -23) quality = level_quality[value + 32];
+                if (value >= -512 && value <= -412) fine = value + 512;
             }
-            ESP_LOGI(TAG, "client SetEncodings: %u entries, Tight=%s, DesktopSize=%s",
+            capture_vnc_snapshot_quality(fine >= 0 ? fine : quality);
+            ESP_LOGI(TAG, "client SetEncodings: %u entries, Tight=%s, DesktopSize=%s, quality %d",
                      (unsigned)count, state.tight ? "yes" : "no",
-                     state.desktop_size ? "yes" : "no");
+                     state.desktop_size ? "yes" : "no", fine >= 0 ? fine : quality);
             if (!state.tight) {
                 ESP_LOGW(TAG, "client did not negotiate Tight encoding; cannot send JPEG frames");
                 alive = false;

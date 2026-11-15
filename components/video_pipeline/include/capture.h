@@ -166,6 +166,8 @@ esp_err_t capture_thumbnail(uint16_t *dst, int max_w, int max_h, bool swap, int 
 esp_err_t capture_vnc_snapshot_begin(void);
 esp_err_t capture_vnc_snapshot_next(const uint8_t **jpeg, size_t *jpeg_len, uint32_t timeout_ms);
 void capture_vnc_snapshot_end(void);
+/** The JPEG quality (1-100) for the VNC frames that follow. */
+void capture_vnc_snapshot_quality(int quality);
 
 /**
  * The I2C master bus the capture bridge lives on (I2C_NUM_0, the board's

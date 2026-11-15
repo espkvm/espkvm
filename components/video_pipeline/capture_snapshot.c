@@ -140,6 +140,14 @@ static esp_err_t stream_buffer_open(capture_ctx_t *c)
     return ESP_OK;
 }
 
+/* The VNC client's JPEG quality, 1-100. */
+static volatile uint8_t s_stream_quality = 80;
+
+void capture_vnc_snapshot_quality(int quality)
+{
+    s_stream_quality = (uint8_t)(quality < 1 ? 1 : quality > 100 ? 100 : quality);
+}
+
 static esp_err_t stream_encode(capture_ctx_t *c, const void *src)
 {
     esp_err_t err = s_stream_encoder ? ESP_OK : stream_encoder_open(c);
@@ -161,7 +169,7 @@ static esp_err_t stream_encode(capture_ctx_t *c, const void *src)
         .height = c->vres,
         .src_type = (jpeg_enc_input_format_t)capture_pixfmt()->jpeg_src,
         .sub_sample = (jpeg_down_sampling_type_t)capture_pixfmt()->jpeg_subsample,
-        .image_quality = SNAPSHOT_QUALITY,
+        .image_quality = s_stream_quality,
     };
     uint32_t len = 0;
     err = jpeg_encoder_process(s_stream_encoder, &cfg, src, (uint32_t)c->frame_bytes,
