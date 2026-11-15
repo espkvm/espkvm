@@ -467,8 +467,8 @@ static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
 
     conn->tls = tls;
     mbedtls_ssl_set_bio(&tls->ssl, &conn->fd, tls_send, tls_recv, NULL);
-    ESP_LOGI(TAG, "VeNCrypt TLS context initialized");
-    ESP_LOGI(TAG, "VeNCrypt TLS handshake starting");
+    ESP_LOGD(TAG, "VeNCrypt TLS context initialized");
+    ESP_LOGD(TAG, "VeNCrypt TLS handshake starting");
     do {
         rc = mbedtls_ssl_handshake(&tls->ssl);
         if (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -485,7 +485,7 @@ static bool vnc_tls_start(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
         vnc_tls_free(conn);
         return false;
     }
-    ESP_LOGI(TAG, "VeNCrypt TLS handshake complete");
+    ESP_LOGD(TAG, "VeNCrypt TLS handshake complete");
     return generation == s_generation;
 }
 
@@ -584,7 +584,7 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
         ESP_LOGW(TAG, "client selected unsupported RFB security type %u", (unsigned)selected);
         return false;
     }
-    ESP_LOGI(TAG, "client selected RFB security type %u%s", (unsigned)selected,
+    ESP_LOGD(TAG, "client selected RFB security type %u%s", (unsigned)selected,
              selected == 19 ? " (VeNCrypt)" : " (legacy VNC auth)");
 
     if (selected == 19) {
@@ -602,8 +602,8 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
                      result == VENC_RESULT_BAD_SUBTYPE ? "unsupported subtype" : "I/O error");
             return false;
         }
-        ESP_LOGI(TAG, "client selected VeNCrypt subtype %u", (unsigned)subtype_id);
-        ESP_LOGI(TAG, "VeNCrypt success status sent; starting TLS");
+        ESP_LOGD(TAG, "client selected VeNCrypt subtype %u", (unsigned)subtype_id);
+        ESP_LOGD(TAG, "VeNCrypt success status sent; starting TLS");
         if (!vnc_tls_start(conn, generation, deadline_us)) {
             return false;
         }
@@ -624,7 +624,7 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
         return false;
     }
     kvm_auth_attempt_succeeded();
-    ESP_LOGI(TAG, "VNC authentication succeeded");
+    ESP_LOGD(TAG, "VNC authentication succeeded");
     if (!send_u32(conn, 0, generation)) {
         ESP_LOGW(TAG, "could not send successful RFB SecurityResult");
         return false;
@@ -654,13 +654,18 @@ static bool rfb_handshake(vnc_conn_t *conn, uint32_t generation, int64_t deadlin
     init[14] = 16;
     init[15] = 8;
     init[16] = 0;
-    put_be32(init + 20, 12);
+    /* The device's name, so a client with several of them tells them apart.
+     * RFB counts the bytes; no terminator goes on the wire. */
+    const char *host = kvm_setting_str("net_hostname");
+    const char *name = host && host[0] ? host : "ESP-KVM";
+    const size_t name_len = strnlen(name, 63);
+    put_be32(init + 20, (uint32_t)name_len);
     if (!send_all(conn, init, sizeof(init), generation) ||
-        !send_all(conn, "ESP-KVM VNC", 12, generation)) {
+        !send_all(conn, name, name_len, generation)) {
         ESP_LOGW(TAG, "failed to send RFB ServerInit");
         return false;
     }
-    ESP_LOGI(TAG, "RFB ServerInit sent (%ux%u)", (unsigned)*width, (unsigned)*height);
+    ESP_LOGD(TAG, "RFB ServerInit sent (%ux%u)", (unsigned)*width, (unsigned)*height);
     return true;
 }
 
@@ -1072,7 +1077,7 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
                 if (value >= -512 && value <= -412) fine = value + 512;
             }
             capture_vnc_snapshot_quality(fine >= 0 ? fine : quality);
-            ESP_LOGI(TAG, "client SetEncodings: %u entries, Tight=%s, DesktopSize=%s, quality %d",
+            ESP_LOGD(TAG, "client SetEncodings: %u entries, Tight=%s, DesktopSize=%s, quality %d",
                      (unsigned)count, state.tight ? "yes" : "no",
                      state.desktop_size ? "yes" : "no", fine >= 0 ? fine : quality);
             if (!state.tight) {
