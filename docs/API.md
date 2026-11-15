@@ -91,7 +91,7 @@ be given a URL.
 | | |
 |---|---|
 | `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), `hdd` (the target's HDD LED is lit or blinking; null when it is not wired), and `csi` (the CSI link as last sampled: `clkHs`, `stop` for the data lanes, `stopClk`, `phyErr`, `ageMs`; see [TROUBLESHOOTING](TROUBLESHOOTING.md#the-hdmi-signal-is-there-but-no-picture)) |
-| `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in) |
+| `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in). A VNC client also has `kind: "vnc"`, `encrypted` and `seconds` (connected for) |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
 | `GET /api/v1/video/frame.jpg` | one frame as a JPEG, on either codec |
 | `GET /api/v1/video/timing?do=start\|read\|stop` | a log for measuring input-to-picture delay without the network in it, on the device's clock: `inputs` (`[us, fn, id, firstByte]` when a HID report left on USB) and `frames` (`[seq, landedUs, encodedUs, sentUs]`, where `seq` is the one in the `/video` header). It holds memory only between start and stop |
@@ -103,34 +103,17 @@ be given a URL.
 
 ### VNC
 
-The optional RFB 3.8 server listens directly on IPv4 TCP (default port 5900)
-and serves one viewer at a time. Enable
-it in Settings &rarr; Video &rarr; VNC server and set a password first. It uses
-VNC Authentication and Tight/JPEG updates, and forwards keyboard and pointer
-events to the target. The password is write-only in the settings API and is
-limited to eight printable ASCII characters by the VNC protocol. The classic
-VNC password exchange and stream are not encrypted; keep the listener on a
-trusted network or reach it through a VPN. HTTPS does not encrypt this TCP
-connection. `vnc_enable` and `vnc_port` are returned by `GET` and accepted by
-`PUT /api/v1/settings`; `vnc_pass` is accepted by `PUT` and never returned.
+A VNC server for clients such as TigerVNC and Remmina, off by default: Settings, Video, VNC server. It needs a password of 1 to 8 printable ASCII characters first, a limit of VNC's own sign-in. The client must support Tight encoding, because the picture goes out as JPEG. RealVNC Viewer and the macOS screen sharing app do not.
 
-`POST /api/v1/vnc/session` issues a one-use ticket for an enabled VNC server.
-Send an empty JSON object with the authenticated session cookie:
+The server offers VeNCrypt (TLS with the device's certificate, then the VNC password) and plain VNC authentication. Plain VNC sends the picture and the keys unencrypted, so use it on your own network or over Tailscale. It does not listen on the device's hotspot unless `vnc_hotspot` is on.
 
-```sh
-curl -sk -b jar -H 'Content-Type: application/json' -d '{}' \
-  https://espkvm.local/api/v1/vnc/session
-```
+One client at a time. A new client that signs in takes over from the one before it. The JPEG quality follows the client's quality setting. While a client is connected it is listed in `GET /api/v1/viewers` with `kind: "vnc"`.
 
-The response contains `ticket`, `port`, `expiresIn` (60 seconds), and `uses`
-(1). Connect a normal VNC viewer to the device and returned port, and enter
-the ticket as its VNC password. The ticket is consumed after a successful
-handshake; the configured VNC password continues to work as well. Issuing a
-ticket requires the VNC password to be configured, and changing VNC settings
-revokes outstanding tickets. The eight-character limit is imposed by classic
-VNC Authentication, so tickets have 48 random bits and are intentionally
-short-lived. The VNC exchange is not encrypted, including when the ticket is
-used; use a trusted network or VPN.
+Settings: `vnc_enable`, `vnc_port` (5900), `vnc_hotspot`, and `vnc_pass`, which is written but never read back.
+
+| | |
+|---|---|
+| `POST /api/v1/vnc/session` | a one-use password for the VNC client, good for 60 s: `{"ticket", "port", "expiresIn", "uses"}`. The configured password keeps working. Changing a VNC setting cancels unused tickets |
 
 ### Sound
 
