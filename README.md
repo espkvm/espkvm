@@ -73,6 +73,7 @@ Useful for what it does today, and honest about the rest.
 | Keyboard, mouse, media keys, pasting text in a layout | works |
 | From a phone or a tablet | works; touch trackpad, pointer stick, pinch zoom and on-screen keyboard |
 | Several viewers, one in control | works; plus a view-only sign-in for others |
+| VNC: TigerVNC and other clients with Tight encoding, over TLS | new, off by default |
 | Virtual media: boot the target from an image | works; from microSD or the device's flash |
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
@@ -277,12 +278,15 @@ components/
   kvm_notify/     notifications: Telegram, ntfy, webhook, Web Push
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
   kvm_webrtc/     H.264 to the browser over WebRTC (ICE-lite, DTLS-SRTP)
+  kvm_vnc/        the VNC server: RFB 3.8, VeNCrypt, Tight JPEG
   kvm_net/        Ethernet, WiFi (station/AP + rescue hotspot, captive portal),
                   IPv6, mDNS, Wake-on-LAN, and the VPN clients (WireGuard,
                   or Tailscale through third_party/microlink)
   kvm_atx/        power and reset buttons, power-LED sensing
   kvm_cec/        HDMI-CEC: acting as a TV, remote keys, standby and wake
   kvm_display/    the optional status screen (I2C OLED, round SPI LCD)
+  kvm_speaker/    the knock on the board's own speaker (ES8311)
+  kvm_timing/     a log of input and frame times for measuring delay
   kvm_log/        the log kept in RTC memory across a restart
   kvm_mqtt/       Home Assistant discovery and state
   kvm_board/      pin map
@@ -358,6 +362,11 @@ The original Xbox gamepad mode, and a check on the capture size at boot, come
 from **ZacharyLeahan**'s [fork](https://github.com/ZacharyLeahan/espkvm), which
 runs ESP-KVM on an original Xbox. He worked out the XID protocol on a real
 console; the descriptor bytes and the vendor requests here are his.
+
+The VNC server is the work of **Jan Heil** ([Gamer08YT](https://github.com/Gamer08YT)),
+sent as [pull request #88](https://github.com/espkvm/espkvm/pull/88): the RFB
+protocol, VeNCrypt, the one-use sign-in tickets and VNC input kept apart from
+the console's.
 
 The Tailscale packet filter, which makes the device follow the tailnet's
 access rules, and a check on STUN replies come from JetKVM's
