@@ -897,6 +897,25 @@ void kvm_web_peer_ip(int fd, char *out, size_t cap)
     peer_ip(fd, out, cap);
 }
 
+static int (*s_viewers_source)(kvm_web_viewer_t *out, int max);
+
+void kvm_web_viewers_source(int (*list)(kvm_web_viewer_t *out, int max))
+{
+    s_viewers_source = list;
+}
+
+/* Over the tailnet the address names a device and its owner. */
+static void add_tailnet(cJSON *v, const char *ip)
+{
+    kvm_ts_peer_t tp;
+    if (kvm_ts_peer_by_ip(ip, &tp)) {
+        cJSON *t = cJSON_AddObjectToObject(v, "tailnet");
+        cJSON_AddStringToObject(t, "name", tp.name);
+        cJSON_AddStringToObject(t, "user", tp.user);
+        cJSON_AddStringToObject(t, "userName", tp.user_display);
+    }
+}
+
 /*
  * Who has the console open: one entry for each open console tab (its control
  * socket), with its address, whether it is in control, whether it signed in
@@ -934,14 +953,24 @@ esp_err_t api_viewers_get(httpd_req_t *req)
         cJSON_AddBoolToObject(v, "control", fds[i] == holder);
         cJSON_AddBoolToObject(v, "viewOnly", known && kvm_auth_session_view_only(theirs));
         cJSON_AddBoolToObject(v, "you", know_mine && known && memcmp(mine, theirs, 32) == 0);
-        /* Over the tailnet the address names a device and its owner. */
-        kvm_ts_peer_t tp;
-        if (kvm_ts_peer_by_ip(ip, &tp)) {
-            cJSON *t = cJSON_AddObjectToObject(v, "tailnet");
-            cJSON_AddStringToObject(t, "name", tp.name);
-            cJSON_AddStringToObject(t, "user", tp.user);
-            cJSON_AddStringToObject(t, "userName", tp.user_display);
-        }
+        add_tailnet(v, ip);
+        cJSON_AddItemToArray(list, v);
+    }
+    /* The others, a VNC client: kind, whether the link is encrypted, and for
+     * how many seconds it has been on. */
+    kvm_web_viewer_t extra[2];
+    const int n_extra = s_viewers_source ? s_viewers_source(extra, 2) : 0;
+    const int64_t now = esp_timer_get_time();
+    for (int i = 0; i < n_extra; i++) {
+        cJSON *v = cJSON_CreateObject();
+        cJSON_AddStringToObject(v, "ip", extra[i].ip);
+        cJSON_AddStringToObject(v, "kind", extra[i].kind);
+        cJSON_AddBoolToObject(v, "control", false);
+        cJSON_AddBoolToObject(v, "viewOnly", false);
+        cJSON_AddBoolToObject(v, "you", false);
+        cJSON_AddBoolToObject(v, "encrypted", extra[i].encrypted);
+        cJSON_AddNumberToObject(v, "seconds", (double)((now - extra[i].since_us) / 1000000));
+        add_tailnet(v, extra[i].ip);
         cJSON_AddItemToArray(list, v);
     }
     char *body = cJSON_PrintUnformatted(root);

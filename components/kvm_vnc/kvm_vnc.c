@@ -33,6 +33,7 @@
 #include "mbedtls/x509_crt.h"
 
 #include "capture.h"
+#include "http_server.h"
 #include "kvm_auth.h"
 #include "kvm_settings.h"
 #include "kvm_tls.h"
@@ -51,6 +52,40 @@ static const char *TAG = "vnc";
 #define VNC_HANDSHAKE_TIMEOUT_MS 10000
 
 static volatile uint32_t s_generation;
+
+/* The connected client, for the console's list of viewers. */
+static portMUX_TYPE s_viewer_mu = portMUX_INITIALIZER_UNLOCKED;
+static kvm_web_viewer_t s_viewer;
+static bool s_viewer_on;
+
+static void viewer_set(const char *ip, bool encrypted)
+{
+    portENTER_CRITICAL(&s_viewer_mu);
+    strlcpy(s_viewer.ip, ip, sizeof(s_viewer.ip));
+    s_viewer.kind = "vnc";
+    s_viewer.encrypted = encrypted;
+    s_viewer.since_us = esp_timer_get_time();
+    s_viewer_on = true;
+    portEXIT_CRITICAL(&s_viewer_mu);
+}
+
+static void viewer_clear(void)
+{
+    portENTER_CRITICAL(&s_viewer_mu);
+    s_viewer_on = false;
+    portEXIT_CRITICAL(&s_viewer_mu);
+}
+
+static int viewers_list(kvm_web_viewer_t *out, int max)
+{
+    int n = 0;
+    portENTER_CRITICAL(&s_viewer_mu);
+    if (s_viewer_on && max > 0) {
+        out[n++] = s_viewer;
+    }
+    portEXIT_CRITICAL(&s_viewer_mu);
+    return n;
+}
 static TaskHandle_t s_task;
 
 typedef struct {
@@ -885,7 +920,7 @@ static bool discard_bytes(vnc_conn_t *conn, uint32_t len, uint32_t generation)
     return true;
 }
 
-static bool client_loop(int fd, uint32_t generation)
+static bool client_loop(int fd, uint32_t generation, const char *ip)
 {
     vnc_conn_t conn = {.fd = fd};
     uint16_t width, height;
@@ -895,6 +930,7 @@ static bool client_loop(int fd, uint32_t generation)
         vnc_tls_free(&conn);
         return false;
     }
+    viewer_set(ip, conn.tls != NULL);
     client_state_t state = {0};
     video_frame_viewer_enter();
     bool has_frame = false;
@@ -1101,7 +1137,8 @@ static void vnc_task(void *arg)
         char ip[16];
         inet_ntoa_r(peer.sin_addr, ip, sizeof(ip));
         ESP_LOGI(TAG, "client connected from %s", ip);
-        const bool clean = client_loop(client, generation);
+        const bool clean = client_loop(client, generation, ip);
+        viewer_clear();
         shutdown(client, SHUT_RDWR);
         close(client);
         ESP_LOGI(TAG, "client disconnected%s", clean ? "" : " (protocol or network error)");
@@ -1111,6 +1148,7 @@ static void vnc_task(void *arg)
 esp_err_t kvm_vnc_init(void)
 {
     if (s_task) return ESP_OK;
+    kvm_web_viewers_source(viewers_list);
     if (xTaskCreateWithCaps(vnc_task, "vnc", VNC_TASK_STACK, NULL, VNC_TASK_PRIO,
                             &s_task, MALLOC_CAP_SPIRAM) != pdPASS) {
         s_task = NULL;
