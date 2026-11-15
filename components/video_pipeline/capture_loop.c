@@ -562,7 +562,9 @@ void capture_loop_run(capture_ctx_t *c)
         int64_t early_at_us = 0;
         size_t early_lead_bytes = 0;
         early_gate(codec == capture_codec_h264() && early_gate_wanted());
-        if (codec == capture_codec_h264()) {
+        /* A frame the VNC client waits for is taken once it has landed, so
+         * its JPEG can run beside the H.264 of the same buffer. */
+        if (codec == capture_codec_h264() && !capture_vnc_snapshot_wanted()) {
             /* The frame the DMA is writing now, if it may be started on. */
             const int w = c->write_fb_idx;
             int64_t data_us = 0;
@@ -746,6 +748,7 @@ void capture_loop_run(capture_ctx_t *c)
             }
         }
 
+        capture_vnc_snapshot_wait(); /* it may still be reading the buffer */
         capture_park_frame_end();
         portENTER_CRITICAL(&c->fb_lock);
         c->held_fb_idx = -1;

@@ -166,6 +166,9 @@ esp_err_t capture_thumbnail(uint16_t *dst, int max_w, int max_h, bool swap, int 
 esp_err_t capture_vnc_snapshot_begin(void);
 esp_err_t capture_vnc_snapshot_next(const uint8_t **jpeg, size_t *jpeg_len, uint32_t timeout_ms);
 void capture_vnc_snapshot_end(void);
+/** Wait until the VNC frame started from the held capture buffer is encoded.
+ *  The capture loop calls it before it lets the buffer go. */
+void capture_vnc_snapshot_wait(void);
 /** The JPEG quality (1-100) for the VNC frames that follow. */
 void capture_vnc_snapshot_quality(int quality);
 
