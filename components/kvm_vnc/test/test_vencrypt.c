@@ -37,7 +37,7 @@ static int fake_send(void *ctx, const uint8_t *data, size_t len)
     f->writes++;
     if (f->writes == 1) return VENC_IO_INTERRUPTED;
     if (f->writes == 2) return VENC_IO_WANT_WRITE;
-    if (f->fail_status && len == 1 && data[0] == 0) return VENC_IO_ERROR;
+    if (f->fail_status && len == 1 && data[0] == 1) return VENC_IO_ERROR;
     const size_t n = len > 2 ? 2 : len;
     if (f->output_len + n > sizeof(f->output)) return VENC_IO_ERROR;
     memcpy(f->output + f->output_len, data, n);
@@ -104,7 +104,7 @@ static void test_tlsvnc_fragmented_and_clienthello_boundary(void)
     CHECK(f.input_len - f.input_pos == sizeof(hello));
     CHECK(memcmp(f.input + f.input_pos, hello, sizeof(hello)) == 0);
 
-    static const uint8_t offer[] = {0, 2, 0, 2, 0, 0, 1, 5, 0, 0, 1, 2, 0};
+    static const uint8_t offer[] = {0, 2, 0, 2, 0, 0, 1, 5, 0, 0, 1, 2, 1};
     CHECK(f.output_len == sizeof(offer));
     CHECK(memcmp(f.output, offer, sizeof(offer)) == 0);
 }

@@ -79,10 +79,14 @@ vencrypt_result_t vencrypt_server_negotiate(const vencrypt_io_t *io, uint32_t *s
 
     *subtype = get_be32(selection);
     if (*subtype != VENC_SUBTYPE_TLS_VNC && *subtype != VENC_SUBTYPE_X509_VNC) {
+        const uint8_t refused = 0;
+        (void)send_exact(io, &refused, sizeof(refused));
         return VENC_RESULT_BAD_SUBTYPE;
     }
 
-    const uint8_t status = 0;
+    /* 1 accepts the subtype, 0 refuses it (TigerVNC, libvncclient). With 0
+       every client gave up before the TLS handshake. */
+    const uint8_t status = 1;
     if (!send_exact(io, &status, sizeof(status))) {
         return VENC_RESULT_IO_ERROR;
     }
