@@ -60,7 +60,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '26'
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
@@ -80,7 +80,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '26'
       - run: npm ci
         working-directory: web
       - run: node tools/check_layouts.mjs
@@ -229,7 +229,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '26'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
