@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["custom.regex"],
+  "dependencyDashboard": false,
+  "schedule": ["* * 1 * *"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "ESP-IDF version the CI builds with",
+      "managerFilePatterns": ["/^\\.github/workflows/firmware\\.yml$/"],
+      "matchStrings": ["esp_idf_version: (?<currentValue>v\\d+\\.\\d+)\\b"],
+      "depNameTemplate": "espressif/idf",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)$"
+    }
+  ]
+}
