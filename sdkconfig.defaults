@@ -73,7 +73,12 @@ CONFIG_SPIRAM_SPEED_200M=y
 # RAM in ONE piece, and a device with 314 KB free but no run longer than 132 KB
 # could not rebuild it. Anything that needs DMA-capable memory asks for
 # MALLOC_CAP_DMA explicitly, so it is unaffected by this threshold.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# 1024 and not 4096: the Ethernet driver copies every received frame (up to
+# 1514 bytes) into a plain malloc, and a frame waits there until the program
+# reads it. A firmware upload, read at the speed the flash takes it, kept up to
+# a TCP window of them in internal RAM and ran it down to 1 KB on the JetKVM
+# Mini with two viewers. The JetKVM firmware uses 1024 too.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
 # No write-and-read-back test of all 32 MB at every start: 0.8 s of each boot,
 # and a fault it found would only be logged.
 CONFIG_SPIRAM_MEMTEST=n

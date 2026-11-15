@@ -110,3 +110,7 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Which board this is: names it in the console.
 CONFIG_KVM_BOARD_JETKVM_MINI=y
+
+# --- speaker -----------------------------------------------------------------
+# No ES8311 codec on this board.
+CONFIG_KVM_ENABLE_SPEAKER=n

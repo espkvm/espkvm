@@ -759,6 +759,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/system/update/keep", .method = HTTP_POST, .handler = api_system_update_keep_post},
         {.uri = "/api/v1/system/update/rollback", .method = HTTP_POST, .handler = api_system_update_rollback_post},
         {.uri = "/api/v1/system/log", .method = HTTP_GET, .handler = api_system_log_get},
+        {.uri = "/api/v1/video/timing", .method = HTTP_GET, .handler = api_video_timing_get},
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
         {.uri = "/api/v1/system/coredump", .method = HTTP_GET, .handler = api_system_coredump_get},
         {.uri = "/api/v1/system/coredump",

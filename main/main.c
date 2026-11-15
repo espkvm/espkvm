@@ -23,6 +23,7 @@
 #include "capture.h"
 #include "kvm_rtc.h"
 #include "kvm_net_guard.h"
+#include "kvm_speaker.h"
 #include "kvm_display.h"
 #include "kvm_log.h"
 #include "ethernet.h"
@@ -671,6 +672,7 @@ void app_main(void)
     /* Before the network: the H.264 encoder needs one large internal block. */
     capture_reserve_early();
     kvm_display_init();
+    kvm_speaker_init();
 
     kvm_auth_check_reset_button(reset_button_notice);
     /* Leave the outcome up for its few seconds; take the prompt down at once. */

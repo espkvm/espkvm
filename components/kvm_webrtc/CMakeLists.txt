@@ -14,4 +14,5 @@ idf_component_register(
         kvm_config
         video_pipeline
         kvm_audio
+        kvm_timing
 )

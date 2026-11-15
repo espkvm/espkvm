@@ -523,7 +523,7 @@ static void render_corners(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     } else {
         snprintf(buf, sizeof(buf), "%lud", (unsigned long)(up / 86400));
     }
-    corner(g->fb, 3, "UP", buf, white);
+    corner(g->fb, 3, "UPTIME", buf, white);
 }
 
 static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)

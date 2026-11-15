@@ -76,6 +76,7 @@
 #include "kvm_board_header.h"
 #include "kvm_caps.h"
 #include "kvm_display.h"
+#include "kvm_speaker.h"
 #include "kvm_log.h"
 #include "kvm_settings.h"
 #include "kvm_profiles.h"
@@ -415,10 +416,11 @@ static void ws_send_control(int fd, uint8_t state)
 }
 
 /* Remember a control socket, so a notice can reach every console. */
-static void ctrl_client_add(int fd)
+/** Remember @p fd as a console. True the first time: a console just joined. */
+static bool ctrl_client_add(int fd)
 {
     if (!s_ws_mu || xSemaphoreTake(s_ws_mu, pdMS_TO_TICKS(200)) != pdTRUE) {
-        return;
+        return false;
     }
     int free_slot = -1;
     for (int i = 0; i < TX_MAX_SOCKETS; i++) {
@@ -434,6 +436,7 @@ static void ctrl_client_add(int fd)
         s_ctrl_fds[free_slot] = fd;
     }
     xSemaphoreGive(s_ws_mu);
+    return free_slot >= 0;
 }
 
 /** Tell every console what the update is doing. */
@@ -694,7 +697,10 @@ esp_err_t ws_input_handler(httpd_req_t *req)
     }
 
     const int my_fd = httpd_req_to_sockfd(req);
-    ctrl_client_add(my_fd);
+    if (ctrl_client_add(my_fd)) {
+        kvm_display_console_joined();
+        kvm_speaker_console_joined();
+    }
     const uint8_t op = pkt.len ? buf[0] : 0;
 
     /* A view-only sign-in watches: it hears the state and the pong, and its

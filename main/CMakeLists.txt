@@ -26,6 +26,7 @@ idf_component_register(
         kvm_record
         kvm_upload
         kvm_display
+        kvm_speaker
         app_update
         esp_timer
         espcoredump

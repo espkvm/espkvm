@@ -11,4 +11,5 @@ idf_component_register(
         esp_driver_gpio
         esp_tinyusb
         esp_timer
+        kvm_timing
 )

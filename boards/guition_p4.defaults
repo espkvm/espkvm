@@ -112,3 +112,8 @@ CONFIG_KVM_DISP_DC_GPIO=33
 CONFIG_KVM_DISP_RST_GPIO=4
 CONFIG_KVM_ATX_PWR_GPIO=46
 CONFIG_KVM_ATX_RST_GPIO=47
+
+# --- speaker -----------------------------------------------------------------
+# ES8311 at 0x18 on the capture bus (#61). From the schematic: the amplifier
+# enable (PA_CTRL) is GPIO11 here, not 53, and the codec DSDIN is GPIO9.
+CONFIG_KVM_SPK_PA_GPIO=11

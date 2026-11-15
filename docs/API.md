@@ -94,6 +94,7 @@ be given a URL.
 | `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in) |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
 | `GET /api/v1/video/frame.jpg` | one frame as a JPEG, on either codec |
+| `GET /api/v1/video/timing?do=start\|read\|stop` | a log for measuring input-to-picture delay without the network in it, on the device's clock: `inputs` (`[us, fn, id, firstByte]` when a HID report left on USB) and `frames` (`[seq, landedUs, encodedUs, sentUs]`, where `seq` is the one in the `/video` header). It holds memory only between start and stop |
 | `GET /api/v1/screen/text` | the screen as characters when the target is in a text mode; 204 when it is showing a picture |
 | `GET /stream` | MJPEG as `multipart/x-mixed-replace`; answers 409 while H.264 is selected |
 | `POST /api/v1/video/webrtc` | WebRTC signaling: `{"sdp": offer}` in, `{"id", "sdp": answer}` out, no trickle. The offer must have one video m-line with H.264 packetization-mode 1 and a SHA-256 fingerprint. 409 while MJPEG runs or WebRTC is off, 503 when it is not ready. The session ends with the sign-in |

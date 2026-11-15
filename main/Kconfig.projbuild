@@ -47,6 +47,15 @@ menu "ESP-KVM"
                 Both are off until switched on in settings, so it is safe to
                 build into every board.
 
+        config KVM_ENABLE_SPEAKER
+            bool "The board's own speaker (ES8311 codec)"
+            default y
+            help
+                A knock on the board's speaker when a console connects. Off
+                until switched on in settings, and nothing happens on a board
+                whose codec does not answer, so it is safe to build in. Turn it
+                off for a board with no codec on these pins.
+
         config KVM_ENABLE_DISPLAY
             bool "Status display (I2C OLED / round SPI LCD)"
             default y
@@ -267,6 +276,25 @@ menu "ESP-KVM"
     endmenu
 
     menu "Board pins"
+
+        menu "Speaker (ES8311 codec)"
+            depends on KVM_ENABLE_SPEAKER
+            config KVM_SPK_MCLK_GPIO
+                int "I2S MCLK"
+                default 13
+            config KVM_SPK_BCLK_GPIO
+                int "I2S BCLK"
+                default 12
+            config KVM_SPK_WS_GPIO
+                int "I2S LRCK (word clock)"
+                default 10
+            config KVM_SPK_DOUT_GPIO
+                int "I2S data to the codec (its DSDIN)"
+                default 9
+            config KVM_SPK_PA_GPIO
+                int "Amplifier enable (active high)"
+                default 53
+        endmenu
         comment "Defaults are for the Waveshare ESP32-P4-ETH."
         comment "Change these, and the Ethernet pins under Network, to port to another board."
 

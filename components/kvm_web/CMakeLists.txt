@@ -40,6 +40,7 @@ idf_component_register(
         esp_https_server
     PRIV_REQUIRES
         kvm_proto
+        kvm_timing
         tcp_transport
         esp_driver_pcnt
         esp_driver_ledc
@@ -54,6 +55,7 @@ idf_component_register(
         kvm_net
         kvm_atx
         kvm_display
+        kvm_speaker
         kvm_log
         kvm_mqtt
         espressif__cjson

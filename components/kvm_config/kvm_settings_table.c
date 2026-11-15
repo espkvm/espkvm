@@ -1145,6 +1145,22 @@ static const kvm_setting_t s_settings[] = {
                 "on, it is used instead of HDMI audio. Takes effect after a restart.",
         .def = 0, .requires_cap = KVM_CAP_HID, .flags = KVM_SF_REBOOT,
     },
+#if CONFIG_KVM_ENABLE_SPEAKER
+    {
+        .key = "spk_knock", .section = "audio", .group = "Speaker", .type = KVM_VT_BOOL,
+        .title = "Knock when someone connects",
+        .help = "A quiet knock-knock on the board's own speaker when a console is opened, "
+                "at most once in 30 s. Needs a speaker on the board's speaker connector.",
+        .def = 0, .requires_cap = KVM_CAP_SPEAKER,
+    },
+    {
+        .key = "spk_volume", .section = "audio", .group = "Speaker", .type = KVM_VT_INT,
+        .title = "Volume",
+        .help = "How loud the knock is.",
+        .min = 5, .max = 100, .def = 40, .unit = "%", .requires_cap = KVM_CAP_SPEAKER,
+        .visible_key = "spk_knock", .visible_val = 1,
+    },
+#endif
 
     /* ---- network -------------------------------------------------------- */
     {
@@ -1935,6 +1951,14 @@ static const kvm_setting_t s_settings[] = {
         .help = "The screen goes dark after this long, and the display button wakes it on "
                 "the page it had. An update or a notice lights it too. 0 keeps it on.",
         .min = 0, .max = 3600, .def = 0, .unit = "s", .requires_cap = -1,
+        .visible_key = "disp_enable", .visible_val = 1,
+    },
+    {
+        .key = "disp_wake_conn", .section = "display", .group = "Screen", .type = KVM_VT_BOOL,
+        .title = "Wake when someone connects",
+        .help = "A sleeping screen lights up when a console is opened, so whoever stands at "
+                "the device sees that someone connected.",
+        .def = 1, .requires_cap = -1,
         .visible_key = "disp_enable", .visible_val = 1,
     },
     {

@@ -524,7 +524,7 @@ static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_
                 snprintf(v, sizeof(v), "%uh %um", (unsigned)(st->uptime_s / 3600),
                          (unsigned)((st->uptime_s % 3600) / 60));
             }
-            row_add_kv(&r, 2, "Up", v);
+            row_add_kv(&r, 2, "Uptime", v);
         }
         break;
     }

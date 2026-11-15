@@ -102,6 +102,13 @@ static const cap_desc_t s_desc[KVM_CAP_COUNT] = {
                         false,
 #endif
                         "webrtc_enable"},
+    [KVM_CAP_SPEAKER] = {"speaker",
+#if CONFIG_KVM_ENABLE_SPEAKER
+                         true,
+#else
+                         false,
+#endif
+                         "spk_knock"},
 };
 
 typedef struct {

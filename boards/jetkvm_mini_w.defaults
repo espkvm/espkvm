@@ -47,3 +47,7 @@ CONFIG_KVM_DISP_CS_GPIO=16
 CONFIG_KVM_BTN_GPIO_DEFAULT=17
 
 CONFIG_KVM_BOARD_JETKVM_MINI_W=y
+
+# --- speaker -----------------------------------------------------------------
+# No ES8311 codec on this board.
+CONFIG_KVM_ENABLE_SPEAKER=n

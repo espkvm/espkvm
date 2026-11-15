@@ -20,7 +20,7 @@ dependencies:
       type: service
     version: 0.5.3
   espressif/esp_audio_codec:
-    component_hash: 16e2880dbdd5a72264051f750f33a6e5a38fd25621c83e3a32a85a152d2d2643
+    component_hash: a5b9275af74247e3ce536d16a7080e4d77207a185b63e1bea368eb4d57176c2b
     dependencies:
     - name: idf
       require: private
@@ -28,9 +28,19 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 2.5.0
+    version: 2.6.2
+  espressif/esp_codec_dev:
+    component_hash: df70f10af8d7b922add7b9d07372c9c97ab356e58d72b7a892050227c2d44348
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.5.11
   espressif/esp_h264:
-    component_hash: 054a781d7280b94f3d5c29d562ed1582e4c51e7f3ff5566d5d57058e80817805
+    component_hash: c32e94b137aef712b5a347bf0c29d59eecfbcdbf62a0b6848810c8ecbe363261
     dependencies:
     - name: idf
       require: private
@@ -42,7 +52,7 @@ dependencies:
     - esp32s3
     - esp32s31
     - esp32p4
-    version: 1.4.0
+    version: 1.5.0
   espressif/esp_lcd_gc9a01:
     component_hash: e60bc2b5649c7679bd010797a875ae64b2a57cf9cdbd6a2bf7a0ade66913edc0
     dependencies:
@@ -85,7 +95,7 @@ dependencies:
       type: service
     version: 0.2.0
   espressif/tinyusb:
-    component_hash: a72b7d67472914ab76309340fd50d578b31e310963d45ad0f81144bde3314752
+    component_hash: 95e10bf67a64897daadb95681c032cfbbdc77240931fc23f47709a254a3db290
     dependencies:
     - name: idf
       require: private
@@ -99,7 +109,7 @@ dependencies:
     - esp32p4
     - esp32h4
     - esp32s31
-    version: 0.21.0~1
+    version: 0.21.0~6
   idf:
     source:
       type: idf
@@ -107,6 +117,7 @@ dependencies:
 direct_dependencies:
 - espressif/cjson
 - espressif/esp_audio_codec
+- espressif/esp_codec_dev
 - espressif/esp_h264
 - espressif/esp_lcd_gc9a01
 - espressif/mdns
@@ -114,6 +125,6 @@ direct_dependencies:
 - espressif/qrcode
 - espressif/tinyusb
 - idf
-manifest_hash: fb286aa3c08495a7f4b4bc0687443b12778fb22c8f79771d7f2d87f077b643ab
+manifest_hash: def21d59a31b12419b84892d474eca6ff7eda97b9a89b8972621849a74449cdc
 target: esp32p4
 version: 3.0.0

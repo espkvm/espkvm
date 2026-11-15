@@ -89,6 +89,7 @@
 #include "kvm_tools.h"
 #include "kvm_proto.h"
 #include "usb_hid.h"
+#include "kvm_timing.h"
 #include "video_frame.h"
 
 static const char *TAG = "web";
@@ -220,6 +221,9 @@ static void stream_worker_task(void *arg)
             if (se == ESP_OK) {
                 se = httpd_resp_send_chunk(req, "\r\n--frame\r\n", 11);
             }
+        }
+        if (se == ESP_OK) {
+            kvm_timing_sent(f.seq, esp_timer_get_time());
         }
         if (se == ESP_OK && f.src_us > 0) {
             const int64_t now = esp_timer_get_time();
@@ -951,6 +955,7 @@ static void video_sender_task(void *arg)
             }
             break;
         }
+        kvm_timing_sent(hdr.seq, esp_timer_get_time());
         if (f_src_us > 0) {
             const int64_t now = esp_timer_get_time();
             capture_status_add_sent((uint32_t)(now - f_at_us), (uint32_t)(now - f_src_us));

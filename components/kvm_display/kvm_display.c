@@ -83,7 +83,8 @@ static TaskHandle_t s_task;
 /* Presses of the page button so far; the driver pages when it changes. */
 static volatile uint32_t s_page_presses;
 /* disp_sleep: the glass goes dark this long after the last wake-up (boot, the
-   button, a notice) and the next one lights it again. */
+   button, a notice, a console opened with disp_wake_conn) and the next one
+   lights it again. */
 static volatile int64_t s_wake_us;
 static volatile bool s_dark;
 
@@ -427,6 +428,17 @@ void kvm_display_next_page(void)
         kvm_setting_set_int("disp_enable", 1);
     } else if (!s_dark) {
         s_page_presses++; /* a dark screen only wakes, on the page it had */
+    }
+    wake();
+    if (s_task) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
+void kvm_display_console_joined(void)
+{
+    if (!kvm_setting_bool("disp_wake_conn")) {
+        return;
     }
     wake();
     if (s_task) {

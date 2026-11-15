@@ -4,6 +4,18 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.85.0] - 2026-11-15
+
+### Added
+- A VNC server, written by Jan Heil (Gamer08YT): Settings, Video, VNC server, off by default. TigerVNC connects with VeNCrypt (TLS with the device's certificate), and plain VNC is there for clients without it. The client needs Tight encoding, which Remmina has too. The picture goes out as Tight JPEG at the quality the client asks for, and the next frame is encoded while the last one is sent: 6 to 11 fps over TLS on a JetKVM Mini at 1080p, depending on what is on the screen. One client at a time, and a new one that signs in takes over. `POST /api/v1/vnc/session` gives a one-use password for 60 s. Without a VNC client nothing changes.
+- A connected VNC client is in the list of viewers, with its address, whether the link is encrypted and for how long.
+- A knock on the board's own speaker when someone opens the console: Settings, Audio, Speaker. Off by default, at most once in 30 s, with its own volume. For the boards with an ES8311 codec: the Waveshare P4 boards (P4-ETH, P4-PoE, NANO, WIFI6, Module DEV-KIT), the Function EV, Guition and VIEWE. The setting shows only where the codec answers.
+- A sleeping status display lights up when someone opens the console. On by default, under Display.
+- Console notices show when they happened, with the date if it was not today. The same error again adds a count to the one already shown.
+
+### Fixed
+- A firmware upload with people watching could run the chip's internal RAM down to nothing on the JetKVM Mini, and the console said the device was low on memory. Every received network frame waited in internal RAM until it was read. Now such frames go to PSRAM, and the Mini has 100 KB of internal RAM free instead of 58 KB.
+
 ## [0.84.1] - 2026-11-15
 
 ### Added

@@ -34,6 +34,7 @@
 #include "kvm_storage.h"
 #include "mmc.h"
 #include "xinput.h"
+#include "kvm_timing.h"
 
 static const char *TAG = "usb_hid";
 
@@ -1225,7 +1226,9 @@ static void hid_emit(int fn, uint8_t id, const void *data, uint16_t len)
     (void)ulTaskNotifyTake(pdTRUE, 0); /* drop any stale completion from a prior timeout */
     for (int attempt = 0; attempt < 2; attempt++) {
         if (tud_hid_n_report((uint8_t)inst, id, data, len)) {
-            (void)wait_report_sent();
+            if (wait_report_sent()) {
+                kvm_timing_input((uint8_t)fn, id, len ? *(const uint8_t *)data : 0, esp_timer_get_time());
+            }
             return;
         }
         /* Endpoint busy: wait for the in-flight report to drain, then retry. */

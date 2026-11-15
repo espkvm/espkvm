@@ -89,6 +89,7 @@
 #include "kvm_acme.h"
 #include "kvm_tools.h"
 #include "kvm_proto.h"
+#include "kvm_timing.h"
 #include "usb_hid.h"
 #include "video_frame.h"
 
@@ -860,6 +861,42 @@ esp_err_t api_system_usbprobe_get(httpd_req_t *req)
  * from next time. Without it, the whole of the live copy (64 KB) as a file, or
  * the RTC ring if the copy never started.
  */
+/*
+ * The input-to-picture timing log (kvm_timing.h) for a measuring tool:
+ * ?do=start empties and starts it, ?do=read reads it, ?do=stop stops it and
+ * frees its memory. Stop comes before the answer, so a stop with no memory to
+ * answer still frees the log.
+ */
+esp_err_t api_video_timing_get(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    char q[32] = {0};
+    char v[8] = {0};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
+        httpd_query_key_value(q, "do", v, sizeof(v)) != ESP_OK) {
+        return send_json_error(req, "400 Bad Request", "do=start, read or stop");
+    }
+    if (strcmp(v, "start") == 0) {
+        if (kvm_timing_start() != ESP_OK) {
+            return send_json_error(req, "503 Service Unavailable", "no memory for the log");
+        }
+    } else if (strcmp(v, "stop") == 0) {
+        kvm_timing_stop();
+    } else if (strcmp(v, "read") != 0) {
+        return send_json_error(req, "400 Bad Request", "do=start, read or stop");
+    }
+    char *json = kvm_timing_json();
+    if (!json) {
+        return send_json_error(req, "503 Service Unavailable", "no memory for the answer");
+    }
+    httpd_resp_set_type(req, "application/json");
+    const esp_err_t r = httpd_resp_sendstr(req, json);
+    free(json);
+    return r;
+}
+
 esp_err_t api_system_log_get(httpd_req_t *req)
 {
     if (!kvm_auth_check(req)) {

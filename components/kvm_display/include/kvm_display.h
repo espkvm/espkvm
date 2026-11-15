@@ -30,6 +30,12 @@ extern "C" {
 void kvm_display_init(void);
 
 /**
+ * A console was opened. With disp_wake_conn on, a sleeping screen lights up,
+ * so someone standing at the device sees that somebody connected.
+ */
+void kvm_display_console_joined(void);
+
+/**
  * Take the panel over with a notice until it is cleared or it expires.
  *
  * A notice outranks the status rotation: it is for something happening right

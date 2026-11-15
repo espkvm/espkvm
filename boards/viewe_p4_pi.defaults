@@ -97,3 +97,9 @@ CONFIG_KVM_TC358743_RST_GPIO=-1
 # Which board this is: names it in the console and picks the expansion header
 # the Pins tab draws.
 CONFIG_KVM_BOARD_VIEWE_P4_PI=y
+
+# --- speaker -----------------------------------------------------------------
+# VIEWE swaps the codec data lines: P4 to codec DSDIN is GPIO48, and the
+# amplifier enable is GPIO11 (carrier schematic and VIEWE 08-audio_es8311).
+CONFIG_KVM_SPK_DOUT_GPIO=48
+CONFIG_KVM_SPK_PA_GPIO=11

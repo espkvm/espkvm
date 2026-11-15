@@ -98,6 +98,13 @@ const kvm_setting_t *kvm_setting_find(const char *key);
 /* Reads give the value in effect: the active profile's own one when it has it,
  * else the stored (Default) one. */
 int32_t kvm_setting_int(const char *key);
+
+/**
+ * The key of the pin setting in use that holds @p gpio (ATX, serial, HDMI
+ * audio...), or NULL when none does. For a fixed function, such as the board's
+ * speaker, that must stay off a pin the operator gave to something else.
+ */
+const char *kvm_settings_pin_user(int gpio);
 bool kvm_setting_bool(const char *key);
 /** @return the stored string, never NULL; valid until the next set on that key. */
 const char *kvm_setting_str(const char *key);

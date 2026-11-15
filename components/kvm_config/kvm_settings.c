@@ -780,6 +780,20 @@ static bool pin_setting_applies(const cJSON *root, const kvm_setting_t *d)
     return true;
 }
 
+const char *kvm_settings_pin_user(int gpio)
+{
+    const char *key = NULL;
+    lock();
+    for (size_t i = 0; i < s_count && !key; i++) {
+        const kvm_setting_t *d = &s_table[i];
+        if ((d->flags & KVM_SF_PIN) && pin_setting_applies(NULL, d) && resulting_int(NULL, i) == gpio) {
+            key = d->key;
+        }
+    }
+    unlock();
+    return key;
+}
+
 /**
  * Refuse a write that would put two things on one pin.
  *

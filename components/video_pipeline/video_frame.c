@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "kvm_timing.h"
 
 #define TAG "video"
 
@@ -213,7 +214,10 @@ void video_frame_publish(int slot, size_t len, bool keyframe)
     s.src_us[slot] = s_next_src_us;
     s.front = slot;
     s.seq++;
+    const uint32_t seq = s.seq;
+    const int64_t at_us = s.at_us[slot], src_us = s.src_us[slot];
     xSemaphoreGive(s.mutex);
+    kvm_timing_frame(seq, src_us, at_us);
 
     if (!s.ready) {
         return;

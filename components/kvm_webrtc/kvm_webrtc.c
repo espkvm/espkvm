@@ -42,6 +42,7 @@
 #include "srtp.h"
 #include "stun.h"
 #include "video_frame.h"
+#include "kvm_timing.h"
 #include "wr_cert.h"
 
 static const char *TAG = "webrtc";
@@ -795,7 +796,7 @@ static void tx_task(void *arg)
         /* 90 kHz from when the picture landed, so the browser paces it right. */
         const uint32_t ts = (uint32_t)((f.src_us ? f.src_us : f.at_us) * 9 / 100);
 
-        bool repair = false;
+        bool repair = false, sent = false;
         const int64_t now = esp_timer_get_time();
         lock();
         for (int i = 0; i < MAX_SESSIONS; i++) {
@@ -824,8 +825,12 @@ static void tx_task(void *arg)
             }
             s->need_key = false;
             s->frames++;
+            sent = true;
         }
         unlock();
+        if (sent) {
+            kvm_timing_sent(f.seq, esp_timer_get_time());
+        }
         video_frame_release(&f);
         if (repair) {
             video_frame_request_repair_keyframe();
