@@ -254,29 +254,29 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "vnc_enable", .section = "video", .group = "VNC server", .type = KVM_VT_BOOL,
         .title = "VNC server",
-        .help = "Accept VNC viewers on the TCP port below. Off by default. The classic VNC "
-                "password exchange and picture stream are not encrypted, so use this only on "
-                "a trusted network or through a VPN. Set a password before enabling it.",
+        .help = "For VNC clients such as TigerVNC and Remmina. Set a password first. With "
+                "VeNCrypt the link is encrypted (TigerVNC uses it by itself). Plain VNC is not, "
+                "so use that on your own network or over Tailscale. One client at a time: a new "
+                "one that signs in takes over.",
         .def = 0, .requires_cap = -1,
     },
     {
         .key = "vnc_port", .section = "video", .group = "VNC server", .type = KVM_VT_INT,
         .title = "TCP port",
-        .help = "VNC clients use this port directly. 5900 is the standard display 0 port.",
+        .help = "5900 is what VNC clients try when no port is given.",
         .min = 1, .max = 65535, .def = 5900, .requires_cap = -1,
     },
     {
         .key = "vnc_pass", .section = "video", .group = "VNC server", .type = KVM_VT_STR,
         .title = "VNC password",
-        .help = "VNC's standard authentication uses only the first 8 printable ASCII "
-                "characters. Use all 8; shorter passwords are accepted but weaker. Stored "
-                "write-only. Changing it disconnects the current viewer.",
+        .help = "Up to 8 characters, a limit of VNC itself, so use all 8. It is never shown "
+                "again. Changing it disconnects the client.",
         .def_str = "", .max_len = 8, .requires_cap = -1, .flags = KVM_SF_SECRET,
     },
     {
         .key = "vnc_hotspot", .section = "video", .group = "VNC server", .type = KVM_VT_BOOL,
-        .title = "Allow VNC on hotspot",
-        .help = "Allow VNC clients to connect through the device's own WiFi hotspot. Off by default.",
+        .title = "VNC over the hotspot",
+        .help = "Take VNC clients that connect through the device's own Wi-Fi hotspot.",
         .def = 0, .requires_cap = -1,
     },
     {

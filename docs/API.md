@@ -105,7 +105,7 @@ be given a URL.
 
 A VNC server for clients such as TigerVNC and Remmina, off by default: Settings, Video, VNC server. It needs a password of 1 to 8 printable ASCII characters first, a limit of VNC's own sign-in. The client must support Tight encoding, because the picture goes out as JPEG. RealVNC Viewer and the macOS screen sharing app do not.
 
-The server offers VeNCrypt (TLS with the device's certificate, then the VNC password) and plain VNC authentication. Plain VNC sends the picture and the keys unencrypted, so use it on your own network or over Tailscale. It does not listen on the device's hotspot unless `vnc_hotspot` is on.
+The server offers VeNCrypt (TLS with the device's certificate, then the VNC password) and plain VNC authentication. Plain VNC sends the picture and the keys unencrypted, so use it on your own network or over Tailscale. It does not take clients that come over the device's hotspot unless `vnc_hotspot` is on.
 
 One client at a time. A new client that signs in takes over from the one before it. The JPEG quality follows the client's quality setting. While a client is connected it is listed in `GET /api/v1/viewers` with `kind: "vnc"`.
 
