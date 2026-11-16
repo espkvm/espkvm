@@ -4,6 +4,17 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.86.0] - 2026-11-16
+
+### Added
+
+- VNC in H.264: a client that knows Open H.264, such as TigerVNC with H.264 built in, gets the same H.264 stream as the browser instead of JPEG. On a JetKVM Mini at 1080p that is 26 fps, as many as the encoder makes, with far less traffic than JPEG. Other clients still get Tight JPEG.
+
+### Fixed
+
+- VNC frames waited for the viewer's delayed ACK. Tight JPEG over plain VNC on a JetKVM Mini went from 13 to 20 fps.
+- A console tab that was signed out, for example after a restart, kept trying to open its keyboard connection every 30 seconds. It now waits for the sign-in.
+
 ## [0.85.0] - 2026-11-15
 
 ### Added

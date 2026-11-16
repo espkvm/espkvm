@@ -73,7 +73,7 @@ Useful for what it does today, and honest about the rest.
 | Keyboard, mouse, media keys, pasting text in a layout | works |
 | From a phone or a tablet | works; touch trackpad, pointer stick, pinch zoom and on-screen keyboard |
 | Several viewers, one in control | works; plus a view-only sign-in for others |
-| VNC: TigerVNC and other clients with Tight encoding, over TLS | new, off by default |
+| VNC: TigerVNC and other clients with Open H.264 or Tight encoding, over TLS | new, off by default |
 | Virtual media: boot the target from an image | works; from microSD or the device's flash |
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
@@ -278,7 +278,7 @@ components/
   kvm_notify/     notifications: Telegram, ntfy, webhook, Web Push
   kvm_web/        HTTP/HTTPS server, REST API, WebSockets, TLS identity
   kvm_webrtc/     H.264 to the browser over WebRTC (ICE-lite, DTLS-SRTP)
-  kvm_vnc/        the VNC server: RFB 3.8, VeNCrypt, Tight JPEG
+  kvm_vnc/        the VNC server: RFB 3.8, VeNCrypt, Open H.264, Tight JPEG
   kvm_net/        Ethernet, WiFi (station/AP + rescue hotspot, captive portal),
                   IPv6, mDNS, Wake-on-LAN, and the VPN clients (WireGuard,
                   or Tailscale through third_party/microlink)

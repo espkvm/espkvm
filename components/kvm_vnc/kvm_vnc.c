@@ -2,8 +2,9 @@
  * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
- * A small RFB 3.8 server. Tight/JPEG carries the capture pipeline's JPEG as-is,
- * so a VNC viewer does not make the P4 allocate a second full-screen buffer.
+ * A small RFB 3.8 server. A viewer that knows Open H.264 gets the browser's
+ * H.264 stream as it is. Others get Tight/JPEG: the capture pipeline's JPEG
+ * as-is, or a snapshot when the pipeline makes H.264.
  */
 #include "kvm_vnc.h"
 
@@ -675,6 +676,140 @@ static bool send_empty_update(vnc_conn_t *conn, uint32_t generation)
     return send_all(conn, empty, sizeof(empty), generation);
 }
 
+/* Tell the client the screen changed size. Without DesktopSize it cannot be
+ * told, so it gets an empty update and keeps its old size. */
+static bool send_resize(vnc_conn_t *conn, uint32_t generation, bool desktop_size,
+                        uint16_t w, uint16_t h, uint16_t *width, uint16_t *height)
+{
+    if (!desktop_size) return send_empty_update(conn, generation);
+    const uint8_t update[] = {0, 0, 0, 1};
+    uint8_t rect[12] = {0};
+    put_be16(rect + 4, w);
+    put_be16(rect + 6, h);
+    put_be32(rect + 8, (uint32_t)-223); /* DesktopSize pseudo-encoding */
+    if (!send_all(conn, update, sizeof(update), generation) ||
+        !send_all(conn, rect, sizeof(rect), generation)) {
+        return false;
+    }
+    *width = w;
+    *height = h;
+    return true;
+}
+
+/*
+ * Open H.264 (encoding 50, from PiKVM): the browser's own H.264 stream goes to
+ * the viewer as it is, so a VNC client costs no second encoder and gets the
+ * browser's frame rate. A rectangle is a 32-bit length, 32-bit flags and an
+ * Annex-B access unit. Flag 1 tells the viewer to start a new decoder.
+ */
+#define VNC_ENC_H264 50
+#define VNC_H264_RESET_CONTEXT 1u
+#define VNC_KEYFRAME_WAIT_MS 1800
+
+typedef struct {
+    bool started;
+    bool need_key; /* a delta now would decode against nothing */
+    bool reset;    /* the next rectangle starts a new decoder */
+    uint32_t last_seq;
+    uint8_t *buf; /* a copy, so a slow link does not hold a frame slot */
+    size_t cap;
+} vnc_h264_t;
+
+static void h264_restart(vnc_h264_t *s)
+{
+    s->started = true;
+    s->need_key = true;
+    s->reset = true;
+    video_frame_request_keyframe();
+}
+
+/* A non-incremental request needs no IDR: the viewer's decoder already holds
+ * the whole screen, and the next delta updates all of it. Restarting on every
+ * one would let a client fill the browser's stream with keyframes. */
+static bool rfb_send_h264(vnc_conn_t *conn, uint32_t generation, uint16_t *width, uint16_t *height,
+                          bool desktop_size, vnc_h264_t *s)
+{
+    if (!s->started) h264_restart(s);
+
+    kvm_video_status_t status;
+    capture_status_get(&status);
+    const uint16_t w = (uint16_t)status.hres;
+    const uint16_t h = (uint16_t)status.vres;
+    if (w && h && (w != *width || h != *height)) {
+        /* The encoder reopens at the new size and starts with an IDR. A client
+         * without DesktopSize stays at its old size and gets empty updates,
+         * so it must not ask for a keyframe on every request. */
+        if (desktop_size) h264_restart(s);
+        return send_resize(conn, generation, desktop_size, w, h, width, height);
+    }
+
+    /* Waiting for a keyframe skips the deltas before it, within a bound:
+     * meanwhile nothing reads the client's keys. */
+    const int64_t deadline = esp_timer_get_time() +
+                             (int64_t)(s->need_key ? VNC_KEYFRAME_WAIT_MS : VNC_READ_TIMEOUT_MS) * 1000;
+    video_frame_ref_t ref;
+    for (;;) {
+        const int64_t left_ms = (deadline - esp_timer_get_time()) / 1000;
+        if (left_ms <= 0 || !video_frame_wait_new(s->last_seq, (uint32_t)left_ms)) {
+            return send_empty_update(conn, generation);
+        }
+        if (!video_frame_acquire(&ref)) {
+            /* The front slot is set aside (a codec reinit). last_seq stays the
+             * last frame sent, so the gap check below still sees the skip. */
+            vTaskDelay(1);
+            continue;
+        }
+        if (ref.payload != VIDEO_PAYLOAD_H264) {
+            video_frame_release(&ref);
+            return send_empty_update(conn, generation);
+        }
+        if (ref.seq == s->last_seq) { /* already sent */
+            video_frame_release(&ref);
+            vTaskDelay(1);
+            continue;
+        }
+        if (s->need_key && !ref.keyframe) {
+            s->last_seq = ref.seq;
+            video_frame_release(&ref);
+            continue;
+        }
+        break;
+    }
+    /* A skipped delta breaks the chain: keep sending, the picture smudges
+     * until the repair IDR, as in the browser. */
+    if (!s->need_key && !ref.keyframe && (uint32_t)(ref.seq - s->last_seq) > 1u) {
+        video_frame_request_repair_keyframe();
+    }
+    if (s->cap < ref.len) {
+        uint8_t *grown = heap_caps_realloc(s->buf, ref.len, MALLOC_CAP_SPIRAM);
+        if (!grown) {
+            video_frame_release(&ref);
+            return send_empty_update(conn, generation);
+        }
+        s->buf = grown;
+        s->cap = ref.len;
+    }
+    memcpy(s->buf, ref.data, ref.len);
+    const size_t len = ref.len;
+    const uint32_t seq = ref.seq;
+    const bool key = ref.keyframe;
+    video_frame_release(&ref);
+
+    uint8_t head[4 + 12 + 8] = {0, 0, 0, 1};
+    put_be16(head + 4 + 4, w ? w : *width);
+    put_be16(head + 4 + 6, h ? h : *height);
+    put_be32(head + 4 + 8, VNC_ENC_H264);
+    put_be32(head + 16, (uint32_t)len);
+    put_be32(head + 20, s->reset ? VNC_H264_RESET_CONTEXT : 0);
+    if (!send_all(conn, head, sizeof(head), generation) || !send_all(conn, s->buf, len, generation)) {
+        return false;
+    }
+    s->last_seq = seq;
+    if (key) s->need_key = false;
+    s->reset = false;
+    return true;
+}
+
 static bool rfb_send_update(vnc_conn_t *conn, uint32_t generation, uint16_t *width, uint16_t *height,
                             bool desktop_size, bool incremental, bool *has_frame,
                             uint32_t *last_seq, bool *stream_open)
@@ -734,22 +869,7 @@ static bool rfb_send_update(vnc_conn_t *conn, uint32_t generation, uint16_t *wid
     const uint16_t h = (uint16_t)status.vres;
     const bool resized = w && h && (w != *width || h != *height);
     if (resized) {
-        bool ok = false;
-        if (desktop_size) {
-            const uint8_t update[] = {0, 0, 0, 1};
-            uint8_t rect[12] = {0};
-            put_be16(rect + 4, w);
-            put_be16(rect + 6, h);
-            put_be32(rect + 8, (uint32_t)-223); /* DesktopSize pseudo-encoding */
-            ok = send_all(conn, update, sizeof(update), generation) &&
-                 send_all(conn, rect, sizeof(rect), generation);
-            if (ok) {
-                *width = w;
-                *height = h;
-            }
-        } else {
-            ok = send_empty_update(conn, generation);
-        }
+        const bool ok = send_resize(conn, generation, desktop_size, w, h, width, height);
         if (held) video_frame_release(&ref);
         if (ok) {
             *last_seq = seq;
@@ -860,6 +980,7 @@ typedef struct {
     uint16_t x;
     uint16_t y;
     bool tight;
+    bool h264;
     bool desktop_size;
 } client_state_t;
 
@@ -1002,6 +1123,8 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
     bool has_frame = false;
     bool stream_open = false;
     uint32_t last_seq = video_frame_seq();
+    vnc_h264_t h264 = {0};
+    bool h264_only_warned = false;
     bool alive = true;
     while (alive && generation == s_generation) {
         const int ready = wait_message(&conn);
@@ -1030,6 +1153,7 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
             memset(&state, 0, sizeof(state));
             has_frame = false;
             last_seq = video_frame_seq();
+            h264.started = false; /* the newcomer's decoder starts on an IDR */
             viewer_set(ip, conn.tls != NULL);
             continue;
         }
@@ -1061,6 +1185,7 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
                 break;
             }
             state.tight = false;
+            state.h264 = false;
             state.desktop_size = false;
             /* The client picks the JPEG quality: a level 0-9 (-32..-23, the
              * TurboVNC table below) or an exact 0-100 (-512..-412). TigerVNC's
@@ -1072,16 +1197,17 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
                 if (!recv_exact(&conn, enc, sizeof(enc), generation)) { alive = false; break; }
                 const int32_t value = (int32_t)be32(enc);
                 if (value == 7) state.tight = true;
+                if (value == VNC_ENC_H264) state.h264 = true;
                 if (value == -223) state.desktop_size = true;
                 if (value >= -32 && value <= -23) quality = level_quality[value + 32];
                 if (value >= -512 && value <= -412) fine = value + 512;
             }
             capture_vnc_snapshot_quality(fine >= 0 ? fine : quality);
-            ESP_LOGD(TAG, "client SetEncodings: %u entries, Tight=%s, DesktopSize=%s, quality %d",
-                     (unsigned)count, state.tight ? "yes" : "no",
+            ESP_LOGD(TAG, "client SetEncodings: %u entries, Tight=%s, H.264=%s, DesktopSize=%s, quality %d",
+                     (unsigned)count, state.tight ? "yes" : "no", state.h264 ? "yes" : "no",
                      state.desktop_size ? "yes" : "no", fine >= 0 ? fine : quality);
-            if (!state.tight) {
-                ESP_LOGW(TAG, "client did not negotiate Tight encoding; cannot send JPEG frames");
+            if (!state.tight && !state.h264) {
+                ESP_LOGW(TAG, "client offers neither Tight nor H.264; cannot send frames");
                 alive = false;
             }
             break;
@@ -1089,12 +1215,25 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
         case 3: { /* FramebufferUpdateRequest */
             uint8_t request[9];
             if (!recv_exact(&conn, request, sizeof(request), generation)) { alive = false; break; }
-            if (state.tight) {
+            if (state.h264 && video_frame_payload() == VIDEO_PAYLOAD_H264) {
+                if (stream_open) {
+                    capture_vnc_snapshot_end();
+                    stream_open = false;
+                }
+                alive = rfb_send_h264(&conn, generation, &width, &height, state.desktop_size, &h264);
+            } else if (state.tight) {
+                h264.started = false;
                 alive = rfb_send_update(&conn, generation, &width, &height, state.desktop_size,
                                         request[0] != 0, &has_frame, &last_seq, &stream_open);
             } else {
-                const uint8_t empty[] = {0, 0, 0, 0};
-                alive = send_all(&conn, empty, sizeof(empty), generation);
+                /* H.264 only, and the device makes JPEG: nothing to send. */
+                if (!h264_only_warned) {
+                    ESP_LOGW(TAG, "client takes only H.264 and the video is MJPEG; switch the codec to H.264");
+                    h264_only_warned = true;
+                }
+                /* Paced, or the client asks again at once, round after round. */
+                (void)video_frame_wait_new(video_frame_seq(), 100);
+                alive = send_empty_update(&conn, generation);
             }
             break;
         }
@@ -1127,6 +1266,7 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
     if (stream_open) {
         capture_vnc_snapshot_end();
     }
+    free(h264.buf);
     video_frame_viewer_leave();
     conn_close(&conn);
     return alive;
@@ -1158,6 +1298,11 @@ static void set_client_timeouts(int fd)
                                .tv_usec = (VNC_SEND_TIMEOUT_MS % 1000) * 1000};
     (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rx, sizeof(rx));
     (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tx, sizeof(tx));
+    /* A frame's last part-segment would otherwise wait for the ACK of the
+     * one before it, and the viewer delays that ACK: tens of ms a frame, so
+     * the next frame went by and the H.264 chain broke on every IDR. */
+    const int one = 1;
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 }
 
 static void vnc_task(void *arg)
