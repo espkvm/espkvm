@@ -32,6 +32,7 @@
 #include "sched_cron.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -180,6 +181,13 @@ static bool dispatch(const char *name, const char *action, const char *arg, cons
         ok = kvm_atx_reset() == ESP_OK;
     } else if (strcmp(action, "poweroff") == 0) {
         ok = kvm_atx_power_hold() == ESP_OK;
+    } else if (strcmp(action, "machine") == 0) {
+        /* The KVM switch: arg is the machine from 1, or empty for the next. */
+        const esp_err_t err = arg && arg[0] ? kvm_kvmsw_select(atoi(arg) - 1) : kvm_kvmsw_next();
+        if (err != ESP_OK) {
+            snprintf(why, why_len, err == ESP_ERR_INVALID_STATE ? "no KVM switch" : "no such machine");
+            ok = false;
+        }
     } else if (strcmp(action, "runbook") == 0) {
         const esp_err_t err = runbook_start(arg ? arg : "", source, NULL, 0);
         if (err != ESP_OK) {

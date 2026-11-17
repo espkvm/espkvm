@@ -29,9 +29,10 @@
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_default_config.h"
 
+#include "esp_heap_caps.h"
 #include "kvm_caps.h"
 #include "kvm_settings.h"
-#include "kvm_storage.h"
+#include "kvm_media.h"
 #include "mmc.h"
 #include "xinput.h"
 #include "kvm_timing.h"
@@ -777,6 +778,8 @@ size_t usb_hid_probe_trace(char *out, size_t len)
  */
 static volatile bool s_replugging;
 
+static void msc_forget_request(void); /* MSC callbacks, below */
+
 static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
 {
     (void)arg;
@@ -788,6 +791,7 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
         ESP_LOGI(TAG, "target attached");
         break;
     case TINYUSB_EVENT_DETACHED:
+        msc_forget_request();
         s_leds = 0;
         s_probe_n = 0; /* next host's enumeration starts a fresh trace */
         ESP_LOGI(TAG, "target detached");
@@ -1003,8 +1007,8 @@ size_t usb_hid_serial_write(const void *data, size_t len)
 
 /* ---- MSC (virtual media) callbacks -------------------------------------- */
 /*
- * The target sees one removable LUN. Its medium is whatever kvm_storage has open;
- * with none open the drive answers "no medium" like an empty card reader, which
+ * The target sees one removable LUN. Its medium is whatever kvm_media has
+ * inserted; with none the drive answers "no medium" like an empty card reader, which
  * every host understands. The disk lives on the microSD (or on-flash rescue) and
  * is read on the target's behalf, so the firmware never yields the card - uploads
  * and target reads run at the same time. It is read-only except for the whole-card
@@ -1064,8 +1068,9 @@ static bool s_msc_seen_valid;
 bool tud_msc_test_unit_ready_cb(uint8_t lun)
 {
     (void)lun;
+    msc_forget_request(); /* a read still out was given up on */
     kvm_media_t m;
-    kvm_storage_media_info(&m);
+    kvm_media_info(&m);
     const bool changed = s_msc_seen_valid &&
                          (m.present != s_msc_seen.present || m.cdrom != s_msc_seen.cdrom ||
                           m.block_size != s_msc_seen.block_size ||
@@ -1092,7 +1097,7 @@ void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_siz
 {
     (void)lun;
     kvm_media_t m;
-    kvm_storage_media_info(&m);
+    kvm_media_info(&m);
     *block_count = (uint32_t)m.block_count;
     *block_size = (uint16_t)m.block_size;
 }
@@ -1105,7 +1110,8 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
     /* The host's software-eject (e.g. dragging the disk to the trash) removes
      * the medium; the operator re-inserts it from the console. */
     if (load_eject && !start) {
-        kvm_storage_media_eject();
+        ESP_LOGI(TAG, "the target ejected the drive");
+        kvm_media_eject();
     }
     return true;
 }
@@ -1114,30 +1120,160 @@ bool tud_msc_is_writable_cb(uint8_t lun)
 {
     (void)lun;
     /* Only the whole-card passthrough is writable; everything else is read-only. */
-    return kvm_storage_media_writable();
+    kvm_media_t m;
+    kvm_media_info(&m);
+    return m.writable;
+}
+
+/*
+ * Reads and writes go to the media task, and TinyUSB waits for the answer
+ * without holding its own task: keys and the mouse keep moving while a card or
+ * a network is slow.
+ *
+ * The host may give up on a command before it is answered: after 30 s Linux
+ * and Windows reset the drive, and then send the next command. The old answer
+ * must not complete the new one. So each request has a number, the newest is
+ * the only one TinyUSB waits for, and a bus reset or any other command ends
+ * it. An answer for another number is dropped. Requests also carry their own
+ * buffer: TinyUSB reuses its endpoint buffer for the next command as soon as
+ * it gave up on this one. Two of them, as the media queue holds two requests.
+ */
+static portMUX_TYPE s_msc_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_msc_seq;
+static uint32_t s_msc_want;     /* the request TinyUSB waits for, 0: none */
+static uint8_t *s_msc_ep;       /* its endpoint buffer */
+static uint8_t *s_msc_buf[2];   /* PSRAM, CFG_TUD_MSC_EP_BUFSIZE each */
+
+/* The sense of the last failed read or write. TinyUSB sets "no medium" on any
+ * error from an asynchronous read or write, which would tell the host the disc
+ * went away when one read failed. REQUEST SENSE answers with this instead. */
+static bool s_msc_own_sense;
+static uint8_t s_msc_sense[3];
+
+static void msc_forget_request(void)
+{
+    taskENTER_CRITICAL(&s_msc_mux);
+    s_msc_want = 0;
+    taskEXIT_CRITICAL(&s_msc_mux);
+}
+
+static void msc_fail(uint8_t lun, uint8_t key, uint8_t asc, uint8_t ascq)
+{
+    tud_msc_set_sense(lun, key, asc, ascq);
+    s_msc_sense[0] = key;
+    s_msc_sense[1] = asc;
+    s_msc_sense[2] = ascq;
+    s_msc_own_sense = true;
+}
+
+int32_t tud_msc_request_sense_cb(uint8_t lun, void *buffer, uint16_t bufsize)
+{
+    (void)lun;
+    if (s_msc_own_sense && bufsize >= 14) {
+        uint8_t *b = buffer; /* fixed format: key at 2, ASC at 12, ASCQ at 13 */
+        b[2] = (uint8_t)((b[2] & 0xF0) | (s_msc_sense[0] & 0x0F));
+        b[12] = s_msc_sense[1];
+        b[13] = s_msc_sense[2];
+    }
+    s_msc_own_sense = false;
+    return 18; /* sizeof(scsi_sense_fixed_resp_t) */
+}
+
+static void msc_done(int32_t result, void *arg, bool write)
+{
+    const uint32_t id = (uint32_t)(uintptr_t)arg;
+    taskENTER_CRITICAL(&s_msc_mux);
+    const bool current = id && id == s_msc_want;
+    if (current) {
+        s_msc_want = 0;
+    }
+    uint8_t *ep = s_msc_ep;
+    taskEXIT_CRITICAL(&s_msc_mux);
+    if (!current) {
+        return; /* the host gave up on it, and has moved on */
+    }
+    if (result == KVM_MEDIA_ERR_NO_MEDIUM) {
+        msc_fail(0, SCSI_SENSE_NOT_READY, 0x3A, 0x00);
+    } else if (result < 0) {
+        /* Unrecovered read error, or a write fault. */
+        msc_fail(0, SCSI_SENSE_MEDIUM_ERROR, write ? 0x03 : 0x11, 0x00);
+    } else if (!write) {
+        memcpy(ep, s_msc_buf[id & 1], (size_t)result);
+    }
+    tud_msc_async_io_done(result < 0 ? TUD_MSC_RET_ERROR : result, false);
+}
+
+static void msc_read_done(int32_t result, void *arg)
+{
+    msc_done(result, arg, false);
+}
+
+static void msc_write_done(int32_t result, void *arg)
+{
+    msc_done(result, arg, true);
+}
+
+/* A new request: its number and buffer, or 0 with no memory. */
+static uint32_t msc_begin(uint8_t *ep, uint32_t len)
+{
+    s_msc_own_sense = false;
+    for (int i = 0; i < 2; i++) {
+        if (!s_msc_buf[i]) {
+            s_msc_buf[i] = heap_caps_malloc(CFG_TUD_MSC_EP_BUFSIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (!s_msc_buf[i]) {
+            return 0;
+        }
+    }
+    if (len > CFG_TUD_MSC_EP_BUFSIZE) {
+        return 0;
+    }
+    taskENTER_CRITICAL(&s_msc_mux);
+    uint32_t id = ++s_msc_seq;
+    if (!id) {
+        id = s_msc_seq = 1;
+    }
+    s_msc_want = id;
+    s_msc_ep = ep;
+    taskEXIT_CRITICAL(&s_msc_mux);
+    return id;
 }
 
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
-    (void)lun;
     const uint64_t addr = (uint64_t)lba * msc_block_size() + offset;
-    return kvm_storage_media_read(addr, buffer, bufsize);
+    const uint32_t id = msc_begin(buffer, bufsize);
+    if (!id || kvm_media_read_async(addr, s_msc_buf[id & 1], bufsize, msc_read_done,
+                                    (void *)(uintptr_t)id) != ESP_OK) {
+        msc_forget_request();
+        msc_fail(lun, SCSI_SENSE_NOT_READY, 0x04, 0x01); /* becoming ready: try again */
+        return TUD_MSC_RET_ERROR;
+    }
+    return TUD_MSC_RET_ASYNC;
 }
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer,
                            uint32_t bufsize)
 {
-    if (!kvm_storage_media_writable()) {
+    kvm_media_t m;
+    kvm_media_info(&m);
+    if (!m.writable) {
         /* Reject with a write-protect sense; is_writable_cb already told the host. */
-        tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00);
-        return -1;
+        msc_fail(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00);
+        return TUD_MSC_RET_ERROR;
     }
     const uint64_t addr = (uint64_t)lba * msc_block_size() + offset;
-    const int32_t n = kvm_storage_media_write(addr, buffer, bufsize);
-    if (n < 0) {
-        tud_msc_set_sense(lun, SCSI_SENSE_MEDIUM_ERROR, 0x03, 0x00);
+    const uint32_t id = msc_begin(buffer, bufsize);
+    if (id) {
+        memcpy(s_msc_buf[id & 1], buffer, bufsize);
     }
-    return n;
+    if (!id || kvm_media_write_async(addr, s_msc_buf[id & 1], bufsize, msc_write_done,
+                                     (void *)(uintptr_t)id) != ESP_OK) {
+        msc_forget_request();
+        msc_fail(lun, SCSI_SENSE_NOT_READY, 0x04, 0x01);
+        return TUD_MSC_RET_ERROR;
+    }
+    return TUD_MSC_RET_ASYNC;
 }
 
 /* What the host has been told about media events, for the optical drive. */
@@ -1155,11 +1291,12 @@ static uint32_t media_id(const kvm_media_t *m)
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
 {
+    msc_forget_request(); /* a read still out was given up on */
     if (s_msc_cdrom) {
         /* An optical drive: READ TOC, GET CONFIGURATION, media events and the
          * rest that Windows, macOS and some firmware ask before trusting it. */
         kvm_media_t km;
-        kvm_storage_media_info(&km);
+        kvm_media_info(&km);
         const mmc_media_t m = {.present = km.present, .blocks = km.block_count, .id = media_id(&km)};
         mmc_sense_t sense = {0};
         const int32_t r = mmc_command(scsi_cmd, &m, &s_mmc_events, buffer, bufsize, &sense);

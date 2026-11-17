@@ -756,6 +756,13 @@ static void publish_discovery(void)
         disco_clear("button", "btn_wol");
     }
     disco_button("btn_usb_wake", "Power on over USB", "usbwake", "mdi:usb", NULL);
+    kvm_kvmsw_status_t sw;
+    kvm_kvmsw_status(&sw);
+    if (sw.enabled) {
+        disco_button("btn_machine", "KVM switch: next machine", "machine", "mdi:swap-horizontal", NULL);
+    } else {
+        disco_clear("button", "btn_machine");
+    }
     disco_button("btn_restart", "Restart ESP-KVM", "restart", "mdi:restart", "diagnostic");
     publish_area_discovery();
 
@@ -1002,6 +1009,8 @@ static void handle_command(esp_mqtt_event_handle_t e)
         kvm_wol_send(kvm_setting_str("pwr_wol_mac"));
     } else if (strcmp(action, "usbwake") == 0) {
         (void)usb_hid_power_on();
+    } else if (strcmp(action, "machine") == 0) {
+        (void)kvm_kvmsw_next();
     } else if (strcmp(action, "restart") == 0) {
         pub(s_avail_topic, "offline", 1);
         vTaskDelay(pdMS_TO_TICKS(300)); /* let the offline notice go out first */

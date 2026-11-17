@@ -13,10 +13,11 @@ and use [Discussions](https://github.com/espkvm/espkvm/discussions) for ideas.
 - Runbooks: a macro that waits for words on the screen, run on the device so it survives a closed tab
 - A scheduler: cron lines that fire Wake-on-LAN, a runbook or a power action on a timetable, on a clock the device sets over the network
 - Push notifications to Telegram (with a screenshot) or a webhook when a watched phrase appears or the screen goes blank
-- Virtual media: boot the target from a microSD image or an on-flash rescue image
+- Virtual media: boot the target from a microSD image, an on-flash rescue image, an image on a web server, or a file on the computer the console is open on
 - Target-OS detection, with OS-specific shortcuts
 - Wake-on-LAN
 - ATX power control - power and reset buttons, and power-LED sensing, through optocouplers
+- A KVM switch in front of several machines - one GPIO to its select button, or a TESmart switch over the network; picked from the console, a schedule, a button, MQTT or the API
 - DHCP or static networking, mDNS
 - Home Assistant integration over MQTT - auto-discovered sensors and power/reset/Wake-on-LAN buttons, with optional TLS
 - VPN: classic WireGuard or native Tailscale (pick one, one shared WireGuard stack) - WireGuard is a split-tunnel client with on-device key generation; Tailscale joins a tailnet natively, reachable at its 100.x address (or MagicDNS name) from anywhere with no gateway or port-forward, and the console's TLS certificate is valid over the tailnet

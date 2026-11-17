@@ -42,6 +42,9 @@
 #include "kvm_mqtt.h"
 #include "kvm_record.h"
 #include "kvm_upload.h"
+#include "kvm_url_media.h"
+#include "kvm_browser_media.h"
+#include "kvm_media.h"
 #include "kvm_storage.h"
 #include "kvm_ts.h"
 #include "kvm_tls.h"
@@ -132,10 +135,10 @@ static void on_setting_changed(const char *key, void *user)
         apply_log_level();
     }
     if (strcmp(key, "msc_enable") == 0 || strcmp(key, "msc_image") == 0 ||
-        strcmp(key, "msc_mode") == 0 || strcmp(key, "*") == 0) {
+        strcmp(key, "msc_mode") == 0 || strcmp(key, "msc_url") == 0 || strcmp(key, "*") == 0) {
         apply_media_selection();
     }
-    if (strncmp(key, "atx_", 4) == 0 || strcmp(key, "*") == 0) {
+    if (strncmp(key, "atx_", 4) == 0 || strncmp(key, "kvmsw_", 6) == 0 || strcmp(key, "*") == 0) {
         kvm_atx_apply();
     }
     if (strncmp(key, "ser_", 4) == 0 || strcmp(key, "*") == 0) {
@@ -180,6 +183,7 @@ static void on_setting_changed(const char *key, void *user)
  * msc_mode is the operator's override: 0 = auto, 1 = force CD-ROM, 2 = force disk.
  * Auto picks CD-ROM for a .iso file and a disk for everything else; the reserved
  * "@" media (rescue, whole card) have no extension, so auto leaves them a disk.
+ * For "@url" the file name in the URL decides.
  */
 static bool media_is_cdrom(const char *image)
 {
@@ -191,11 +195,14 @@ static bool media_is_cdrom(const char *image)
     default: /* auto */
         break;
     }
-    if (image[0] == '@') {
+    size_t n = strlen(image);
+    if (strcmp(image, "@url") == 0) {
+        image = kvm_setting_str("msc_url");
+        n = strcspn(image, "?#");
+    } else if (image[0] == '@') {
         return false;
     }
-    const size_t n = strlen(image);
-    return n >= 4 && strcasecmp(image + n - 4, ".iso") == 0;
+    return n >= 4 && strncasecmp(image + n - 4, ".iso", 4) == 0;
 }
 
 /*
@@ -207,8 +214,9 @@ static bool media_is_cdrom(const char *image)
  */
 static void apply_media_selection(void)
 {
-    /* Reserved names: "@rescue" is the on-flash image, "@wholesd" the whole card.
-     * Any other name is a file on the card. */
+    /* Reserved names: "@rescue" is the on-flash image, "@wholesd" the whole card,
+     * "@url" the image at msc_url, "@browser" a file a console tab serves. Any
+     * other name is a file on the card. */
     static char prev_image[64] = "";
     const char *image = kvm_setting_str("msc_image");
     const bool want = kvm_setting_bool("msc_enable") && image && image[0];
@@ -223,35 +231,52 @@ static void apply_media_selection(void)
 
     kvm_storage_status_t sd;
     kvm_storage_status(&sd);
-    kvm_rescue_t rescue;
-    kvm_storage_rescue_status(&rescue);
-    /* Virtual media is available whenever there is something to serve - a card
-     * or the built-in rescue image - so it works on a device with no card. */
-    kvm_cap_report(KVM_CAP_MSC, sd.mounted || rescue.supported,
-                   "no microSD card and no rescue partition");
+    /* Virtual media works on any device: an image at a URL needs no card. */
+    kvm_cap_report(KVM_CAP_MSC, true, NULL);
+
+    /* An image at a URL opens on a task of its own, and may arrive later. */
+    if (want && strcmp(image, "@url") == 0) {
+        const bool cdrom = media_is_cdrom(image);
+        kvm_media_eject();
+        kvm_url_media_select(kvm_setting_str("msc_url"), cdrom);
+        usb_hid_msc_set_type(cdrom);
+        return;
+    }
+    kvm_url_media_select("", false);
+
+    /* A tab puts its file in itself (media_ws.c). Without one serving, after a
+     * restart for one, the drive is empty. */
+    if (want && strcmp(image, "@browser") == 0) {
+        if (!kvm_browser_media_inserted()) {
+            kvm_media_eject();
+            usb_hid_msc_set_type(false);
+        }
+        return;
+    }
 
     esp_err_t err;
-    bool cdrom = false;
+    kvm_media_source_t src;
     if (want && strcmp(image, "@rescue") == 0) {
-        cdrom = media_is_cdrom(image);
-        err = kvm_storage_media_select_rescue(cdrom);
+        err = kvm_storage_source_rescue(media_is_cdrom(image), &src);
     } else if (want && strcmp(image, "@wholesd") == 0 && sd.mounted) {
-        err = kvm_storage_media_select_whole_sd();
+        err = kvm_storage_source_whole_card(&src);
     } else if (want && sd.mounted) {
-        cdrom = media_is_cdrom(image);
-        err = kvm_storage_media_select(image, cdrom);
+        err = kvm_storage_source_image(image, media_is_cdrom(image), &src);
     } else {
-        kvm_storage_media_eject();
+        kvm_media_eject();
         usb_hid_msc_set_type(false);
         return;
+    }
+    if (err == ESP_OK) {
+        err = kvm_media_insert(&src);
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "cannot offer media '%s': %s", image, esp_err_to_name(err));
-        kvm_storage_media_eject();
+        kvm_media_eject();
         usb_hid_msc_set_type(false);
         return;
     }
-    usb_hid_msc_set_type(cdrom);
+    usb_hid_msc_set_type(src.cdrom);
 }
 
 /*
@@ -697,6 +722,8 @@ void app_main(void)
      * and Ethernet mode mounts the card. "auto" counts as WiFi here: the backup
      * link comes before the card. (esp-hosted's own eager constructor init
      * is blocked so it never races for the bus; see wifi.c.) */
+    /* The target's USB drive reads on a task of its own, whatever is behind it. */
+    ESP_ERROR_CHECK(kvm_media_init());
     if (net_mode == KVM_NET_ETHERNET || !kvm_storage_shares_wifi_slot()) {
         ESP_LOGI(TAG, "boot: storage (SDMMC slot %d)", kvm_storage_sd_slot());
         ESP_ERROR_CHECK(kvm_storage_init());

@@ -171,8 +171,9 @@ static const char *const s_btn_action_choices[] = {"nothing", "power", "power of
                                                    "hotspot on/off", "next network mode",
                                                    "Ethernet / WiFi", "next display page",
                                                    "display on/off", "power on over USB",
-                                                   "menu on the screen"};
+                                                   "menu on the screen", "next machine"};
 /* Read by the console only; how long its vibration tick lasts on a phone. */
+static const char *const s_kvmsw_mode_choices[] = {"off", "button", "tesmart"};
 static const char *const s_haptic_choices[] = {"light", "medium", "strong"};
 static const char *const s_touch_kbd_choices[] = {"console", "phone"};
 static const char *const s_netmode_choices[] = {"ethernet", "wifi", "ap", "auto"};
@@ -890,6 +891,14 @@ static const kvm_setting_t s_settings[] = {
         .help = "File on the microSD card currently offered to the target.",
         .def_str = "", .max_len = 63, .requires_cap = KVM_CAP_MSC,
     },
+    {
+        .key = "msc_url", .section = "storage_hidden", .type = KVM_VT_STR,
+        .title = "Image URL",
+        .help = "An image on a web server that the target boots without it being copied to "
+                "the card, used while the mounted image is \"@url\". The server must answer "
+                "HTTP Range requests. Secret: a link may carry a password or a signed token.",
+        .def_str = "", .max_len = 500, .requires_cap = KVM_CAP_MSC, .flags = KVM_SF_SECRET,
+    },
 
     /* ---- power ---------------------------------------------------------- */
     {
@@ -988,6 +997,86 @@ static const kvm_setting_t s_settings[] = {
         .visible_key = "atx_enable", .visible_val = 1,
     },
 
+    /* A KVM switch in front of several machines: its select button on a GPIO,
+     * or a TESmart switch over the network. See kvm_atx.h. */
+    {
+        .key = "kvmsw_mode", .section = "power", .group = "KVM switch", .type = KVM_VT_ENUM,
+        .title = "KVM switch",
+        .help = "A KVM switch between this device and several machines, so the console's "
+                "Power menu lists them. \"button\": a GPIO wired to the switch's select "
+                "button, each press moves it to the next machine. \"tesmart\": a TESmart "
+                "switch told the machine over the network, no wires.",
+        .min = 0, .max = ENUM_MAX(s_kvmsw_mode_choices), .def = 0,
+        .choices = s_kvmsw_mode_choices, .requires_cap = -1,
+    },
+    {
+        .key = "kvmsw_gpio", .section = "power", .group = "KVM switch", .type = KVM_VT_INT,
+        .title = "Switch button GPIO",
+        .help = "Wired to the switch's select button. -1 to leave it unwired.",
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO,
+        .flags = KVM_SF_PIN,
+        .visible_key = "kvmsw_mode", .visible_val = 1,
+    },
+    {
+        .key = "kvmsw_host", .section = "power", .group = "KVM switch", .type = KVM_VT_STR,
+        .title = "Switch address",
+        .help = "The TESmart switch's address on the network, with :port if it is not "
+                "5000. A new switch is at 192.168.1.10. It has no password, so keep it "
+                "on a network you trust.",
+        .def_str = "192.168.1.10", .max_len = 63, .requires_cap = -1,
+        .visible_key = "kvmsw_mode", .visible_val = 2,
+    },
+    {
+        .key = "kvmsw_direct", .section = "power", .group = "KVM switch", .type = KVM_VT_BOOL,
+        .title = "Wired straight to the button",
+        .help = "On when the GPIO goes straight to the side of the switch's button that is "
+                "not ground, with the grounds joined: a press pulls it low, and between "
+                "presses the pin lets go. Only if that side is at 3.3 V or less. Off for an "
+                "optocoupler module that presses on a high.",
+        .def = 1, .requires_cap = KVM_CAP_GPIO,
+        .visible_key = "kvmsw_mode", .visible_val = 1,
+    },
+    {
+        .key = "kvmsw_ports", .section = "power", .group = "KVM switch", .type = KVM_VT_INT,
+        .title = "Machines",
+        .help = "How many machines the switch has.",
+        .min = 2, .max = 16, .def = 2, .requires_cap = -1,
+        .visible_key = "kvmsw_mode", .visible_val = 0, .flags = KVM_SF_SHOW_NE,
+    },
+    {
+        .key = "kvmsw_names", .section = "power", .group = "KVM switch", .type = KVM_VT_STR,
+        .title = "Machine names",
+        .help = "Names for the console, in the switch's order, split by commas. "
+                "For example: NAS, Desktop. Empty gives Machine 1, Machine 2.",
+        .def_str = "", .max_len = 95, .requires_cap = -1,
+        .visible_key = "kvmsw_mode", .visible_val = 0, .flags = KVM_SF_SHOW_NE,
+    },
+    {
+        .key = "kvmsw_ms", .section = "power", .group = "KVM switch", .type = KVM_VT_INT,
+        .title = "Press length",
+        .help = "How long each press of the switch's button is held.",
+        .min = 50, .max = 2000, .def = 200, .requires_cap = KVM_CAP_GPIO, .unit = "ms",
+        .visible_key = "kvmsw_mode", .visible_val = 1,
+    },
+    {
+        .key = "kvmsw_led_gpio", .section = "power", .group = "KVM switch", .type = KVM_VT_INT,
+        .title = "First machine LED GPIO",
+        .help = "Optional. Reads the switch's light for the first machine, so the device "
+                "knows where the switch is after someone presses its button by hand. "
+                "Without it the device counts its own presses from the first machine. "
+                "-1 if not wired.",
+        .min = -1, .max = 54, .def = -1, .requires_cap = KVM_CAP_GPIO,
+        .flags = KVM_SF_PIN,
+        .visible_key = "kvmsw_mode", .visible_val = 1,
+    },
+    {
+        .key = "kvmsw_led_ah", .section = "power", .group = "KVM switch", .type = KVM_VT_BOOL,
+        .title = "LED active-high",
+        .help = "On if the LED input reads high while the first machine is selected.",
+        .def = 1, .requires_cap = KVM_CAP_GPIO,
+        .visible_key = "kvmsw_led_gpio", .visible_val = -1, .flags = KVM_SF_SHOW_NE,
+    },
+
     /* The buttons on the box - see components/kvm_sched/button.c. Button 1
      * keeps the keys it had when it was the only one. Each next button shows
      * once the one before it has a pin, so an unused list stays one line. */
@@ -1000,7 +1089,7 @@ static const kvm_setting_t s_settings[] = {
     "\"next display page\" and \"display on/off\" drive the status display. "                 \
     "\"power on over USB\" sends the wake signal a keyboard sends. \"menu on the screen\" "    \
     "opens a menu on the status display: a short press moves to the next item, a hold picks " \
-    "it, and Back at the end closes it."
+    "it, and Back at the end closes it. \"next machine\" presses the KVM switch's button."
 #define BTN_HOLD_HELP "What holding it for 1.5 s does. It fires as soon as it has been held long enough, so you know it took."
 #define BTN_RUNBOOK_HELP "The name of the runbook, for either action set to \"runbook\"."
 #define BTN_HIGH_HELP                                                                      \

@@ -783,6 +783,7 @@ httpd_handle_t http_server_start(void)
         {.uri = "/api/v1/power/click", .method = HTTP_POST, .handler = api_power_click_post},
         {.uri = "/api/v1/power/hold", .method = HTTP_POST, .handler = api_power_hold_post},
         {.uri = "/api/v1/power/reset", .method = HTTP_POST, .handler = api_power_reset_post},
+        {.uri = "/api/v1/power/switch", .method = HTTP_POST, .handler = api_power_switch_post},
         {.uri = "/api/v1/settings", .method = HTTP_GET, .handler = api_settings_get},
         {.uri = "/api/v1/settings", .method = HTTP_PUT, .handler = api_settings_put},
         {.uri = "/api/v1/storage/images", .method = HTTP_GET, .handler = api_storage_images_get},
@@ -878,6 +879,14 @@ httpd_handle_t http_server_start(void)
     const httpd_uri_t *audio_uris = audio_api_routes(&n_audio);
     for (size_t i = 0; i < n_audio; i++) {
         register_route(h, &audio_uris[i]);
+    }
+    if (media_ws_init() != ESP_OK) {
+        ESP_LOGW(TAG, "media socket: no memory");
+    }
+    size_t n_media = 0;
+    const httpd_uri_t *media_uris = media_ws_routes(&n_media);
+    for (size_t i = 0; i < n_media; i++) {
+        register_route(h, &media_uris[i]);
     }
 
     /* Before anything else is registered: a request that arrives while the

@@ -422,6 +422,17 @@ esp_err_t api_video_status_get(httpd_req_t *req)
 
     kvm_atx_status_t atx;
     kvm_atx_status(&atx);
+    kvm_kvmsw_status_t sw;
+    kvm_kvmsw_status(&sw);
+    char kvmsw[96] = "null";
+    if (sw.enabled) {
+        char at[12] = "null"; /* a network switch that has not answered yet */
+        if (sw.port >= 0) {
+            snprintf(at, sizeof(at), "%d", sw.port + 1);
+        }
+        snprintf(kvmsw, sizeof(kvmsw), "{\"machine\":%s,\"machines\":%d,\"busy\":%s,\"error\":%s}",
+                 at, sw.ports, sw.busy ? "true" : "false", sw.error ? "true" : "false");
+    }
 
     kvm_record_status_t rec;
     kvm_record_status(&rec);
@@ -449,7 +460,7 @@ esp_err_t api_video_status_get(httpd_req_t *req)
     (void)web_mem_guard_json(mem, sizeof(mem));
 
     /* Worst case with every string field full is about 1660. */
-    char body[1820];
+    char body[1900];
     int n = snprintf(body, sizeof(body),
                      "{\"knowsDdc5v\":%s,\"signal\":%s,\"width\":%u,\"height\":%u,\"interlaced\":%s,"
                      "\"inputHz\":%u,\"tooFast\":%s,\"audioHz\":%u,"
@@ -482,6 +493,8 @@ esp_err_t api_video_status_get(httpd_req_t *req)
                      "\"profile\":%u,"
                      /* The target's HDD LED, null when it is not wired. */
                      "\"hdd\":%s,"
+                     /* The KVM switch, null when there is none. */
+                     "\"kvmSwitch\":%s,"
                      /* Internal RAM ran low and connections were closed, null
                         when not: see mem_guard.c. */
                      "\"memLow\":%s%s}",
@@ -511,7 +524,7 @@ esp_err_t api_video_status_get(httpd_req_t *req)
                      (unsigned)rec.clips_converting, rec.last_clip, shot_blocked ? "\"" : "",
                      shot_blocked ? shot_blocked : "null", shot_blocked ? "\"" : "",
                      (unsigned)kvm_profiles_active(),
-                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false", mem, csi);
+                     !atx.have_hdd ? "null" : atx.hdd_busy ? "true" : "false", kvmsw, mem, csi);
     if (n <= 0 || n >= (int)sizeof(body)) {
         return send_json_error(req, "500 Internal Server Error", "status too long");
     }
@@ -1166,6 +1179,41 @@ esp_err_t api_power_hold_post(httpd_req_t *req)
 esp_err_t api_power_reset_post(httpd_req_t *req)
 {
     return atx_action(req, kvm_atx_reset, "reset");
+}
+
+/*
+ * The KVM switch: ?machine=N (from 1) moves it there, no query moves it to the
+ * next one. Returns at once, the presses run on the ATX worker.
+ */
+esp_err_t api_power_switch_post(httpd_req_t *req)
+{
+    if (!kvm_auth_check(req)) {
+        return kvm_auth_challenge(req);
+    }
+    char query[32] = "", val[8] = "";
+    esp_err_t err;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "machine", val, sizeof(val)) == ESP_OK) {
+        err = kvm_kvmsw_select(atoi(val) - 1);
+    } else {
+        err = kvm_kvmsw_next();
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict",
+                               "no KVM switch is set up (Settings -> Power -> KVM switch)");
+    }
+    if (err == ESP_ERR_INVALID_ARG) {
+        return send_json_error(req, "400 Bad Request", "no such machine on the switch");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "429 Too Many Requests", "the switch is still busy");
+    }
+    kvm_kvmsw_status_t sw;
+    kvm_kvmsw_status(&sw);
+    char out[64];
+    snprintf(out, sizeof(out), "{\"status\":\"ok\",\"ports\":%d}", sw.ports);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, out);
 }
 
 esp_err_t api_settings_reset_post(httpd_req_t *req)

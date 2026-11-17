@@ -48,6 +48,9 @@ if [ "$what" = all ] || [ "$what" = host ]; then
     echo "== the optical drive's MMC replies =="
     sh "$here/components/kvm_hid/test/run.sh"
     echo
+    echo "== the virtual media read-ahead =="
+    sh "$here/components/kvm_media/test/run.sh"
+    echo
     echo "== one-time passwords =="
     sh "$here/components/kvm_web/test/run.sh"
     echo

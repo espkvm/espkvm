@@ -2,7 +2,22 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
-## [Unreleased]
+## [0.87.0] - 2026-11-17
+
+### Added
+
+- Boot from a URL. Paste a link in Media and press Boot from URL: the target boots the image straight from the web server, and nothing is copied to the card. The device reads the parts the target asks for, so it works without a card and with images bigger than it. The server has to answer HTTP Range requests, as nginx, Apache, Caddy and most NAS servers do. http and https both work. On the JetKVM Mini a LAN server gives about 4 MB/s, the card about 5.
+- Boot from a file on your own computer. Press Boot from this computer in Media and pick a file: the target reads it from the console tab as it boots, and nothing is uploaded first or copied to the card. Keep the tab open meanwhile. A banner says so, and the browser asks before the tab closes. After a network blip or a reload the tab picks up where it was. On the JetKVM Mini this gives about 1.6 MB/s, about 11 minutes a gigabyte, so I suggest it for images up to 1 GB. A bigger one is faster from the card or a URL. Video runs at 2 fps while the target reads from the tab, as during an upload, and the console shows how fast the tab sends.
+- A KVM switch in front of several machines. The console's Power menu lists the machines by name, and picking one switches to it. Two ways to drive it: a free GPIO on the switch's select button, which the device presses as often as it takes, or a TESmart switch over the network, with the same commands PiKVM sends. Buttons on the box, schedules, the menu on the screen and MQTT can change the machine too, and `POST /api/v1/power/switch` does it from a script. A pin can go straight to a button at 3.3 V, pulling it to ground like a finger, or through an optocoupler. An optional input on the first machine's LED keeps the count right after a press by hand. Settings, Power, KVM switch. Wiring in `docs/wiring.md`.
+
+### Changed
+
+- Ethernet: 30 receive buffers instead of 20, and pause frames when they run low. A fast server sending in bursts lost about 4% of its packets before, and each loss stalled the connection. Reading an image over HTTP went from 1.6 to 4.0 MB/s on the JetKVM Mini.
+
+### Fixed
+
+- The target's USB drive reads the card on a task of its own. Before, a slow or failing card read held up the USB stack, and keys and the mouse waited with it.
+- VNC: on a still screen with MJPEG the device waited up to a second for a new frame and read no keys or mouse moves meanwhile, so the first move after a pause came late. Keys and the mouse are now read while it waits.
 
 ## [0.86.0] - 2026-11-16
 

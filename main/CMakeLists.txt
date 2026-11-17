@@ -24,6 +24,7 @@ idf_component_register(
         kvm_mqtt
         nvs_flash
         kvm_storage
+        kvm_media
         kvm_record
         kvm_upload
         kvm_display

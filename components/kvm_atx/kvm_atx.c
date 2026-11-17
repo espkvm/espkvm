@@ -15,6 +15,7 @@
  */
 #include "kvm_atx.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -29,6 +30,7 @@
 
 #include "kvm_caps.h"
 #include "kvm_settings.h"
+#include "kvmsw_tesmart.h"
 
 static const char *TAG = "kvm_atx";
 
@@ -36,6 +38,7 @@ typedef enum {
     ATX_CMD_CLICK, /* short press, power button */
     ATX_CMD_HOLD,  /* long press, power button (hard off) */
     ATX_CMD_RESET, /* short press, reset button */
+    ATX_CMD_SWITCH, /* one press of the KVM switch's select button */
 } atx_cmd_t;
 
 typedef struct {
@@ -48,6 +51,13 @@ typedef struct {
     int long_ms;
     bool active_high;     /* drive high to "press" the button */
     bool led_active_high; /* LED line reads high when the target is on */
+    /* The KVM switch, independent of atx_enable. */
+    int sw_gpio;          /* -1 when no switch is wired */
+    int sw_led_gpio;      /* -1, or the first machine's LED on the switch */
+    int sw_ms;
+    int sw_ports;
+    bool sw_direct;       /* wired straight to the button: open drain, low presses */
+    bool sw_led_ah;
 } atx_cfg_t;
 
 static atx_cfg_t s_cfg;
@@ -59,6 +69,15 @@ static SemaphoreHandle_t s_cfg_mtx;
  * order where both are taken: op before cfg. */
 static SemaphoreHandle_t s_op_mtx;
 static QueueHandle_t s_cmd_q;
+
+/* Where the switch is: counted from the presses, set right by its LED. Starts
+   on the first machine, where such switches start when powered. s_sw_queued
+   counts presses waiting in the queue, so a select adds to them. */
+static volatile int s_sw_port;
+static volatile int s_sw_queued;
+static portMUX_TYPE s_sw_mux = portMUX_INITIALIZER_UNLOCKED;
+static int s_sw_mode;      /* kvmsw_mode as last applied */
+static int s_sw_net_ports; /* kvmsw_ports, for the network switch */
 
 /* The HDD LED blinks for each burst of disk work, far too briefly for a status
  * poll once a second to see the level. An edge interrupt notes when it last
@@ -90,6 +109,31 @@ static void atx_task(void *arg)
         xSemaphoreTake(s_cfg_mtx, portMAX_DELAY);
         c = s_cfg;
         xSemaphoreGive(s_cfg_mtx);
+        if (cmd == ATX_CMD_SWITCH) {
+            if (c.sw_gpio >= 0) {
+                gpio_set_level(c.sw_gpio, press_level(!c.sw_direct));
+                vTaskDelay(pdMS_TO_TICKS(c.sw_ms));
+                gpio_set_level(c.sw_gpio, idle_level(!c.sw_direct));
+                /* The switch needs a moment before it takes the next press, and
+                   its LED a moment to follow. */
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+            /* Both in one step, so port + queued never counts a press twice. */
+            taskENTER_CRITICAL(&s_sw_mux);
+            if (c.sw_gpio >= 0) {
+                s_sw_port = (s_sw_port + 1) % c.sw_ports;
+            }
+            if (s_sw_queued > 0) {
+                s_sw_queued--;
+            }
+            const int now_at = s_sw_port;
+            taskEXIT_CRITICAL(&s_sw_mux);
+            if (c.sw_gpio >= 0) {
+                ESP_LOGI(TAG, "KVM switch: machine %d", now_at + 1);
+            }
+            xSemaphoreGive(s_op_mtx);
+            continue;
+        }
         if (!c.enabled) {
             xSemaphoreGive(s_op_mtx);
             continue; /* disabled between queueing and running; drop it */
@@ -135,12 +179,13 @@ esp_err_t kvm_atx_init(void)
     }
     s_cfg_mtx = xSemaphoreCreateMutex();
     s_op_mtx = xSemaphoreCreateMutex();
-    s_cmd_q = xQueueCreate(4, sizeof(atx_cmd_t));
+    s_cmd_q = xQueueCreate(20, sizeof(atx_cmd_t)); /* up to 15 switch presses and ATX ones */
     if (!s_cfg_mtx || !s_op_mtx || !s_cmd_q) {
         return ESP_ERR_NO_MEM;
     }
     memset(&s_cfg, 0, sizeof(s_cfg));
     s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = s_cfg.hdd_gpio = -1;
+    s_cfg.sw_gpio = s_cfg.sw_led_gpio = -1;
     if (xTaskCreate(atx_task, "atx", 2048, NULL, 5, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
@@ -186,6 +231,27 @@ static esp_err_t configure_led(int gpio, bool active_high)
     return gpio_config(&io);
 }
 
+/* The switch's button. Wired straight to it, the pin pulls the button's line
+   to ground like a finger would, and lets go to high impedance, so it never
+   pushes its own 3.3 V into the switch. Through an optocoupler module it
+   drives high to press, like the ATX outputs. */
+static esp_err_t configure_switch(int gpio, bool direct)
+{
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << gpio,
+        .mode = direct ? GPIO_MODE_OUTPUT_OD : GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_set_level(gpio, idle_level(!direct));
+    esp_err_t err = gpio_config(&io);
+    if (err == ESP_OK) {
+        gpio_set_level(gpio, idle_level(!direct));
+    }
+    return err;
+}
+
 /* Same wiring as the power LED, with an interrupt on every change. */
 static esp_err_t configure_hdd(int gpio, bool active_high)
 {
@@ -228,6 +294,30 @@ esp_err_t kvm_atx_apply(void)
     const bool active_high = kvm_setting_bool("atx_active_high");
     const bool led_active_high = kvm_setting_bool("atx_led_ah");
 
+    /* 0 off, 1 a button on a GPIO, 2 a TESmart switch over the network. */
+    const int sw_mode = (int)kvm_setting_int("kvmsw_mode");
+    const int sw = sw_mode == 1 ? (int)kvm_setting_int("kvmsw_gpio") : -1;
+    const int sw_led = (int)kvm_setting_int("kvmsw_led_gpio");
+    const int sw_ms = (int)kvm_setting_int("kvmsw_ms");
+    int sw_ports = (int)kvm_setting_int("kvmsw_ports");
+    const bool sw_direct = kvm_setting_bool("kvmsw_direct");
+    const bool sw_led_ah = kvm_setting_bool("kvmsw_led_ah");
+    if (sw_ports < 2) {
+        sw_ports = 2;
+    }
+    /* "host" or "host:port"; TESmart's own port is 5000. */
+    char sw_host[64];
+    strlcpy(sw_host, kvm_setting_str("kvmsw_host"), sizeof(sw_host));
+    int sw_tport = 5000;
+    char *colon = strchr(sw_host, ':');
+    if (colon && colon == strrchr(sw_host, ':')) { /* one colon: a port, not IPv6 */
+        sw_tport = atoi(colon + 1);
+        *colon = '\0';
+    }
+    s_sw_mode = sw_mode;
+    s_sw_net_ports = sw_ports;
+    kvmsw_tesmart_apply(sw_mode == 2, sw_host, sw_tport, sw_ports);
+
     const bool pins_valid = pwr >= 0 && rst >= 0;
     const bool want_hw = want_enable && pins_valid;
 
@@ -242,8 +332,36 @@ esp_err_t kvm_atx_apply(void)
     release_pin(s_cfg.rst_gpio);
     release_pin(s_cfg.led_gpio);
     release_hdd(s_cfg.hdd_gpio);
+    release_pin(s_cfg.sw_gpio);
+    release_pin(s_cfg.sw_led_gpio);
     s_cfg.enabled = false;
     s_cfg.pwr_gpio = s_cfg.rst_gpio = s_cfg.led_gpio = s_cfg.hdd_gpio = -1;
+    s_cfg.sw_gpio = s_cfg.sw_led_gpio = -1;
+
+    /* The switch works with or without the ATX wiring. */
+    if (sw >= 0) {
+        esp_err_t e = configure_switch(sw, sw_direct);
+        if (e == ESP_OK && sw_led >= 0) {
+            e = configure_led(sw_led, sw_led_ah);
+        }
+        if (e == ESP_OK) {
+            s_cfg.sw_gpio = sw;
+            s_cfg.sw_led_gpio = sw_led;
+            s_cfg.sw_ms = sw_ms;
+            s_cfg.sw_ports = sw_ports;
+            s_cfg.sw_direct = sw_direct;
+            s_cfg.sw_led_ah = sw_led_ah;
+            taskENTER_CRITICAL(&s_sw_mux);
+            if (s_sw_port >= sw_ports) {
+                s_sw_port = 0;
+            }
+            taskEXIT_CRITICAL(&s_sw_mux);
+        } else {
+            ESP_LOGE(TAG, "KVM switch GPIO setup failed: %s", esp_err_to_name(e));
+            release_pin(sw);
+            release_pin(sw_led);
+        }
+    }
 
     esp_err_t err = ESP_OK;
     if (want_hw) {
@@ -332,6 +450,114 @@ static esp_err_t queue_cmd(atx_cmd_t cmd)
         return ESP_ERR_INVALID_STATE;
     }
     return xQueueSend(s_cmd_q, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+/* Read the first machine's LED, when wired, and put the count right: someone
+   may have pressed the switch by hand. Only while no press is under way, as
+   the LED follows a press with a delay. Called with s_cfg_mtx held. */
+static void sw_sync_locked(void)
+{
+    if (s_cfg.sw_gpio < 0 || s_cfg.sw_led_gpio < 0 || s_sw_queued > 0) {
+        return;
+    }
+    const int level = gpio_get_level(s_cfg.sw_led_gpio);
+    const bool first = s_cfg.sw_led_ah ? (level != 0) : (level == 0);
+    taskENTER_CRITICAL(&s_sw_mux);
+    if (first) {
+        s_sw_port = 0;
+    } else if (s_sw_port == 0) {
+        /* Not the first: with two machines that is the second. With more it
+           is a guess, and the next one is where a press by hand goes. */
+        s_sw_port = 1;
+    }
+    taskEXIT_CRITICAL(&s_sw_mux);
+}
+
+void kvm_kvmsw_status(kvm_kvmsw_status_t *out)
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    if (!s_cfg_mtx) {
+        return;
+    }
+    if (s_sw_mode == 2) {
+        int m;
+        kvmsw_tesmart_status(&m, &out->busy, &out->error);
+        out->enabled = true;
+        out->ports = s_sw_net_ports;
+        out->port = m;
+        return;
+    }
+    xSemaphoreTake(s_cfg_mtx, portMAX_DELAY);
+    out->enabled = s_cfg.sw_gpio >= 0;
+    if (out->enabled) {
+        sw_sync_locked();
+        out->ports = s_cfg.sw_ports;
+        out->port = s_sw_port;
+        out->busy = s_sw_queued > 0;
+    }
+    xSemaphoreGive(s_cfg_mtx);
+}
+
+esp_err_t kvm_kvmsw_select(int port)
+{
+    if (!s_cmd_q || !s_cfg_mtx) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_sw_mode == 2) {
+        if (port < 0 || port >= s_sw_net_ports) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        return kvmsw_tesmart_select(port);
+    }
+    xSemaphoreTake(s_cfg_mtx, portMAX_DELAY);
+    const bool on = s_cfg.sw_gpio >= 0;
+    const int ports = s_cfg.sw_ports;
+    if (on) {
+        sw_sync_locked();
+    }
+    xSemaphoreGive(s_cfg_mtx);
+    if (!on) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (port < 0 || port >= ports) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* Count from where the queued presses will leave it. */
+    taskENTER_CRITICAL(&s_sw_mux);
+    const int presses = ((port - s_sw_port - s_sw_queued) % ports + ports) % ports;
+    s_sw_queued += presses;
+    taskEXIT_CRITICAL(&s_sw_mux);
+    const atx_cmd_t cmd = ATX_CMD_SWITCH;
+    for (int i = 0; i < presses; i++) {
+        if (xQueueSend(s_cmd_q, &cmd, 0) != pdTRUE) {
+            taskENTER_CRITICAL(&s_sw_mux);
+            s_sw_queued -= presses - i;
+            taskEXIT_CRITICAL(&s_sw_mux);
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+    return ESP_OK;
+}
+
+esp_err_t kvm_kvmsw_next(void)
+{
+    kvm_kvmsw_status_t st;
+    kvm_kvmsw_status(&st);
+    if (!st.enabled) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    int at;
+    if (s_sw_mode == 2) {
+        at = st.port < 0 ? -1 : st.port; /* not known yet: the first machine */
+    } else {
+        taskENTER_CRITICAL(&s_sw_mux);
+        at = s_sw_port + s_sw_queued;
+        taskEXIT_CRITICAL(&s_sw_mux);
+    }
+    return kvm_kvmsw_select((at + 1) % st.ports);
 }
 
 esp_err_t kvm_atx_power_click(void) { return queue_cmd(ATX_CMD_CLICK); }

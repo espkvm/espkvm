@@ -54,6 +54,7 @@ esp_err_t api_power_usb_post(httpd_req_t *req);
 esp_err_t api_power_click_post(httpd_req_t *req);
 esp_err_t api_power_hold_post(httpd_req_t *req);
 esp_err_t api_power_reset_post(httpd_req_t *req);
+esp_err_t api_power_switch_post(httpd_req_t *req);
 esp_err_t api_settings_reset_post(httpd_req_t *req);
 
 /* screentext_api.c */

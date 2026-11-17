@@ -74,13 +74,14 @@ Useful for what it does today, and honest about the rest.
 | From a phone or a tablet | works; touch trackpad, pointer stick, pinch zoom and on-screen keyboard |
 | Several viewers, one in control | works; plus a view-only sign-in for others |
 | VNC: TigerVNC and other clients with Open H.264 or Tight encoding, over TLS | new, off by default |
-| Virtual media: boot the target from an image | works; from microSD or the device's flash |
+| Virtual media: boot the target from an image | works; from microSD, the device's flash, a web server or the browser's computer |
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |
 | A command palette (Ctrl+K), your own buttons on the bar | new; the palette also finds every setting by name |
 | Notifications to Telegram, ntfy, a webhook or the browser, with a screenshot | works |
 | Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |
+| A KVM switch in front of several machines, picked from the console | new; one GPIO to the switch's button, or a TESmart switch over the network |
 | HDMI-CEC remote | works; on TC358743 boards |
 | A gamepad for a console | works on a Switch |
 | Device profiles: pointer, gamepad and video settings for each target | new, the device picks one from HDMI-CEC or the USB guess |
@@ -282,7 +283,7 @@ components/
   kvm_net/        Ethernet, WiFi (station/AP + rescue hotspot, captive portal),
                   IPv6, mDNS, Wake-on-LAN, and the VPN clients (WireGuard,
                   or Tailscale through third_party/microlink)
-  kvm_atx/        power and reset buttons, power-LED sensing
+  kvm_atx/        power and reset buttons, power-LED sensing, a KVM switch's button
   kvm_cec/        HDMI-CEC: acting as a TV, remote keys, standby and wake
   kvm_display/    the optional status screen (I2C OLED, round SPI LCD)
   kvm_speaker/    the knock on the board's own speaker (ES8311)

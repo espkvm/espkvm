@@ -186,6 +186,68 @@ the top one (SW3) shows the next status page on a press and turns the screen
 off or on when held, the bottom one (SW2) opens the menu. The bottom one is
 also the password-reset button, which is read only at start-up.
 
+# A KVM switch
+
+A KVM switch between the device and several machines: the machines' HDMI and
+USB go into the switch, and the switch's HDMI output and one of its USB ports go
+to the device. Use a USB port of the switch's hub, not its keyboard/mouse port:
+the virtual drive does not pass through that one. The console's Power menu then
+lists the machines by name. Two ways to drive the switch, `kvmsw_mode`:
+
+- `button`: a GPIO wired to the switch's select button. Each press moves it to
+  the next machine. For a switch with one button that steps through them all.
+- `tesmart`: a TESmart switch with a LAN port, told the machine over the
+  network. No wires, so it works on boards with no free pins, such as the
+  JetKVM Mini.
+
+Settings -> Power -> KVM switch:
+
+| Setting | Meaning | Default |
+|---|---|---|
+| `kvmsw_mode` | off, button or tesmart | off |
+| `kvmsw_gpio` | button: the pin wired to the switch's select button | -1 (none) |
+| `kvmsw_host` | tesmart: the switch's address, with `:port` if not 5000 | 192.168.1.10 |
+| `kvmsw_direct` | Wired straight to the button, not through an optocoupler | on |
+| `kvmsw_ports` | How many machines the switch has, 2 to 16 | 2 |
+| `kvmsw_names` | Names for the console, split by commas | empty |
+| `kvmsw_ms` | How long each press is held | 200 ms |
+| `kvmsw_led_gpio` | Optional: the switch's light for the first machine | -1 (none) |
+| `kvmsw_led_ah` | That light reads high while it is lit | on |
+
+## Straight to the button
+
+Most such boards have a small tactile button with one side on ground. Measure
+the other side against ground with the switch powered. At 3.3 V or less, wire
+that side to the GPIO and join the two grounds (a USB cable between them
+already does). With `kvmsw_direct` on, a press pulls the line to ground the way
+a finger does, and between presses the pin lets go. It never drives 3.3 V into
+the switch.
+
+If the button's side reads 5 V, or you are not sure, use an optocoupler module
+like the ATX ones: its output across the button's two pins, `kvmsw_direct` off.
+
+## Which machine is selected
+
+Each press moves the switch to the next machine. The device counts its presses
+and starts on the first machine, where such switches start when powered. Press
+the switch's own button by hand and the count is off, until the next time the
+switch comes back round. The first machine's LED, read the same way as the ATX
+power LED, keeps it right: `kvmsw_led_gpio` on that LED's pin.
+
+## TESmart over the network
+
+TESmart's switches with a LAN port take a 6-byte command on TCP port 5000.
+ESP-KVM sends the same commands as PiKVM's TESmart driver: `AA BB 03 01 CH EE`
+picks machine CH (from 1), and `AA BB 03 10 00 EE` asks which one is picked,
+every 10 s and after each change, so a change from the switch's own buttons
+shows in the console too. A new switch is at 192.168.1.10. Give it an address on
+your network with TESmart's tool, or put the device on its subnet. The switch has
+no password: anyone who reaches port 5000 can switch it, so keep it on a network
+you trust.
+
+Buttons on the box, schedules, the menu on the screen and MQTT have a "next
+machine" action too, and `POST /api/v1/power/switch` does it from a script.
+
 # Serial console
 
 For a target whose console is a serial port: a NAS with no video output, a

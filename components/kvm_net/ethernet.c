@@ -400,6 +400,15 @@ esp_err_t ethernet_init(void)
     }
     esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
     ESP_RETURN_ON_ERROR(esp_eth_driver_install(&eth_config, &s_eth_handle), TAG, "eth install");
+#if CONFIG_ETH_SOFT_FLOW_CONTROL
+    /* Ask the switch to pause instead of dropping frames when the receive
+     * buffers fill. A burst from a fast server (an image read over HTTP, an
+     * upload) otherwise loses packets, and each loss stalls TCP. */
+    bool flow = true;
+    if (esp_eth_ioctl(s_eth_handle, ETH_CMD_S_FLOW_CTRL, &flow) != ESP_OK) {
+        ESP_LOGW(TAG, "no flow control");
+    }
+#endif
 
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     s_eth_netif = esp_netif_new(&netif_cfg);

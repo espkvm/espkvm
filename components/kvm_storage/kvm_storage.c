@@ -4,6 +4,8 @@
  */
 #include "kvm_storage.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "sdkconfig.h"
@@ -133,10 +135,18 @@ void kvm_storage_set_fs_leaving_cb(void (*cb)(const char *why))
     s_leaving_cb = cb;
 }
 
-/* Outside the media lock: whoever listens may take a while to close its files,
- * and a target read must not wait behind that. */
+/* Defined with the sources below. */
+static const kvm_media_ops_t s_card_file_ops;
+static const kvm_media_ops_t s_whole_card_ops;
+
+/* Outside the card lock: whoever listens may take a while to close its files,
+ * and a target read must not wait behind that. A medium on the card is taken
+ * out first, and the media task waits for the card lock, so no read of it is
+ * running when this returns. */
 static void fs_leaving(const char *why)
 {
+    kvm_media_eject_ops(&s_card_file_ops);
+    kvm_media_eject_ops(&s_whole_card_ops);
     if (s_leaving_cb) {
         s_leaving_cb(why);
     }
@@ -214,41 +224,24 @@ static bool sd_read_test(size_t sectors)
     return s_bus_errors == errors;
 }
 
-/* ---- virtual media --------------------------------------------------------
- *
- * The inserted image, guarded by a mutex because the target reads it from the
- * USB task while selection happens on the web task. Raw FATFS is used rather
- * than stdio: f_lseek takes a 64-bit FSIZE_t that covers exFAT files past
- * 4 GiB, where fseek's long offset would overflow past 2 GiB. Drive "0:"
- * is the same volume esp_vfs_fat mounted, so f_getfree above and f_read here
- * see one filesystem. */
-static SemaphoreHandle_t s_media_lock;
-static FIL s_media_file;
-static bool s_media_open;
-static uint64_t s_media_blocks;
-static uint32_t s_media_bsize = MEDIA_BLOCK_SIZE; /* 512 for a disk, 2048 for a CD */
-static bool s_media_cdrom;
+/*
+ * Guards s_card against the card leaving while it is read: the media task reads
+ * images, the web task uploads, and the slot watcher unmounts a card that was
+ * pulled out. Also guards s_rescue_writing. Raw FATFS is used rather than stdio
+ * for images: f_lseek takes a 64-bit FSIZE_t that covers exFAT files past
+ * 4 GiB, where fseek's long offset would overflow past 2 GiB. Drive "0:" is the
+ * same volume esp_vfs_fat mounted. */
+static SemaphoreHandle_t s_card_lock;
 /* True while the whole card is handed to the target read-write: the firmware then
  * keeps off the filesystem so there is a single writer, and re-reads the card
  * (kvm_storage_reread) when the operator switches the medium back. */
 static bool s_handed_over;
-static char s_media_name[64];
-
-/*
- * What the inserted image is backed by. The target sees one USB drive; behind
- * it is either a file on the microSD card or the on-flash "rescue" partition.
- * Both coexist - the operator picks which one is inserted - so booting from the
- * card is unaffected by the built-in image, and the built-in image is there
- * even with no card in the slot.
- */
-typedef enum { MEDIA_SRC_NONE, MEDIA_SRC_SD, MEDIA_SRC_FLASH, MEDIA_SRC_WHOLE_SD } media_src_t;
-static media_src_t s_media_src;
 /* The rescue partition, found once at init; NULL on a device whose partition
  * table predates it (it is served only when present). */
 static const esp_partition_t *s_rescue;
 /* An upload in progress: the partition is being erased/written, so it must not
  * be served to the target meanwhile. The flag is read from other tasks (select,
- * begin) under s_media_lock, so every transition of it is made under the lock
+ * begin) under s_card_lock, so every transition of it is made under the lock
  * too; it is volatile so the write path, which reads it without the lock while
  * streaming, always sees the current value. s_rescue_wpos has no cross-task
  * reader - begin/write/end/abort run in sequence on the one upload handler. */
@@ -467,165 +460,194 @@ void kvm_storage_status(kvm_storage_status_t *out)
     }
 }
 
-/* ---- virtual media API ---------------------------------------------------- */
+/* ---- sources for virtual media --------------------------------------------
+ *
+ * What the target's USB drive can be backed by from here: an image file on the
+ * card, the whole card, or the rescue partition. kvm_media reads them on its
+ * own task. When the card goes away, fs_leaving() takes a card source out
+ * before anything is unmounted.
+ */
 
 /*
- * Read-ahead for the target's reads. USB hands them over 4 KB at a time, and a
- * card command per 4 KB costs more than the data: 5.6 MB/s where the card reads
- * 9. So a read that follows the last one takes 256 KB from the card in one
- * command, into PSRAM, and the next reads are served from there. A bigger USB
- * buffer does the same from the other side, but it lives in internal RAM, which
- * WiFi needs, and moved to PSRAM the USB transfers get slower instead. A read that
- * jumps elsewhere - a file system looking at its tables - goes straight to the
- * card at its own size, so random access does not pay for data it never uses.
- * Any write to the medium drops the buffer.
+ * USB hands reads over 4 KB at a time, and a card command per 4 KB costs more
+ * than the data: 5.6 MB/s where the card reads 9. A read that goes straight on
+ * takes this much from the card in one command.
  */
-#define MEDIA_RA_BYTES (256u * 1024u)
-static uint8_t *s_ra_buf;
-static uint64_t s_ra_off;  /* medium offset of s_ra_buf[0] */
-static uint32_t s_ra_len;  /* valid bytes, 0 when empty */
-static uint64_t s_ra_next; /* where a sequential read would start */
+#define CARD_READ_AHEAD (256u * 1024u)
 
-static void media_close_locked(void)
+typedef struct {
+    FIL f;
+} card_file_t;
+
+static esp_err_t card_file_read(void *ctx, uint64_t off, void *buf, uint32_t len)
 {
-    s_ra_len = 0;
-    s_ra_next = 0;
-    if (s_media_src == MEDIA_SRC_SD && s_media_open) {
-        f_close(&s_media_file);
+    card_file_t *cf = ctx;
+    esp_err_t err = ESP_FAIL;
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    /*
+     * Retry a failed read: this board occasionally returns a CRC error (0x109)
+     * on an SD read at full speed, and such errors are transient - the same
+     * block reads clean on the next try. Over a multi-gigabyte boot image the
+     * rare miss would otherwise reach the target as a disk error. A handful of
+     * attempts turns those into a slight hitch instead.
+     */
+    for (int attempt = 0; s_card && attempt < 4 && err != ESP_OK; attempt++) {
+        UINT br = 0;
+        if (f_lseek(&cf->f, (FSIZE_t)off) == FR_OK && f_read(&cf->f, buf, len, &br) == FR_OK &&
+            br == len) {
+            err = ESP_OK;
+        }
     }
-    s_media_open = false;
-    s_media_src = MEDIA_SRC_NONE;
-    s_media_blocks = 0;
-    s_media_bsize = MEDIA_BLOCK_SIZE;
-    s_media_cdrom = false;
-    s_media_name[0] = '\0';
+    xSemaphoreGive(s_card_lock);
+    return err;
 }
 
-esp_err_t kvm_storage_media_select(const char *name, bool cdrom)
+static void card_file_close(void *ctx)
 {
-    if (!s_media_lock) {
-        return ESP_ERR_INVALID_STATE;
+    card_file_t *cf = ctx;
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    if (s_card) {
+        f_close(&cf->f);
     }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    media_close_locked();
+    xSemaphoreGive(s_card_lock);
+    free(cf);
+}
 
-    if (!name || !name[0]) { /* eject */
-        xSemaphoreGive(s_media_lock);
-        ESP_LOGI(TAG, "media ejected");
-        return ESP_OK;
-    }
-    if (!s_card) {
-        xSemaphoreGive(s_media_lock);
-        return ESP_ERR_INVALID_STATE;
-    }
+static const kvm_media_ops_t s_card_file_ops = {
+    .kind = "card",
+    .read = card_file_read,
+    .close = card_file_close,
+    .read_ahead = CARD_READ_AHEAD,
+};
 
+esp_err_t kvm_storage_source_image(const char *name, bool cdrom, kvm_media_source_t *out)
+{
+    if (!s_card_lock || !name || !name[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
     /* Raw FATFS paths live on drive "0:"; reject any slashes so a setting can
      * only ever name a file in the card's root, never escape it. */
     if (strpbrk(name, "/\\")) {
-        xSemaphoreGive(s_media_lock);
         return ESP_ERR_INVALID_ARG;
+    }
+    card_file_t *cf = calloc(1, sizeof(*cf));
+    if (!cf) {
+        return ESP_ERR_NO_MEM;
     }
     char path[80];
     snprintf(path, sizeof(path), "0:/%s", name);
-
-    FRESULT fr = f_open(&s_media_file, path, FA_READ);
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    const FRESULT fr = s_card ? f_open(&cf->f, path, FA_READ) : FR_NOT_READY;
+    const uint64_t size = fr == FR_OK ? (uint64_t)f_size(&cf->f) : 0;
+    xSemaphoreGive(s_card_lock);
     if (fr != FR_OK) {
-        xSemaphoreGive(s_media_lock);
+        free(cf);
+        if (fr == FR_NOT_READY) {
+            return ESP_ERR_INVALID_STATE;
+        }
         ESP_LOGW(TAG, "cannot open image '%s' (FRESULT %d)", name, fr);
         return fr == FR_NO_FILE || fr == FR_NO_PATH ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
-    const uint32_t bsize = cdrom ? 2048u : MEDIA_BLOCK_SIZE;
-    FSIZE_t size = f_size(&s_media_file);
-    if (size < bsize) {
-        f_close(&s_media_file);
-        xSemaphoreGive(s_media_lock);
-        return ESP_ERR_INVALID_SIZE;
-    }
-    s_media_open = true;
-    s_media_src = MEDIA_SRC_SD;
-    s_media_bsize = bsize;
-    s_media_cdrom = cdrom;
-    s_media_blocks = size / bsize;
-    snprintf(s_media_name, sizeof(s_media_name), "%s", name);
-    xSemaphoreGive(s_media_lock);
-    ESP_LOGI(TAG, "media inserted: '%s' as %s, %llu blocks (%llu MB)", name,
-             cdrom ? "CD-ROM" : "disk", (unsigned long long)s_media_blocks,
-             (unsigned long long)((uint64_t)size / (1024 * 1024)));
+    *out = (kvm_media_source_t){.ops = &s_card_file_ops, .ctx = cf, .size = size, .cdrom = cdrom};
+    snprintf(out->name, sizeof(out->name), "%s", name);
     return ESP_OK;
 }
 
-esp_err_t kvm_storage_media_select_rescue(bool cdrom)
+/* The whole card as raw sectors. USB reads and writes are whole 512-byte
+ * blocks, so offsets and lengths are sector-aligned. */
+static esp_err_t whole_card_read(void *ctx, uint64_t off, void *buf, uint32_t len)
 {
-    if (!s_media_lock) {
+    (void)ctx;
+    esp_err_t err = ESP_FAIL;
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    if (s_card && off % MEDIA_BLOCK_SIZE == 0 && len % MEDIA_BLOCK_SIZE == 0) {
+        err = sdmmc_read_sectors(s_card, buf, (size_t)(off / MEDIA_BLOCK_SIZE), len / MEDIA_BLOCK_SIZE);
+    }
+    xSemaphoreGive(s_card_lock);
+    return err;
+}
+
+#if SD_CAN_WRITE
+static esp_err_t whole_card_write(void *ctx, uint64_t off, const void *buf, uint32_t len)
+{
+    (void)ctx;
+    esp_err_t err = ESP_FAIL;
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    if (s_card && off % MEDIA_BLOCK_SIZE == 0 && len % MEDIA_BLOCK_SIZE == 0) {
+        err = sdmmc_write_sectors(s_card, buf, (size_t)(off / MEDIA_BLOCK_SIZE), len / MEDIA_BLOCK_SIZE);
+    }
+    xSemaphoreGive(s_card_lock);
+    return err;
+}
+#endif
+
+static const kvm_media_ops_t s_whole_card_ops = {
+    .kind = "whole card",
+    .read = whole_card_read,
+#if SD_CAN_WRITE
+    .write = whole_card_write, /* a pre-3.0 chip without the IO LDO times out on writes */
+#endif
+    .read_ahead = CARD_READ_AHEAD,
+};
+
+esp_err_t kvm_storage_source_whole_card(kvm_media_source_t *out)
+{
+    if (!s_card_lock || !s_card) {
+        return ESP_ERR_INVALID_STATE; /* nothing to hand over */
+    }
+    fs_leaving("the whole card was handed to the target");
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    if (!s_card) {
+        xSemaphoreGive(s_card_lock);
         return ESP_ERR_INVALID_STATE;
     }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    if (s_rescue_writing) {
-        xSemaphoreGive(s_media_lock);
-        return ESP_ERR_INVALID_STATE; /* being re-flashed; cannot serve it now */
+    /* The card stays mounted for the firmware's own use, but the firmware keeps
+     * off the filesystem from now on (uploads, the file list), so the target is
+     * its only writer, until kvm_storage_reread(). */
+    const uint64_t bytes = (uint64_t)s_card->csd.capacity * s_card->csd.sector_size;
+    s_handed_over = true;
+    xSemaphoreGive(s_card_lock);
+    *out = (kvm_media_source_t){.ops = &s_whole_card_ops, .size = bytes};
+    snprintf(out->name, sizeof(out->name), "whole card");
+    return ESP_OK;
+}
+
+/* Memory-mapped flash: fast at any size and reliable, so no read-ahead or retry. */
+static esp_err_t rescue_read(void *ctx, uint64_t off, void *buf, uint32_t len)
+{
+    (void)ctx;
+    return esp_partition_read(s_rescue, (size_t)off, buf, len);
+}
+
+static const kvm_media_ops_t s_rescue_ops = {
+    .kind = "rescue",
+    .read = rescue_read,
+};
+
+esp_err_t kvm_storage_source_rescue(bool cdrom, kvm_media_source_t *out)
+{
+    if (!s_card_lock) {
+        return ESP_ERR_INVALID_STATE;
     }
-    media_close_locked();
     if (!s_rescue) {
-        xSemaphoreGive(s_media_lock);
         return ESP_ERR_NOT_SUPPORTED; /* table predates the rescue partition */
     }
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
+    const bool writing = s_rescue_writing;
+    xSemaphoreGive(s_card_lock);
+    if (writing) {
+        return ESP_ERR_INVALID_STATE; /* being re-flashed; cannot serve it now */
+    }
     if (!rescue_has_image()) {
-        xSemaphoreGive(s_media_lock);
         return ESP_ERR_NOT_FOUND; /* partition is erased; nothing to boot */
     }
     /* The whole partition is offered as the disk. A raw boot image (an iPXE
      * .usb, a floppy) describes its real extent in its own MBR; the erased tail
      * past it is never read by a booting target. */
-    s_media_open = true;
-    s_media_src = MEDIA_SRC_FLASH;
-    s_media_bsize = cdrom ? 2048u : MEDIA_BLOCK_SIZE;
-    s_media_cdrom = cdrom;
-    s_media_blocks = s_rescue->size / s_media_bsize;
-    snprintf(s_media_name, sizeof(s_media_name), "rescue");
-    xSemaphoreGive(s_media_lock);
-    ESP_LOGI(TAG, "media inserted: built-in rescue image as %s, %llu blocks",
-             cdrom ? "CD-ROM" : "disk", (unsigned long long)s_media_blocks);
+    *out = (kvm_media_source_t){.ops = &s_rescue_ops, .size = s_rescue->size, .cdrom = cdrom};
+    snprintf(out->name, sizeof(out->name), "rescue");
     return ESP_OK;
 }
-
-esp_err_t kvm_storage_media_select_whole_sd(void)
-{
-    if (!s_media_lock) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (s_card) {
-        fs_leaving("the whole card was handed to the target");
-    }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    media_close_locked();
-    if (!s_card) {
-        xSemaphoreGive(s_media_lock);
-        return ESP_ERR_INVALID_STATE; /* nothing to hand over */
-    }
-    /* Serve the card's raw sectors. The card stays mounted for the firmware's own
-     * use (uploads, the file list); reads go through the SDMMC host, which
-     * serialises transactions, so this coexists with FATFS access - though a write
-     * from the console mid-read would make the target's view momentarily stale, it
-     * is read-only to the target so the card is never corrupted. */
-    const uint64_t bytes = (uint64_t)s_card->csd.capacity * s_card->csd.sector_size;
-    s_media_open = true;
-    s_media_src = MEDIA_SRC_WHOLE_SD;
-    s_media_bsize = MEDIA_BLOCK_SIZE;
-    s_media_cdrom = false;
-    s_media_blocks = bytes / MEDIA_BLOCK_SIZE;
-    s_handed_over = true; /* the target now owns the card; firmware stays off the FS */
-    snprintf(s_media_name, sizeof(s_media_name), "whole card");
-    xSemaphoreGive(s_media_lock);
-    ESP_LOGI(TAG, "media inserted: whole microSD card, %llu blocks (%llu MB)",
-             (unsigned long long)s_media_blocks, (unsigned long long)(bytes / (1024 * 1024)));
-    return ESP_OK;
-}
-
-void kvm_storage_media_eject(void)
-{
-    (void)kvm_storage_media_select(NULL, false);
-}
-
 void kvm_storage_rescue_status(kvm_rescue_t *out)
 {
     if (!out) {
@@ -641,7 +663,7 @@ void kvm_storage_rescue_status(kvm_rescue_t *out)
 
 esp_err_t kvm_storage_rescue_write_begin(size_t total)
 {
-    if (!s_rescue || !s_media_lock) {
+    if (!s_rescue || !s_card_lock) {
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (total == 0 || total > s_rescue->size) {
@@ -649,17 +671,15 @@ esp_err_t kvm_storage_rescue_write_begin(size_t total)
     }
     /* Stop serving the image while it changes underneath the target, and lock
      * out a second uploader. */
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
+    kvm_media_eject_ops(&s_rescue_ops);
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
     if (s_rescue_writing) {
-        xSemaphoreGive(s_media_lock);
+        xSemaphoreGive(s_card_lock);
         return ESP_ERR_INVALID_STATE;
-    }
-    if (s_media_src == MEDIA_SRC_FLASH) {
-        media_close_locked();
     }
     s_rescue_writing = true;
     s_rescue_wpos = 0;
-    xSemaphoreGive(s_media_lock);
+    xSemaphoreGive(s_card_lock);
 
     /* Erase only what the image needs, rounded up to the 4 KB sector. */
     size_t erase = (total + 0xFFFu) & ~(size_t)0xFFFu;
@@ -668,9 +688,9 @@ esp_err_t kvm_storage_rescue_write_begin(size_t total)
     }
     esp_err_t err = esp_partition_erase_range(s_rescue, 0, erase);
     if (err != ESP_OK) {
-        xSemaphoreTake(s_media_lock, portMAX_DELAY);
+        xSemaphoreTake(s_card_lock, portMAX_DELAY);
         s_rescue_writing = false;
-        xSemaphoreGive(s_media_lock);
+        xSemaphoreGive(s_card_lock);
         ESP_LOGE(TAG, "rescue erase failed: %s", esp_err_to_name(err));
     } else {
         ESP_LOGI(TAG, "rescue upload started: %u bytes into a %u KB partition",
@@ -702,184 +722,18 @@ esp_err_t kvm_storage_rescue_write_end(void)
     if (!s_rescue_writing) {
         return ESP_ERR_INVALID_STATE;
     }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
     s_rescue_writing = false;
-    xSemaphoreGive(s_media_lock);
+    xSemaphoreGive(s_card_lock);
     ESP_LOGI(TAG, "rescue image written: %u bytes", (unsigned)s_rescue_wpos);
     return ESP_OK;
 }
 
 void kvm_storage_rescue_write_abort(void)
 {
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
     s_rescue_writing = false;
-    xSemaphoreGive(s_media_lock);
-}
-
-void kvm_storage_media_info(kvm_media_t *out)
-{
-    if (!out) {
-        return;
-    }
-    memset(out, 0, sizeof(*out));
-    out->block_size = MEDIA_BLOCK_SIZE;
-    if (!s_media_lock) {
-        return;
-    }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    out->present = s_media_open;
-    out->writable = false;
-    out->cdrom = s_media_cdrom;
-    out->block_size = s_media_bsize;
-    out->block_count = s_media_blocks;
-    snprintf(out->name, sizeof(out->name), "%s", s_media_name);
-    xSemaphoreGive(s_media_lock);
-}
-
-int32_t kvm_storage_media_read(uint64_t offset, void *buf, uint32_t len)
-{
-    if (!buf || !s_media_lock) {
-        return -1;
-    }
-    /* A read of the last block can run past end-of-file; hand the host zeros
-     * for the tail rather than a short or failed transfer. */
-    memset(buf, 0, len);
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    if (!s_media_open) {
-        xSemaphoreGive(s_media_lock);
-        return -1;
-    }
-
-    int32_t got = -1;
-    const bool sequential = offset == s_ra_next;
-    s_ra_next = offset + len;
-    if (s_media_src != MEDIA_SRC_FLASH && s_ra_len && offset >= s_ra_off &&
-        offset + len <= s_ra_off + s_ra_len) {
-        memcpy(buf, s_ra_buf + (offset - s_ra_off), len);
-        got = (int32_t)len;
-    } else if (s_media_src != MEDIA_SRC_FLASH && sequential && len <= MEDIA_RA_BYTES &&
-               (s_ra_buf || (s_ra_buf = heap_caps_aligned_alloc(64, MEDIA_RA_BYTES,
-                                                               MALLOC_CAP_SPIRAM)) != NULL)) {
-        s_ra_len = 0;
-        if (s_media_src == MEDIA_SRC_WHOLE_SD) {
-            if (s_card && (offset % MEDIA_BLOCK_SIZE) == 0 && (len % MEDIA_BLOCK_SIZE) == 0) {
-                const uint64_t first = offset / MEDIA_BLOCK_SIZE;
-                const uint64_t left = s_card->csd.capacity > first ? s_card->csd.capacity - first : 0;
-                const uint32_t sectors = (uint32_t)(left < MEDIA_RA_BYTES / MEDIA_BLOCK_SIZE
-                                                        ? left
-                                                        : MEDIA_RA_BYTES / MEDIA_BLOCK_SIZE);
-                if (sectors * MEDIA_BLOCK_SIZE >= len &&
-                    sdmmc_read_sectors(s_card, s_ra_buf, (size_t)first, sectors) == ESP_OK) {
-                    s_ra_len = sectors * MEDIA_BLOCK_SIZE;
-                }
-            }
-        } else {
-            UINT br = 0;
-            if (f_lseek(&s_media_file, (FSIZE_t)offset) == FR_OK &&
-                f_read(&s_media_file, s_ra_buf, MEDIA_RA_BYTES, &br) == FR_OK) {
-                s_ra_len = br;
-                if (br < len) {
-                    /* The end of the file: hand over what there is, zero-filled,
-                     * and keep nothing - a partial block is not worth serving. */
-                    memcpy(buf, s_ra_buf, br);
-                    s_ra_len = 0;
-                    got = (int32_t)len;
-                }
-            }
-        }
-        if (s_ra_len) {
-            s_ra_off = offset;
-            memcpy(buf, s_ra_buf, len);
-            got = (int32_t)len;
-        }
-    }
-
-    /* Not served from the read-ahead, or it failed: the read itself. */
-    if (got < 0 && s_media_src == MEDIA_SRC_WHOLE_SD) {
-        /* Raw whole-card passthrough. USB reads are always whole 512-byte blocks,
-         * so the offset and length are sector-aligned; sdmmc_read_sectors goes
-         * straight to the card, bypassing the filesystem. */
-        if (s_card && (offset % MEDIA_BLOCK_SIZE) == 0 && (len % MEDIA_BLOCK_SIZE) == 0 &&
-            sdmmc_read_sectors(s_card, buf, (size_t)(offset / MEDIA_BLOCK_SIZE),
-                               len / MEDIA_BLOCK_SIZE) == ESP_OK) {
-            got = (int32_t)len;
-        }
-    } else if (got < 0 && s_media_src == MEDIA_SRC_FLASH) {
-        /* Memory-mapped flash: fast and reliable, no retry needed. A read past
-         * the end of the partition keeps the zero fill from the memset above. */
-        uint32_t avail = 0;
-        if (offset < s_rescue->size) {
-            const uint64_t rest = s_rescue->size - offset;
-            avail = rest < len ? (uint32_t)rest : len;
-        }
-        if (avail == 0 || esp_partition_read(s_rescue, (size_t)offset, buf, avail) == ESP_OK) {
-            got = (int32_t)len;
-        }
-    } else if (got < 0) {
-        /*
-         * Retry a failed read: this board occasionally returns a CRC error
-         * (0x109) on an SD read at full speed, and such errors are transient -
-         * the same block reads clean on the next try. Over a multi-gigabyte boot
-         * image the rare miss would otherwise reach the target as a disk error.
-         * A handful of attempts turns those into a slight hitch instead.
-         */
-        for (int attempt = 0; attempt < 4 && got < 0; attempt++) {
-            if (f_lseek(&s_media_file, (FSIZE_t)offset) != FR_OK) {
-                continue;
-            }
-            UINT br = 0;
-            if (f_read(&s_media_file, buf, len, &br) == FR_OK) {
-                got = (int32_t)len; /* zero-padded above, so the block is complete */
-                (void)br;
-            }
-        }
-    }
-    if (got < 0) {
-        ESP_LOGW(TAG, "media read failed at offset %llu after retries",
-                 (unsigned long long)offset);
-    }
-    xSemaphoreGive(s_media_lock);
-    return got;
-}
-
-bool kvm_storage_media_writable(void)
-{
-#if SD_CAN_WRITE
-    if (!s_media_lock) {
-        return false;
-    }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    /* Only the whole-card passthrough is writable; images and CD-ROM stay
-     * read-only (a booting target must not corrupt the operator's image). */
-    const bool w = s_media_open && s_media_src == MEDIA_SRC_WHOLE_SD && s_card != NULL;
-    xSemaphoreGive(s_media_lock);
-    return w;
-#else
-    return false; /* pre-3.0 without the IO LDO: writes time out */
-#endif
-}
-
-int32_t kvm_storage_media_write(uint64_t offset, const void *buf, uint32_t len)
-{
-    if (!buf || !s_media_lock) {
-        return -1;
-    }
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
-    s_ra_len = 0; /* the read-ahead may hold these sectors */
-    int32_t done = -1;
-    /* Raw whole-card writes only. USB writes are whole 512-byte blocks, so the
-     * offset and length are sector-aligned. */
-    if (s_media_open && s_media_src == MEDIA_SRC_WHOLE_SD && s_card &&
-        (offset % MEDIA_BLOCK_SIZE) == 0 && (len % MEDIA_BLOCK_SIZE) == 0 &&
-        sdmmc_write_sectors(s_card, buf, (size_t)(offset / MEDIA_BLOCK_SIZE),
-                            len / MEDIA_BLOCK_SIZE) == ESP_OK) {
-        done = (int32_t)len;
-    }
-    xSemaphoreGive(s_media_lock);
-    if (done < 0) {
-        ESP_LOGW(TAG, "media write failed at offset %llu", (unsigned long long)offset);
-    }
-    return done;
+    xSemaphoreGive(s_card_lock);
 }
 
 bool kvm_storage_card_handed_over(void)
@@ -889,23 +743,22 @@ bool kvm_storage_card_handed_over(void)
 
 void kvm_storage_reread(void)
 {
-    if (!s_handed_over || !s_media_lock) {
+    if (!s_handed_over || !s_card_lock) {
         return;
     }
     /* The target had the card read-write; drop our now-stale filesystem view and
-     * mount it fresh so we see whatever it wrote (or reformatted). Close the
-     * medium and unmount under the lock first, so a target read in flight cannot
-     * touch the card object as it is freed. */
+     * mount it fresh so we see whatever it wrote (or reformatted). fs_leaving
+     * takes the medium out first, so no target read is left to touch the card
+     * object as it is freed. */
     ESP_LOGI(TAG, "re-reading microSD after target write access");
     fs_leaving("the card is being re-read");
-    xSemaphoreTake(s_media_lock, portMAX_DELAY);
+    xSemaphoreTake(s_card_lock, portMAX_DELAY);
     s_handed_over = false;
-    media_close_locked();
     if (s_card) {
         (void)esp_vfs_fat_sdcard_unmount(MOUNT_POINT, s_card);
         s_card = NULL;
     }
-    xSemaphoreGive(s_media_lock);
+    xSemaphoreGive(s_card_lock);
     (void)kvm_storage_init();
 }
 
@@ -1085,9 +938,9 @@ static void sd_probe_task(void *arg)
          * it is one sector, and a card that left the slot has to disappear from
          * the target too.
          */
-        if (!s_bus_released && s_media_lock &&
+        if (!s_bus_released && s_card_lock &&
             (s_slot_recheck || now - s_last_io_us >= SD_PROBE_IDLE_US) &&
-            xSemaphoreTake(s_media_lock, 0) == pdTRUE) {
+            xSemaphoreTake(s_card_lock, 0) == pdTRUE) {
             s_slot_recheck = false;
             bool changed = false;
             if (!s_card && !s_handed_over && !s_other_slot_busy && sd_cd_says_card()) {
@@ -1107,20 +960,18 @@ static void sd_probe_task(void *arg)
             } else if (s_card && (!sd_cd_says_card() || !sd_present())) {
                 ESP_LOGW(TAG, "microSD is gone; the slot reads as empty now");
                 /* Files open on the card are closed before it is unmounted. */
-                xSemaphoreGive(s_media_lock);
+                xSemaphoreGive(s_card_lock);
                 fs_leaving("the microSD card was removed");
-                xSemaphoreTake(s_media_lock, portMAX_DELAY);
-                media_close_locked();
+                xSemaphoreTake(s_card_lock, portMAX_DELAY);
                 s_handed_over = false; /* nothing left to hand anyone */
                 if (s_card) {
                     (void)esp_vfs_fat_sdcard_unmount(MOUNT_POINT, s_card);
                     s_card = NULL;
                 }
-                s_ra_len = 0;
                 s_next_probe_us = 0;
                 changed = true;
             }
-            xSemaphoreGive(s_media_lock);
+            xSemaphoreGive(s_card_lock);
             if (changed && s_slot_cb) {
                 /* Re-offers the chosen image, or shows the drive as empty. */
                 s_slot_cb();
@@ -1131,10 +982,10 @@ static void sd_probe_task(void *arg)
             s_climbed_us = 0;
         }
         if (!s_next_probe_us || now < s_next_probe_us || now - s_last_io_us < SD_PROBE_IDLE_US ||
-            s_other_slot_busy || !s_media_lock) {
+            s_other_slot_busy || !s_card_lock) {
             continue;
         }
-        if (xSemaphoreTake(s_media_lock, 0) != pdTRUE) {
+        if (xSemaphoreTake(s_card_lock, 0) != pdTRUE) {
             continue;
         }
         if (s_card && !s_handed_over && s_bus_khz < s_start_khz) {
@@ -1162,7 +1013,7 @@ static void sd_probe_task(void *arg)
         } else if (!s_card || s_bus_khz >= s_start_khz) {
             s_next_probe_us = 0;
         }
-        xSemaphoreGive(s_media_lock);
+        xSemaphoreGive(s_card_lock);
     }
 }
 
@@ -1291,8 +1142,8 @@ static esp_err_t sd_mount(int attempts)
 
 esp_err_t kvm_storage_init(void)
 {
-    if (!s_media_lock) {
-        s_media_lock = xSemaphoreCreateMutex();
+    if (!s_card_lock) {
+        s_card_lock = xSemaphoreCreateMutex();
     }
     /* The built-in rescue image lives here; independent of the card, so this is
      * found whether or not a card ever mounts. Absent on an older table. */
@@ -1340,16 +1191,15 @@ esp_err_t kvm_storage_bus_suspend(bool *was_mounted)
     if (!s_card) {
         return ESP_OK; /* nothing mounted - the SD host controller is already free */
     }
-    /* Pull any image the target is reading before the filesystem goes away. */
+    /* fs_leaving pulls a medium on the card before the filesystem goes away. */
     fs_leaving("the SD host was handed to the WiFi chip");
-    kvm_storage_media_eject();
-    xSemaphoreTake(s_media_lock, portMAX_DELAY); /* not under a speed probe */
+    xSemaphoreTake(s_card_lock, portMAX_DELAY); /* not under a speed probe */
     s_handed_over = false; /* the card is going away; the remount on resume is fresh */
     esp_err_t err = esp_vfs_fat_sdcard_unmount(MOUNT_POINT, s_card);
     s_card = NULL;
     s_next_probe_us = 0;
     s_bus_released = true; /* the slot watcher must keep its hands off it now */
-    xSemaphoreGive(s_media_lock);
+    xSemaphoreGive(s_card_lock);
     if (was_mounted) {
         *was_mounted = true;
     }

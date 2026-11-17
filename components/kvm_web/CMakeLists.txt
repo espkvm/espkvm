@@ -29,6 +29,8 @@ idf_component_register(
         "netlog_api.c"
         "audio_api.c"
         "url_fetch.c"
+        "url_media.c"
+        "media_ws.c"
         "pinprobe_api.c"
         "webrtc_api.c"
         "ts_api.c"

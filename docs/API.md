@@ -90,7 +90,7 @@ be given a URL.
 
 | | |
 |---|---|
-| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), `hdd` (the target's HDD LED is lit or blinking; null when it is not wired), and `csi` (the CSI link as last sampled: `clkHs`, `stop` for the data lanes, `stopClk`, `phyErr`, `ageMs`; see [TROUBLESHOOTING](TROUBLESHOOTING.md#the-hdmi-signal-is-there-but-no-picture)) |
+| `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), `hdd` (the target's HDD LED is lit or blinking; null when it is not wired), `kvmSwitch` (the KVM switch: `machine`, null while a network switch has not answered, `machines`, `busy`, and `error` when a network switch did not answer; null when there is none), and `csi` (the CSI link as last sampled: `clkHs`, `stop` for the data lanes, `stopClk`, `phyErr`, `ageMs`; see [TROUBLESHOOTING](TROUBLESHOOTING.md#the-hdmi-signal-is-there-but-no-picture)) |
 | `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in). A VNC client also has `kind: "vnc"`, `encrypted` and `seconds` (connected for) |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
 | `GET /api/v1/video/frame.jpg` | one frame as a JPEG, on either codec |
@@ -149,8 +149,10 @@ These need the agent API, and answer 409 when no target is attached.
 
 | | |
 |---|---|
-| `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active |
+| `GET /api/v1/storage/images` | disk images on the card and in flash, and which one is active. `url` is the image at a URL: `url` (without a password or query: `msc_url` itself is a secret setting), `state` (`off`, `connecting`, `ready`, `error`, retried while it fails), `message`, `size`. `browser` is a file a console tab serves: `state` (`off`, `serving`, `waiting` for the tab to come back), `name`, `size` |
 | `POST /api/v1/storage/upload`, `/rescue`, `/delete` | manage the images; a file of 4 GB and over goes in parts, each with `&offset=` |
+| `PUT /api/v1/settings` `{"msc_url":"https://.../x.iso","msc_image":"@url"}` | boot from a URL without copying the image: the device reads it with HTTP Range requests as the target asks. `@rescue` and `@wholesd` are the other reserved names |
+| `WS /ws/media` | a console tab serves a file of its own computer as the drive (`"@browser"`). Binary messages, described at the top of `components/kvm_web/media_ws.c`; operator sign-ins only |
 | `POST /api/v1/storage/fetch`, `GET` the same, `POST .../fetch/cancel` | the device downloads `{"url","dest":"card"\|"rescue","name"}` itself; GET is the progress |
 
 ### Power, HDMI-CEC and the target's logs
@@ -158,6 +160,7 @@ These need the agent API, and answer 409 when no target is attached.
 | | |
 |---|---|
 | `POST /api/v1/power/click`, `/hold`, `/reset` | ATX: tap power, hold power for a hard off, tap reset |
+| `POST /api/v1/power/switch?machine=N` | KVM switch: go to machine N (from 1), or to the next one without `machine`. 409 when no switch is set up. Where it is: `kvmSwitch` in `/api/v1/video/status` |
 | `POST /api/v1/power/wake` | send a Wake-on-LAN magic packet to the target's MAC |
 | `POST /api/v1/power/usb` | send the USB wake signal, as a keyboard key does: wakes a sleeping target, and one that is off if its BIOS powers on from USB. Waits up to 3 s and answers `{"status":"awake"\|"woke"\|"no answer"}` |
 | `GET /api/v1/cec` | HDMI-CEC: the devices on the line (name, vendor, power state) and the last messages |

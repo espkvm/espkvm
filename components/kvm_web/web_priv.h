@@ -63,6 +63,10 @@ const httpd_uri_t *url_fetch_routes(size_t *count);
 const httpd_uri_t *audio_api_routes(size_t *count);
 esp_err_t audio_api_init(void);
 void audio_api_drop(int fd);
+/** Virtual media served by a console tab: the /ws/media socket. See media_ws.c. */
+const httpd_uri_t *media_ws_routes(size_t *count);
+esp_err_t media_ws_init(void);
+void media_ws_drop(int fd);
 
 /** The target's log over the network (netconsole). See netlog_api.c. */
 const httpd_uri_t *netlog_api_routes(size_t *count);

@@ -37,7 +37,7 @@ static const char *const k_actions[] = {"", "power", "poweroff", "reset", "wol",
                                         "runbook", "clip", "screenshot",
                                         "hotspot", "netnext", "netswap",
                                         "displaypage", "displaytoggle", "usbwake",
-                                        "menu"};
+                                        "menu", "machine"};
 
 static const char *action_of(const char *key)
 {

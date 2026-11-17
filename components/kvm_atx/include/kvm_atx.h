@@ -54,6 +54,29 @@ esp_err_t kvm_atx_power_hold(void);
 /** Short press of the reset button. */
 esp_err_t kvm_atx_reset(void);
 
+/*
+ * A KVM switch in front of several machines. Either one more button output,
+ * wired to the switch's own select button: each press moves it to the next
+ * machine, the device counts the presses to know where it is, and an optional
+ * LED input on the first machine's light puts it right after a press by hand.
+ * Or a TESmart switch, told the machine over the network (kvmsw_tesmart.c).
+ */
+typedef struct {
+    bool enabled; /**< A switch is set up: a button on a GPIO, or TESmart over the network. */
+    int ports;    /**< How many machines the switch has, 2 to 16. */
+    int port;     /**< The machine selected now, 0-based; -1 while a network switch has not answered. */
+    bool busy;    /**< Presses or a command are queued or running. */
+    bool error;   /**< A network switch did not answer the last command. */
+} kvm_kvmsw_status_t;
+
+void kvm_kvmsw_status(kvm_kvmsw_status_t *out);
+
+/** Move the switch to machine @p port (0-based), pressing as often as needed. */
+esp_err_t kvm_kvmsw_select(int port);
+
+/** One press: the next machine. */
+esp_err_t kvm_kvmsw_next(void);
+
 #ifdef __cplusplus
 }
 #endif

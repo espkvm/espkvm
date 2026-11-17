@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "kvm_media.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,49 +125,34 @@ bool kvm_storage_writable(void);
 /** Human-readable reason writing is unavailable (NULL when writable), for the UI. */
 const char *kvm_storage_write_unavailable_reason(void);
 
-/* ---- virtual media: an image file exposed to the target over USB MSC ------
+/* ---- sources for virtual media (kvm_media) ---------------------------------
  *
- * One image file on the card is "inserted" at a time. The firmware keeps the
- * card mounted throughout and reads the file on the target's behalf, so there
- * is no USB<->app ownership handoff: uploads and target reads coexist. The
- * image is served read-only, which is what booting from it needs and which
- * keeps a booting target from corrupting the operator's file.
+ * The card can back the target's USB drive in two ways: one image file, read
+ * by the firmware on the target's behalf so uploads and target reads coexist,
+ * or the whole card as raw sectors. Each call makes a source to hand to
+ * kvm_media_insert(). A card source leaves the drive by itself when the card
+ * goes away.
  *
  * On exFAT an image may pass 4 GiB. The browser upload cannot make one that big
  * (HTTP body sizes are 32-bit), so such a file is copied onto the card elsewhere.
  */
 
-typedef struct {
-    bool present;         /**< an image is selected and open */
-    bool writable;        /**< host may write (always false in this version) */
-    bool cdrom;           /**< served as a CD-ROM (2048-byte, PDT 0x05) not a disk */
-    uint32_t block_size;  /**< logical block size offered to the host, 512 or 2048 */
-    uint64_t block_count; /**< image size / block_size */
-    char name[64];        /**< file name currently offered, empty when ejected */
-} kvm_media_t;
-
 /**
- * Insert an image: open @p name (a file in the mount point root, e.g.
- * "ubuntu.img") read-only and compute its geometry. Passing NULL or "" ejects.
- * @p cdrom presents it as a CD-ROM (2048-byte blocks, for .iso images) rather
- * than a removable disk (512-byte blocks). The caller decides the type, since it
- * knows the file name; the storage layer only serves whatever it is told.
- * @return ESP_OK, ESP_ERR_INVALID_STATE with no card, ESP_ERR_NOT_FOUND if the
- *         file is missing, or ESP_ERR_INVALID_SIZE if it is smaller than a block.
+ * An image file in the card's root, e.g. "ubuntu.iso", served read-only, as a
+ * CD-ROM when @p cdrom (2048-byte blocks), else as a removable disk.
+ * @return ESP_OK, ESP_ERR_INVALID_STATE with no card, ESP_ERR_INVALID_ARG for a
+ *         name with a slash, or ESP_ERR_NOT_FOUND if the file is missing.
  */
-esp_err_t kvm_storage_media_select(const char *name, bool cdrom);
+esp_err_t kvm_storage_source_image(const char *name, bool cdrom, kvm_media_source_t *out);
 
 /**
- * Expose the whole microSD card to the target as a removable flash drive - every
- * file on it, not one image - by serving its raw sectors. Read-only like the rest.
+ * The whole microSD card as a removable flash drive: every file on it, not one
+ * image. Writable by the target where the card can be written at all (see
+ * kvm_storage_writable). From here the firmware keeps off the filesystem until
+ * kvm_storage_reread().
  * @return ESP_OK, or ESP_ERR_INVALID_STATE when no card is mounted.
  */
-esp_err_t kvm_storage_media_select_whole_sd(void);
-
-/** Eject: close the image; the host then sees the drive with no medium. */
-void kvm_storage_media_eject(void);
-
-void kvm_storage_media_info(kvm_media_t *out);
+esp_err_t kvm_storage_source_whole_card(kvm_media_source_t *out);
 
 /* ---- built-in rescue image (on-flash) -------------------------------------
  *
@@ -187,12 +173,12 @@ typedef struct {
 void kvm_storage_rescue_status(kvm_rescue_t *out);
 
 /**
- * Insert the built-in rescue image as the USB drive. Coexists with the card:
- * this simply makes the flash image the inserted medium instead of a file.
- * @return ESP_OK, ESP_ERR_NOT_SUPPORTED with no rescue partition, or
- *         ESP_ERR_NOT_FOUND when the partition is present but empty.
+ * The built-in rescue image as a source, read-only. Coexists with the card.
+ * @return ESP_OK, ESP_ERR_NOT_SUPPORTED with no rescue partition,
+ *         ESP_ERR_NOT_FOUND when it is empty, or ESP_ERR_INVALID_STATE while it
+ *         is being written.
  */
-esp_err_t kvm_storage_media_select_rescue(bool cdrom);
+esp_err_t kvm_storage_source_rescue(bool cdrom, kvm_media_source_t *out);
 
 /*
  * Write a new image into the rescue partition, streamed like a firmware update.
@@ -205,30 +191,6 @@ esp_err_t kvm_storage_rescue_write_begin(size_t total);
 esp_err_t kvm_storage_rescue_write(const void *buf, size_t len);
 esp_err_t kvm_storage_rescue_write_end(void);
 void kvm_storage_rescue_write_abort(void);
-
-/**
- * Read @p len bytes at byte @p offset from the inserted image. Thread-safe
- * against selection and against itself. Missing bytes past end-of-file are
- * zero-filled, so a full block is always returned.
- * @return bytes read (== @p len on success), or -1 when nothing is inserted.
- */
-int32_t kvm_storage_media_read(uint64_t offset, void *buf, uint32_t len);
-
-/**
- * Whether the target may write to the inserted medium. Only the whole-card
- * passthrough is writable, and only where the card can be written at all (see
- * kvm_storage_writable); images, the rescue partition and CD-ROM media are always
- * read-only.
- */
-bool kvm_storage_media_writable(void);
-
-/**
- * Write @p len bytes at byte @p offset to the inserted medium. Only valid when
- * kvm_storage_media_writable() is true (the whole-card passthrough). Thread-safe.
- * @return bytes written (== @p len), or -1 if the medium is not writable or the
- *         card write failed.
- */
-int32_t kvm_storage_media_write(uint64_t offset, const void *buf, uint32_t len);
 
 /**
  * Whether the whole card is currently handed to the target as a read-write drive.

@@ -661,6 +661,7 @@ void http_sess_close_cb(httpd_handle_t hd, int sockfd)
     video_remove_client(sockfd);
     serial_api_drop(sockfd);
     audio_api_drop(sockfd);
+    media_ws_drop(sockfd);
     kvm_auth_forget_socket(sockfd);
 }
 

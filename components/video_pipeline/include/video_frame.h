@@ -126,7 +126,8 @@ void video_frame_set_demand_cb(video_frame_demand_cb_t cb);
 bool video_frame_wanted(int64_t lead_us);
 
 /*
- * Uploads. While one runs the stream is encoded at no more than
+ * Uploads, and reads from a file a console tab serves to the target
+ * (kvm_web/media_ws.c). While one runs the stream is encoded at no more than
  * VIDEO_UPLOAD_FPS. The encoder and the Ethernet MAC share the chip's bus: at
  * full frame rate the MAC drops frames and a 3.5 MB/s upload falls to 0.3.
  */

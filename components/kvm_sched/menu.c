@@ -22,6 +22,7 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "kvm_atx.h"
 #include "kvm_caps.h"
 #include "kvm_display.h"
 #include "kvm_sched.h"
@@ -64,6 +65,11 @@ static void build(void)
         add("Press power", "power", false);
         add("Press reset", "reset", true);
         add("Force off", "poweroff", true);
+    }
+    kvm_kvmsw_status_t sw;
+    kvm_kvmsw_status(&sw);
+    if (sw.enabled) {
+        add("Next machine", "machine", false);
     }
     add("Screenshot", "screenshot", false);
     add("Save clip", "clip", false);

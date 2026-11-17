@@ -86,6 +86,8 @@
 #include "kvm_tls.h"
 #include "kvm_acme.h"
 #include "kvm_tools.h"
+#include "kvm_url_media.h"
+#include "kvm_browser_media.h"
 #include "kvm_proto.h"
 #include "usb_hid.h"
 #include "video_frame.h"
@@ -199,6 +201,37 @@ esp_err_t api_storage_images_get(httpd_req_t *req)
         cJSON_AddBoolToObject(rj, "supported", rescue.supported);
         cJSON_AddBoolToObject(rj, "hasImage", rescue.has_image);
         cJSON_AddNumberToObject(rj, "capacityBytes", (double)rescue.capacity_bytes);
+    }
+    /* The image at a URL: its address, and whether it is reachable. */
+    kvm_url_media_status_t us;
+    kvm_url_media_status(&us);
+    cJSON *uj = cJSON_AddObjectToObject(root, "url");
+    if (uj) {
+        /* The link without a user name, a password or the query, which may
+         * hold a signed token: msc_url is a secret, and this list is shown to
+         * view-only sign-ins too. Enough to recognise the image. */
+        char shown[160];
+        const char *u = kvm_setting_str("msc_url");
+        const char *host = strstr(u, "://");
+        host = host ? host + 3 : u;
+        const size_t auth_end = strcspn(host, "/?#");
+        const char *at = memchr(host, '@', auth_end);
+        const size_t scheme = (size_t)(host - u);
+        const char *rest = at ? at + 1 : host;
+        snprintf(shown, sizeof(shown), "%.*s%.*s", (int)scheme, u, (int)strcspn(rest, "?#"), rest);
+        cJSON_AddStringToObject(uj, "url", shown);
+        cJSON_AddStringToObject(uj, "state", us.state);
+        cJSON_AddStringToObject(uj, "message", us.message);
+        cJSON_AddNumberToObject(uj, "size", (double)us.size);
+    }
+    /* A file served by a console tab. */
+    kvm_browser_media_status_t bs;
+    kvm_browser_media_status(&bs);
+    cJSON *bj = cJSON_AddObjectToObject(root, "browser");
+    if (bj) {
+        cJSON_AddStringToObject(bj, "state", bs.state);
+        cJSON_AddStringToObject(bj, "name", bs.name);
+        cJSON_AddNumberToObject(bj, "size", (double)bs.size);
     }
     /* While the whole card is handed to the target, the firmware stays off the
      * filesystem, so there is no file list to give and uploads are disabled. */

@@ -136,6 +136,12 @@ CONFIG_LWIP_TCP_WND_DEFAULT=65535
 # a burst overflows it, lwIP drops the rest until its next timer (125 ms), and
 # every upload is stuck at ~64 KB/s per connection whatever the link.
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=48
+# The same burst also overflows the Ethernet receive ring (20 x 512 B, about 7
+# frames). An image read over HTTP lost 4% of its packets, and with no SACK in
+# lwIP each loss stalls the connection: 1.6 MB/s. 30 buffers and pause frames
+# when they run low: 4.0 MB/s, 1/7 of the losses. JetKVM Mini, 2026-11-16.
+CONFIG_ETH_DMA_RX_BUFFER_NUM=30
+CONFIG_ETH_SOFT_FLOW_CONTROL=y
 # Tailscale puts every tunnelled packet on one UDP socket. A 64 KB window
 # arrives as ~45 datagrams in a burst; the default mailbox of 6 dropped most
 # of them and a viewer over the tunnel got ~50 KB/s.
