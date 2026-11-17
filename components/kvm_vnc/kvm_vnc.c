@@ -1082,12 +1082,12 @@ static void conn_close(vnc_conn_t *conn)
 }
 
 /*
- * Wait up to a second for the next message. Meanwhile a new client may knock:
+ * Wait up to @p timeout_ms for the next message. Meanwhile a new client may knock:
  * there is one session at a time, and a client left open somewhere would
  * otherwise keep everyone else out. 1: a message is there. 0: nothing yet.
  * 2: someone is at the listener.
  */
-static int wait_message(const vnc_conn_t *conn)
+static int wait_message(const vnc_conn_t *conn, uint32_t timeout_ms)
 {
     if (conn->tls && mbedtls_ssl_get_bytes_avail(&conn->tls->ssl) > 0) return 1;
     fd_set fds;
@@ -1098,10 +1098,28 @@ static int wait_message(const vnc_conn_t *conn)
         FD_SET(s_listener, &fds);
         if (s_listener > top) top = s_listener;
     }
-    struct timeval wait = {.tv_sec = 1, .tv_usec = 0};
+    struct timeval wait = {.tv_sec = timeout_ms / 1000, .tv_usec = (timeout_ms % 1000) * 1000};
     if (select(top + 1, &fds, NULL, NULL, &wait) <= 0) return 0;
     if (s_listener >= 0 && FD_ISSET(s_listener, &fds)) return 2;
     return FD_ISSET(conn->fd, &fds) ? 1 : 0;
+}
+
+/*
+ * An update request waits for a new frame, and on a still screen with MJPEG
+ * none comes for a while. Meanwhile the keys and the mouse must still be read:
+ * the move that would change the screen is one of them. Polls the socket once
+ * a tick, and wakes at once for a frame. 1 or 2 as wait_message(), 0: a new
+ * frame, or @p until passed.
+ */
+static int wait_frame_or_message(const vnc_conn_t *conn, uint32_t seen, int64_t until)
+{
+    for (;;) {
+        const int ready = wait_message(conn, 0);
+        if (ready) return ready;
+        const int64_t left_ms = (until - esp_timer_get_time()) / 1000;
+        if (left_ms <= 0) return 0;
+        if (video_frame_wait_new(seen, left_ms < 10 ? (uint32_t)left_ms : 10)) return 0;
+    }
 }
 
 /* Closes its connection (and any it took over) before it returns. */
@@ -1125,9 +1143,46 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
     uint32_t last_seq = video_frame_seq();
     vnc_h264_t h264 = {0};
     bool h264_only_warned = false;
+    /* An update request not answered yet: what it waits for, and until when. */
+    bool pending = false;
+    bool pending_incremental = false;
+    bool pending_waits = false;
+    uint32_t pending_seen = 0;
+    int64_t pending_until = 0;
     bool alive = true;
     while (alive && generation == s_generation) {
-        const int ready = wait_message(&conn);
+        int ready;
+        if (pending) {
+            ready = pending_waits ? wait_frame_or_message(&conn, pending_seen, pending_until) : 0;
+            if (ready == 0) {
+                pending = false;
+                const bool fresh = !pending_waits || video_frame_seq() != pending_seen;
+                if (state.h264 && video_frame_payload() == VIDEO_PAYLOAD_H264) {
+                    if (stream_open) {
+                        capture_vnc_snapshot_end();
+                        stream_open = false;
+                    }
+                    alive = fresh ? rfb_send_h264(&conn, generation, &width, &height, state.desktop_size, &h264)
+                                  : send_empty_update(&conn, generation);
+                } else if (state.tight) {
+                    h264.started = false;
+                    alive = fresh ? rfb_send_update(&conn, generation, &width, &height, state.desktop_size,
+                                                    pending_incremental, &has_frame, &last_seq, &stream_open)
+                                  : send_empty_update(&conn, generation);
+                } else {
+                    /* H.264 only, and the device makes JPEG: nothing to send.
+                     * Paced, or the client asks again at once, round after round. */
+                    if (!h264_only_warned) {
+                        ESP_LOGW(TAG, "client takes only H.264 and the video is MJPEG; switch the codec to H.264");
+                        h264_only_warned = true;
+                    }
+                    alive = send_empty_update(&conn, generation);
+                }
+                continue;
+            }
+        } else {
+            ready = wait_message(&conn, 1000);
+        }
         if (ready == 0) continue;
         if (ready == 2) {
             /* The newcomer takes over only once it has signed in: an
@@ -1151,6 +1206,7 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
             height = nh;
             strlcpy(ip, new_ip, sizeof(ip));
             memset(&state, 0, sizeof(state));
+            pending = false;
             has_frame = false;
             last_seq = video_frame_seq();
             h264.started = false; /* the newcomer's decoder starts on an IDR */
@@ -1215,25 +1271,24 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
         case 3: { /* FramebufferUpdateRequest */
             uint8_t request[9];
             if (!recv_exact(&conn, request, sizeof(request), generation)) { alive = false; break; }
+            /* Answered from the loop above once there is something to send.
+             * A second request before that only matters if it wants all. */
+            const bool incremental = request[0] != 0 && (!pending || pending_incremental);
+            const int64_t now = esp_timer_get_time();
+            pending = true;
+            pending_incremental = incremental;
             if (state.h264 && video_frame_payload() == VIDEO_PAYLOAD_H264) {
-                if (stream_open) {
-                    capture_vnc_snapshot_end();
-                    stream_open = false;
-                }
-                alive = rfb_send_h264(&conn, generation, &width, &height, state.desktop_size, &h264);
+                pending_waits = h264.started;
+                pending_seen = h264.last_seq;
+                pending_until = now + (int64_t)(h264.need_key ? VNC_KEYFRAME_WAIT_MS : VNC_READ_TIMEOUT_MS) * 1000;
             } else if (state.tight) {
-                h264.started = false;
-                alive = rfb_send_update(&conn, generation, &width, &height, state.desktop_size,
-                                        request[0] != 0, &has_frame, &last_seq, &stream_open);
+                pending_waits = incremental && has_frame;
+                pending_seen = last_seq;
+                pending_until = now + (int64_t)VNC_READ_TIMEOUT_MS * 1000;
             } else {
-                /* H.264 only, and the device makes JPEG: nothing to send. */
-                if (!h264_only_warned) {
-                    ESP_LOGW(TAG, "client takes only H.264 and the video is MJPEG; switch the codec to H.264");
-                    h264_only_warned = true;
-                }
-                /* Paced, or the client asks again at once, round after round. */
-                (void)video_frame_wait_new(video_frame_seq(), 100);
-                alive = send_empty_update(&conn, generation);
+                pending_waits = true;
+                pending_seen = video_frame_seq();
+                pending_until = now + 100 * 1000;
             }
             break;
         }
