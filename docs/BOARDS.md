@@ -324,6 +324,12 @@ keyboard and mouse.
 </tr>
 </table>
 
+**[JetKVM Mini](https://espkvm.io/boards/jetkvm-mini/)** and **[JetKVM Mini W](https://espkvm.io/boards/jetkvm-mini-w/)**
+
+A finished box from JetKVM, not a bare board: an ESP32-P4X (rev 3.x) with 32 MB PSRAM, 16 MB flash, a TC358743 for the HDMI input, 100M Ethernet, microSD, a 240x240 screen and two buttons. No capture board or ribbon is needed. The Mini W has an ESP32-C5 for dual-band Wi-Fi in place of the Ethernet. Every pin comes from JetKVM's open firmware ([jetkvm/mini](https://github.com/jetkvm/mini)). Build overlays: `boards/jetkvm_mini.defaults`, and for the Mini W `boards/jetkvm_mini_w.defaults` on top of it.
+
+Flash it over the EXT USB port with USB Debugging turned on in JetKVM's Settings, Advanced, and back up the flash first ([boards/README.md](../boards/README.md) has the steps). Its HDMI sound is not wired to the P4, so the device offers the target a USB speaker and takes the sound from there (Settings, Audio). There are no free pins for ATX power control or a serial console. Tested on a Mini: the picture, Ethernet, keyboard and mouse, the screen and buttons, microSD and sound. The Mini W's Wi-Fi has not run yet.
+
 ## Boards built from a schematic, never run
 
 :warning: **Nobody has run this firmware on any of these.** Their pins were read

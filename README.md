@@ -111,7 +111,9 @@ What is coming next is in the [roadmap](ROADMAP.md).
 
 **Do not put this on the public internet.** It has a login, two-factor sign-in
 and TLS, and has had a security review of my own but not an external one. Secure
-boot and flash encryption are off, and update images are not signed. Keep it on
+boot and flash encryption are off. Each release's checksums are signed, so a
+download can be checked before it is flashed
+([docs/FLASHING.md](docs/FLASHING.md#checking-a-download)). Keep it on
 a network you trust, or reach it over the Tailscale or WireGuard built into it
 ([docs/SETUP.md](docs/SETUP.md#reaching-it-from-outside-tailscale-or-wireguard)).
 
@@ -126,13 +128,13 @@ are optional.
 
 **The capture board:** a [Geekworm C790](https://wiki.geekworm.com/C790) or a
 [Waveshare HDMI to CSI Adapter](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter).
-The M5Stack Unit PoE-P4 takes its own [Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d) instead.
+The M5Stack Unit PoE-P4 takes its own [Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d) instead. The JetKVM Mini has one built in.
 
 **The ESP32-P4 board**, one of these:
 
 | Board | Network | Chip revision | |
 |---|---|---|---|
-| [Waveshare ESP32-P4-ETH](https://espkvm.io/boards/p4-eth/) | Ethernet | 1.x or 3.x | tested; the default |
+| [Waveshare ESP32-P4-ETH](https://espkvm.io/boards/p4-eth/) | Ethernet | 1.x or 3.x | tested |
 | [Espressif ESP32-P4 Function EV](https://espkvm.io/boards/funcev/) | Ethernet, Wi-Fi | 1.x or 3.x | tested |
 | [Waveshare ESP32-P4-NANO](https://espkvm.io/boards/p4-nano/) | Ethernet, Wi-Fi | 1.x or 3.x | tested |
 | [Guition ESP32-P4-M3-Dev](https://espkvm.io/boards/p4-guition/) | Ethernet, Wi-Fi | 1.x or 3.x | tested |
@@ -147,14 +149,16 @@ The M5Stack Unit PoE-P4 takes its own [Add-on Display In](https://shop.m5stack.c
 | [Waveshare ESP32-P4-WIFI6-DB](https://espkvm.io/boards/p4-wifi6-db/) | 5 GHz Wi-Fi only | 3.x | tested |
 | [VIEWE ESP32-P4-Pi](https://espkvm.io/boards/viewe-p4-pi/) | Ethernet, Wi-Fi | 1.x | untested |
 | [M5Stack Unit PoE-P4X](https://espkvm.io/boards/m5-poe-p4x/) | Ethernet with PoE | 3.x | untested |
+| [JetKVM Mini](https://espkvm.io/boards/jetkvm-mini/) | Ethernet | 3.x | tested; a finished box, capture built in |
+| [JetKVM Mini W](https://espkvm.io/boards/jetkvm-mini-w/) | 5 GHz Wi-Fi only | 3.x | untested; the Mini with Wi-Fi |
 
-"Untested" means the image is built from the vendor's schematic and nobody has
-run it yet; if you have one, say how it went. Another P4 board? [Every ESP32-P4
+"Untested" means nobody has run the image on that board yet. If you have one,
+say how it went. Another P4 board? [Every ESP32-P4
 board I have looked at](https://espkvm.io/boards/all/) says whether it can work. Rev 3.x silicon runs H.264 three
 times faster at 1080p, and it takes its own image: the boot log prints the
 revision, and so does the chip, **ESP32-P4NRW32X** with an X being rev 3.x.
 
-To choose between them: [compare the boards](https://espkvm.io/boards/compare/).
+To choose between them: the [board catalog](https://espkvm.io/boards/) on the site rates each board out of five, best first, and [compare the boards](https://espkvm.io/boards/compare/) puts them side by side.
 Photos, cables, which port goes to the target, cases and status screens are in
 [docs/BOARDS.md](docs/BOARDS.md), with what rules a board out if yours is not
 listed.
