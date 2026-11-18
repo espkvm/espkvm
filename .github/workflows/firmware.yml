@@ -372,6 +372,34 @@ jobs:
             tar --null -T - --transform "s,^,${name}/,S" -czf "out/${name}.tar.gz"
           tar -tzf "out/${name}.tar.gz" | wc -l
 
+      - name: Sign the checksums
+        # sha256sums.txt covers every file of the release, and minisign signs
+        # it. The secret is the unencrypted key from `minisign -G -W`. A fork
+        # without the secret still gets its release, only unsigned.
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+        run: |
+          cd out
+          sha256sum ./*.zip ./*.tar.gz | sed 's| \./| |' >> sha256sums.txt
+          sort -k2 -o sha256sums.txt sha256sums.txt
+          if [ -z "${MINISIGN_KEY}" ]; then
+            if [ "${GITHUB_REPOSITORY}" = espkvm/espkvm ]; then
+              echo "::error::MINISIGN_KEY is not set"; exit 1
+            fi
+            echo "::warning::no MINISIGN_KEY secret, the release is not signed"; exit 0
+          fi
+          sudo apt-get install -y -qq minisign >/dev/null
+          key="${RUNNER_TEMP}/minisign.key"
+          (umask 077; printf '%s\n' "${MINISIGN_KEY}" > "${key}")
+          minisign -S -s "${key}" -m sha256sums.txt -t "ESP-KVM ${GITHUB_REF_NAME}"
+          rm -f "${key}"
+          # Check against the public key in the repository, so a wrong secret
+          # fails here and not on a user's machine.
+          if [ -f ../minisign.pub ]; then
+            minisign -V -p ../minisign.pub -m sha256sums.txt
+          fi
+          cat sha256sums.txt
+
       - name: Build release notes from the changelog
         run: |
           # The tag is v.<version>; pull that version's section out of the

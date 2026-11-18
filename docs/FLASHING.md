@@ -30,6 +30,23 @@ ESP32-P4 Function EV Board):
 For a first flash from a computer, the **merged** image is the simplest: one file,
 written at offset 0.
 
+### Checking a download
+
+From the release after 0.87.0 on, `sha256sums.txt` lists every file of the release and `sha256sums.txt.minisig` is its signature. CI signs it with this key, and the private half never leaves CI:
+
+```
+RWT4vgu3y5NjVA5BZXZvWztNO983re08arr7Q+YZKb7G+xeXpm3m1fcg
+```
+
+It is also in `minisign.pub` in the repository. With [minisign](https://jedisct1.github.io/minisign/) installed, put the downloads in one folder and run there:
+
+```sh
+minisign -Vm sha256sums.txt -P RWT4vgu3y5NjVA5BZXZvWztNO983re08arr7Q+YZKb7G+xeXpm3m1fcg
+sha256sum -c --ignore-missing sha256sums.txt
+```
+
+The first line checks the list, the second checks your files against it. Both work with no network, so a machine that never goes online can check what it is about to flash.
+
 ### Which revision
 
 The ESP32-P4 exists in two silicon families, and an image built for one **refuses
