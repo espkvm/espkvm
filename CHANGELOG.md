@@ -2,7 +2,7 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
-## [Unreleased]
+## [0.88.0] - 2026-11-18
 
 ### Added
 
@@ -10,12 +10,12 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ### Changed
 
-- The Tailscale client now builds on the current upstream microlink instead of my old fork of it, with the changes ESP-KVM needs carried on top. That brings in upstream's security fixes for the WireGuard and Noise code and less CPU use while the tunnel is idle. Login with or without a key, the peers page, Headscale, the HTTPS certificate and relayed (DERP) connections all ran on a JetKVM Mini, and video over the tailnet is as fast as before.
+- The Tailscale client now builds on the current upstream microlink instead of my old fork of it, with the changes ESP-KVM needs carried on top. That brings in upstream's security fixes for the WireGuard and Noise code, and an idle loop that waits for events instead of a timer. Login with or without a key, the peers page, Headscale, the HTTPS certificate and relayed (DERP) connections all ran on a JetKVM Mini, and Tailscale also on a P4-ETH and on a Function EV over Wi-Fi. Video over the tailnet is as fast as before.
 
 ### Fixed
 
 - Headscale: its auth keys (hskey-auth-...) are 89 characters long and did not fit the auth key field, which took 63. It now takes up to 127.
-- Classic WireGuard: the device answered tunnel traffic over its normal network instead of through the tunnel, so nothing came back to the other end. It now works both ways. The console over the tunnel loads in a third of a second on a JetKVM Mini.
+- Classic WireGuard: the device answered tunnel traffic over its normal network instead of through the tunnel, so nothing came back to the other end. It now works both ways: the console over the tunnel loads in a third of a second, and on a P4-ETH H.264 gets the same frame rate through the tunnel as on the LAN.
 - Classic WireGuard sent nothing when Tailscale had run earlier since the last restart, for example after switching from one to the other in Settings. It now starts either way.
 
 ## [0.87.0] - 2026-11-17

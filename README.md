@@ -113,7 +113,8 @@ What is coming next is in the [roadmap](ROADMAP.md).
 and TLS, and has had a security review of my own but not an external one. Secure
 boot and flash encryption are off. Each release's checksums are signed, so a
 download can be checked before it is flashed
-([docs/FLASHING.md](docs/FLASHING.md#checking-a-download)). Keep it on
+([docs/FLASHING.md](docs/FLASHING.md#checking-a-download)). The minisign public
+key is `RWT4vgu3y5NjVA5BZXZvWztNO983re08arr7Q+YZKb7G+xeXpm3m1fcg`. Keep it on
 a network you trust, or reach it over the Tailscale or WireGuard built into it
 ([docs/SETUP.md](docs/SETUP.md#reaching-it-from-outside-tailscale-or-wireguard)).
 
