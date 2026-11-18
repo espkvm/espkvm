@@ -193,6 +193,15 @@ CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y
 
+# microlink would mark an OTA image valid only once Tailscale connects, and roll
+# back after 5 minutes otherwise. The device has its own update trial
+# (kvm_web/ota_trial.c), and Tailscale is optional, so that stays off.
+# CONFIG_ML_OTA_ROLLBACK is not set
+
+# Direct Tailscale UDP best effort, not in the Wi-Fi voice queue: from the C6
+# over esp-hosted those frames did not reach a peer on the same Wi-Fi.
+CONFIG_ML_UDP_TOS=0
+
 # See both sides of a target going to sleep: the bus falling quiet and coming
 # back are the first two questions when a keyboard dies after a wake.
 CONFIG_TINYUSB_SUSPEND_CALLBACK=y

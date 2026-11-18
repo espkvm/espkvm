@@ -377,22 +377,24 @@ static void wg_reconcile(void)
     wgpeer.endport_port = (u16_t)port;
     wgpeer.keep_alive = (u16_t)kvm_setting_int("wg_keepalive");
 
-    wg_lock();
-    netif->state = &init;
-    err_t err = wireguardif_init(netif);
-    if (err != ERR_OK) {
-        wg_unlock();
-        ESP_LOGE(TAG, "wireguardif_init: %d", err);
-        free(netif);
-        kvm_cap_report(KVM_CAP_WG, true, NULL);
-        return;
-    }
     /* /24 tunnel subnet, split route (not the default netif). */
     ip4_addr_t ip4, mask, gw;
     ip4_addr_copy(ip4, *ip_2_ip4(&tun_ip));
     IP4_ADDR(&mask, 255, 255, 255, 0);
     IP4_ADDR(&gw, 0, 0, 0, 0);
-    netif_set_addr(netif, &ip4, &mask, &gw);
+
+    wg_lock();
+    /* netif_add runs wireguardif_init on the init data, puts the interface in
+     * lwIP's list, so replies to the tunnel subnet are routed through it, and
+     * sets the input wireguardif hands each decrypted packet to. */
+    if (!netif_add(netif, &ip4, &mask, &gw, &init, wireguardif_init, tcpip_input)) {
+        wg_unlock();
+        ESP_LOGE(TAG, "the WireGuard interface did not start");
+        free(netif);
+        kvm_cap_report(KVM_CAP_WG, true, NULL);
+        return;
+    }
+    err_t err;
     netif_set_up(netif);
     netif_set_link_up(netif);
 

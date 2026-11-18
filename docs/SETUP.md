@@ -129,6 +129,8 @@ your hub.
 
 Tailscale does not need an auth key. Turn it on with the key field empty and the VPN tab shows **Sign in to Tailscale**: the link opens Tailscale's page, you approve the device with your account, and it joins a few seconds later. An auth key still works the same way as before, for a device you set up without a browser. **Log out of the tailnet** makes the device forget its keys, so the next start asks again. It works only from the local network: over Tailscale itself it is refused, because nobody could then reach the sign-in link.
 
+A self-hosted Headscale server works too. Put its address in **Control server**, with `http://` in front for a server without TLS and the port in the address if it is not the default one, and give the device a Headscale auth key (`hskey-auth-...`). I run it against Headscale 0.29.
+
 The same tab lists the other devices on the tailnet: whose they are, whether traffic to each goes straight or through a Tailscale relay (and which one), and the last round trip. A slow console over Tailscale is usually a relay. The list of open consoles names a tailnet device and its owner instead of a 100.x address.
 
 Two settings use what Tailscale knows about who is connecting:

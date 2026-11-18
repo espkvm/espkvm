@@ -45,7 +45,7 @@ typedef struct {
     char cert_domain[128];
     /** While the device waits for a person to approve it (no auth key): the
      *  URL to open. "" otherwise. */
-    char login_url[160];
+    char login_url[256]; /* MICROLINK_AUTH_URL_MAX */
     /** Why the control plane refused the device, "" if it did not. */
     char error[96];
     char derp[8];       /**< our home relay region, e.g. "fra"; "" before the map */

@@ -62,7 +62,7 @@ static int c2n(const char *method, const char *path, char *body, size_t cap, voi
  * struct but keeps the pointers, so the auth key and hostname it uses are these
  * buffers. They double as the snapshot we compare against to decide whether a
  * settings change actually needs a costly rejoin. */
-static char s_auth[64];
+static char s_auth[128]; /* Headscale 0.28+ keys are 89 characters */
 static char s_name[64];
 static bool s_tls;
 static char s_ctrl_host[64]; /* self-hosted control server (Headscale); "" = Tailscale */
@@ -259,7 +259,7 @@ static void ts_reconcile(void)
         .stun_interval_ms = 60000,
         /* Reach the hosted control plane, which is HTTPS-only. Operators pointing
          * at a plain-HTTP Headscale can turn this off. */
-        .ctrl_tls = tls,
+        .ctrl_tls = tls ? ML_CTRL_TLS_ON : ML_CTRL_TLS_OFF,
         /* A self-hosted control server (Headscale/Ionscale), or NULL for Tailscale.
          * s_ctrl_host is a static buffer so it outlives the session, like s_auth. */
         .ctrl_host = s_ctrl_host[0] ? s_ctrl_host : NULL,
@@ -472,7 +472,9 @@ void kvm_ts_status(kvm_ts_status_t *out)
         }
         snprintf(out->name, sizeof(out->name), "%s", microlink_get_self_name(ml));
         snprintf(out->cert_domain, sizeof(out->cert_domain), "%s", microlink_get_cert_domain(ml));
-        snprintf(out->login_url, sizeof(out->login_url), "%s", microlink_get_login_url(ml));
+        if (microlink_get_auth_url(ml, out->login_url, sizeof(out->login_url)) != ESP_OK) {
+            out->login_url[0] = '\0';
+        }
         snprintf(out->error, sizeof(out->error), "%s", microlink_get_register_error(ml));
         microlink_get_derp_home(ml, out->derp);
         out->derp_up = microlink_derp_connected(ml);
@@ -487,7 +489,7 @@ static void fill_peer(microlink_t *ml, const microlink_peer_info_t *pi, kvm_ts_p
     snprintf(out->name, sizeof(out->name), "%s", pi->hostname);
     snprintf(out->user, sizeof(out->user), "%s", pi->user);
     snprintf(out->user_display, sizeof(out->user_display), "%s", pi->user_display);
-    out->online = pi->net_online;
+    out->online = pi->online ? 1 : 0;
     out->direct = pi->direct_path && pi->endpoint_ip;
     if (out->direct) {
         char ip[16];
@@ -516,7 +518,9 @@ bool kvm_ts_peer(int index, kvm_ts_peer_t *out)
     bool ok = false;
     if (s_mtx && xSemaphoreTake(s_mtx, pdMS_TO_TICKS(100)) == pdTRUE) {
         microlink_peer_info_t pi;
-        if (s_started && s_ml && microlink_get_peer_info(s_ml, index, &pi) == ESP_OK && pi.online) {
+        /* A peer from microlink's NVS cache has a cut name and no owner until
+         * the netmap confirms it, and may be from another tailnet. */
+        if (s_started && s_ml && microlink_get_peer_info(s_ml, index, &pi) == ESP_OK && pi.active && !pi.cached) {
             fill_peer(s_ml, &pi, out);
             ok = true;
         }

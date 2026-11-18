@@ -1589,11 +1589,11 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ts_auth_key", .section = "vpn", .group = "Tailscale", .type = KVM_VT_STR,
         .title = "Auth key",
-        .help = "Optional. A Tailscale auth key (tskey-auth-...) that authorises this "
-                "device to join. Empty, the device shows a link to sign in with your "
+        .help = "Optional. A Tailscale auth key (tskey-auth-...) or a Headscale one "
+                "(hskey-auth-...) that authorises this device to join. Empty, the device shows a link to sign in with your "
                 "Tailscale account instead. Generate a key in the Tailscale admin "
-                "console; a reusable key survives re-registration across reboots.",
-        .def_str = "", .max_len = 63, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_TS,
+                "console. A reusable key survives re-registration across reboots.",
+        .def_str = "", .max_len = 127, .flags = KVM_SF_SECRET, .requires_cap = KVM_CAP_TS,
     },
     {
         .key = "ts_hostname", .section = "vpn", .group = "Tailscale", .type = KVM_VT_STR,
