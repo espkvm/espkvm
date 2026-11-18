@@ -20,7 +20,6 @@
 #include "capture_priv.h"
 #include "capture.h"
 #include "fps_gate.h"
-#include "capture_dirty.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -102,23 +101,6 @@ typedef struct {
     uint32_t hres;
     uint32_t vres;
 } h264_job_t;
-
-/*
- * rev < 3.0 with the PPA: convert only what changed. A full RGB->YUV pass at
- * 1080p takes 120-135 ms whoever does it (PSRAM bound), which held these boards
- * at 7 fps. The YUV buffers keep their picture between frames, and each one gets
- * only the rectangles that changed since it was last filled (capture_dirty.c).
- * A whole pass every H264_FULL_EVERY_US anyway, so nothing missed stays.
- */
-#define H264_PARTIAL (!CAPTURE_YUV_SWAP)
-#if H264_PARTIAL
-#define H264_FULL_EVERY_US 2000000
-#define H264_MAX_RECTS 8
-_Static_assert(H264_YUV_BUFS == DIRTY_MAX_SLOTS, "one dirty map per YUV buffer");
-static dirty_t s_dirty;       /* zeroed: tracks nothing until its memory is there */
-static void *s_dirty_mem;     /* PSRAM, made once and kept */
-static int64_t s_full_at[H264_YUV_BUFS];
-#endif
 
 static QueueHandle_t s_free_slots; /* YUV buffers the PPA may write */
 static QueueHandle_t s_jobs;       /* YUV buffers filled and awaiting encode */
@@ -823,18 +805,6 @@ static esp_err_t h264_open_once(void)
     for (int i = 0; i < H264_YUV_BUFS; i++) {
         xQueueSend(s_free_slots, &i, 0);
     }
-#if H264_PARTIAL
-    /* The buffers may hold anything now (the region is shared): whole fills
-     * first. Without the memory every fill is a whole one, as before. */
-    if (!s_dirty_mem) {
-        const size_t bytes = dirty_mem_bytes(CAPTURE_MAX_H_RES, CAPTURE_MAX_V_RES);
-        s_dirty_mem = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
-        if (s_dirty_mem) {
-            dirty_init(&s_dirty, s_dirty_mem, CAPTURE_MAX_H_RES, CAPTURE_MAX_V_RES);
-        }
-    }
-    (void)dirty_reset(&s_dirty, 0, 0);
-#endif
     if (xTaskCreatePinnedToCore(h264_encode_task, "h264enc", 4096, NULL, 5, &s_enc_task, 1) !=
         pdPASS) {
         ESP_LOGE(CAPTURE_LOG_TAG, "h264 encode task could not start");
@@ -1206,56 +1176,30 @@ static esp_err_t h264_encode(capture_ctx_t *c, const void *src, bool force_publi
      */
     vTaskDelay(1);
 #else
-    /* Only what changed since this buffer was last filled (see H264_PARTIAL). */
-    if (s_dirty.w != c->hres || s_dirty.h != c->vres) {
-        (void)dirty_reset(&s_dirty, c->hres, c->vres);
-    }
-    dirty_scan(&s_dirty, src, c->hres * capture_pixfmt_bytes(), capture_pixfmt_bytes());
-    if (ppa_started_us - s_full_at[slot] > H264_FULL_EVERY_US) {
-        dirty_mark_all(&s_dirty, slot);
-    }
-    dirty_rect_t rects[H264_MAX_RECTS];
-    int n = dirty_take(&s_dirty, slot, rects, H264_MAX_RECTS);
-    if (n < 0) {
-        rects[0] = (dirty_rect_t){0, 0, (uint16_t)c->hres, (uint16_t)c->vres};
-        n = 1;
-    }
-    if (n == 1 && rects[0].w == c->hres && rects[0].h == c->vres) {
-        s_full_at[slot] = ppa_started_us;
-    }
-    esp_err_t err = ESP_OK;
-    for (int i = 0; i < n && err == ESP_OK; i++) {
-        const dirty_rect_t *r = &rects[i];
-        ppa_srm_oper_config_t srm = {
-            .in = {.buffer = (void *)src,
-                   .pic_w = c->hres,
-                   .pic_h = c->vres,
-                   .block_w = r->w,
-                   .block_h = r->h,
-                   .block_offset_x = r->x,
-                   .block_offset_y = r->y,
-                   .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
-            .out = {.buffer = s_yuv[slot],
-                    .buffer_size = s_yuv_alloc[slot],
-                    .pic_w = padded_w,
-                    .pic_h = padded_h,
-                    .block_offset_x = r->x,
-                    .block_offset_y = r->y,
-                    .srm_cm = PPA_SRM_COLOR_MODE_YUV420,
-                    /* Full range, as the SPS says (h264_sps.c). */
-                    .yuv_range = PPA_COLOR_RANGE_FULL,
-                    .yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601},
-            .scale_x = 1.0f,
-            .scale_y = 1.0f,
-            .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
-            .mode = PPA_TRANS_MODE_BLOCKING,
-        };
-        err = ppa_do_scale_rotate_mirror(s_ppa, &srm);
-    }
+    ppa_srm_oper_config_t srm = {
+        .in = {.buffer = (void *)src,
+               .pic_w = c->hres,
+               .pic_h = c->vres,
+               .block_w = c->hres,
+               .block_h = c->vres,
+               .srm_cm = PPA_SRM_COLOR_MODE_RGB888},
+        .out = {.buffer = s_yuv[slot],
+                .buffer_size = s_yuv_alloc[slot],
+                .pic_w = padded_w,
+                .pic_h = padded_h,
+                .srm_cm = PPA_SRM_COLOR_MODE_YUV420,
+                /* Full range, as the SPS says (h264_sps.c). */
+                .yuv_range = PPA_COLOR_RANGE_FULL,
+                .yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601},
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa, &srm);
     capture_status_add_ppa_time((uint32_t)(esp_timer_get_time() - ppa_started_us));
     if (err != ESP_OK) {
         ESP_LOGW(CAPTURE_LOG_TAG, "ppa rgb->yuv: %s", esp_err_to_name(err));
-        dirty_mark_all(&s_dirty, slot); /* part of it may be from this frame */
         xQueueSend(s_free_slots, &slot, 0); /* return the unused buffer */
         return err;
     }
