@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
  * H.264, and Opus when the recording has sound, into an MPEG transport stream.

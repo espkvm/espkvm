@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
  * The ESP-KVM wordmark, lifted pixel-for-pixel from web/public/icon.svg: the

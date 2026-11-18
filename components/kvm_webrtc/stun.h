@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
  * The part of STUN (RFC 5389) an ICE-lite agent needs (RFC 8445): read a

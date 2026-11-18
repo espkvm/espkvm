@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
  * The single source of truth for every user-visible setting. Adding a row here

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
  * GC9A01 240x240 round colour LCD over SPI - e.g. the Waveshare 1.28" module.

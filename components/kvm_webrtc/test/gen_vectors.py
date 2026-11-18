@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+# SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
 # SPDX-License-Identifier: Apache-2.0
 #
 # Writes vectors.h for test_webrtc.c: SRTP, SRTCP and STUN worked out by a

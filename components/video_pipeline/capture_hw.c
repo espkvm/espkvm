@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: 2026 Jonathan Rowny
- * SPDX-FileCopyrightText: 2026 ESP-KVM contributors
+ * SPDX-FileCopyrightText: 2026 Evgenij Spitsyn and ESP-KVM contributors
  * SPDX-License-Identifier: Apache-2.0
  *
  * Derived from the p4kvm project: https://github.com/jrowny/p4kvm
