@@ -61,7 +61,14 @@ xrandr --output DP-2 --mode "1280x720_60.00"
 
 Use the output name `xrandr` prints for that port, and run it on the target's own screen, not over SSH. Put the lines in `.profile` to keep them. A BIOS screen stays at whatever the converter takes, which is usually fine.
 
-A passive DVI-to-HDMI adapter or cable is only a different plug: the target sees the device's EDID, and nothing changes. The same goes for a DisplayPort port marked DP++ with a passive adapter. An active DisplayPort-to-HDMI adapter behaves like the VGA converter above.
+A passive DVI-to-HDMI adapter or cable is only a different plug: the target sees the device's EDID, and nothing changes.
+
+DisplayPort is a different signal from HDMI, not just a different plug. It sends packets over its own lanes and reads the EDID over its own channel (AUX). There are two kinds of DisplayPort-to-HDMI adapters:
+
+- **Passive.** The adapter only shifts levels. It works when the port is dual-mode, marked DP++ next to the socket. The graphics card then sees the adapter and sends HDMI itself. The target reads the device's EDID as with a plain cable. Most full-size DisplayPort sockets on graphics cards and PCs are DP++. Many USB-C ports, docks and small PCs are not, and a passive adapter on those gives no picture at all.
+- **Active.** A chip in the adapter turns the DisplayPort packets back into HDMI. Every USB-C-to-HDMI adapter is this kind. Most pass the device's EDID through to the target, so the mode list and EDID profiles still work. Some answer with an EDID of their own when the device is not ready yet, or keep the hotplug line up all the time. Then a restart of the device does not make the target pick a mode again. If that happens, set the mode on the target as above, or unplug the adapter from the target and plug it back in.
+
+If there is no picture through an adapter, look at the target's port first. With DP++ a passive adapter is the simpler choice. A USB-C source always needs an active one, and then the adapter's own chip decides how it behaves.
 
 ## The HDMI signal is there, but no picture
 
