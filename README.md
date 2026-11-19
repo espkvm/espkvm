@@ -74,7 +74,7 @@ Useful for what it does today, and honest about the rest.
 | From a phone or a tablet | works; touch trackpad, pointer stick, pinch zoom and on-screen keyboard |
 | Several viewers, one in control | works; plus a view-only sign-in for others |
 | VNC: TigerVNC and other clients with Open H.264 or Tight encoding, over TLS | new, off by default |
-| Virtual media: boot the target from an image | works; from microSD, the device's flash, a web server or the browser's computer |
+| Virtual media: boot the target from an image | works; from microSD, the device's flash, a web server or the browser's computer; picked in the console or with the buttons on the device's screen |
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |

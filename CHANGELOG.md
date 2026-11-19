@@ -2,7 +2,7 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
-## [Unreleased]
+## [0.89.0] - 2026-11-19
 
 ### Added
 
