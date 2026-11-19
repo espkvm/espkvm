@@ -2,6 +2,13 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
+## [Unreleased]
+
+### Added
+
+- Pick the image from the box. The menu on the status screen has a Virtual media item: the images on the card, the rescue image and Eject, picked with the buttons. The console's Media panel shows the choice at once. While the drive holds an image, the status screen gets a Media page with the file name, CD-ROM or disk, the size and where it is read from. Schedules can mount an image too, with the new `media` action. On the JetKVM Mini this makes the device a USB drive with a screen that you pick ISOs on, like the ISO drives admins carry.
+- On colour screens an ISO is drawn as a disc with its name written round the label, and any other image as a USB stick. A disc spins up when it goes in, a stick blinks its light, and the screen turns to the Media page whenever an image is mounted.
+
 ## [0.88.0] - 2026-11-18
 
 ### Added

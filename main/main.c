@@ -179,33 +179,6 @@ static void on_setting_changed(const char *key, void *user)
 }
 
 /*
- * Whether the named medium should be served as a CD-ROM rather than a disk.
- * msc_mode is the operator's override: 0 = auto, 1 = force CD-ROM, 2 = force disk.
- * Auto picks CD-ROM for a .iso file and a disk for everything else; the reserved
- * "@" media (rescue, whole card) have no extension, so auto leaves them a disk.
- * For "@url" the file name in the URL decides.
- */
-static bool media_is_cdrom(const char *image)
-{
-    switch (kvm_setting_int("msc_mode")) {
-    case 1:
-        return true;
-    case 2:
-        return false;
-    default: /* auto */
-        break;
-    }
-    size_t n = strlen(image);
-    if (strcmp(image, "@url") == 0) {
-        image = kvm_setting_str("msc_url");
-        n = strcspn(image, "?#");
-    } else if (image[0] == '@') {
-        return false;
-    }
-    return n >= 4 && strncasecmp(image + n - 4, ".iso", 4) == 0;
-}
-
-/*
  * Reconcile the virtual drive with the settings: offer the chosen medium to the
  * target when the feature is on and something is named; otherwise show an empty
  * drive. Called at boot and whenever a storage setting changes, so swapping the
@@ -236,7 +209,7 @@ static void apply_media_selection(void)
 
     /* An image at a URL opens on a task of its own, and may arrive later. */
     if (want && strcmp(image, "@url") == 0) {
-        const bool cdrom = media_is_cdrom(image);
+        const bool cdrom = kvm_storage_image_is_cdrom(image);
         kvm_media_eject();
         kvm_url_media_select(kvm_setting_str("msc_url"), cdrom);
         usb_hid_msc_set_type(cdrom);
@@ -257,11 +230,11 @@ static void apply_media_selection(void)
     esp_err_t err;
     kvm_media_source_t src;
     if (want && strcmp(image, "@rescue") == 0) {
-        err = kvm_storage_source_rescue(media_is_cdrom(image), &src);
+        err = kvm_storage_source_rescue(kvm_storage_image_is_cdrom(image), &src);
     } else if (want && strcmp(image, "@wholesd") == 0 && sd.mounted) {
         err = kvm_storage_source_whole_card(&src);
     } else if (want && sd.mounted) {
-        err = kvm_storage_source_image(image, media_is_cdrom(image), &src);
+        err = kvm_storage_source_image(image, kvm_storage_image_is_cdrom(image), &src);
     } else {
         kvm_media_eject();
         usb_hid_msc_set_type(false);

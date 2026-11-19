@@ -34,7 +34,8 @@ typedef struct {
 /**
  * Carry out one device action, the same set a schedule can fire: "wol",
  * "usbwake" (power on over USB), "power", "reset", "poweroff", "runbook" (@p arg is its name), "clip" (save
- * the dashcam's last seconds), "screenshot", "restart". @p name labels it in
+ * the dashcam's last seconds), "screenshot", "media" (@p arg is the image to offer the target, a file
+ * on the card or "@rescue", empty to take it out), "restart". @p name labels it in
  * the log and the status ("button", a schedule's name); @p source says who
  * asked. Quick: a runbook starts its own task. An empty action does nothing.
  * False when it could not be done, with a short reason in @p why (may be NULL).

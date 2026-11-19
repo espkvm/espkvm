@@ -56,6 +56,12 @@ void kvm_display_console_joined(void);
  */
 void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t ttl_ms);
 
+/** kvm_display_notice() with a picture for the panels that can draw one
+    (kvm_disp_pic_t in kvm_display_driver.h). */
+typedef struct kvm_disp_pic kvm_disp_pic_t;
+void kvm_display_notice_pic(const char *title, const char *detail, int pct, uint32_t ttl_ms,
+                            const kvm_disp_pic_t *pic);
+
 /** Drop any notice and go back to the status rotation. */
 void kvm_display_notice_clear(void);
 

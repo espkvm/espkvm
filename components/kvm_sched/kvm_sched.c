@@ -26,6 +26,7 @@
 #include "kvm_display.h"
 #include "kvm_record.h"
 #include "kvm_settings.h"
+#include "kvm_storage.h"
 #include "nvs.h"
 #include "sdkconfig.h"
 #include "runbook.h"
@@ -211,6 +212,34 @@ static bool dispatch(const char *name, const char *action, const char *arg, cons
         if (!net_switch(name, action)) {
             snprintf(why, why_len, "not on this board");
             return false;
+        }
+    } else if (strcmp(action, "media") == 0) {
+        /* The target's USB drive: arg is a file in the card's root, "@rescue",
+           or empty to take the medium out. The same setting the Media panel
+           sets, so the console shows it at once and it outlives a restart. */
+        const char *img = arg ? arg : "";
+        if (!kvm_setting_bool("msc_enable")) {
+            snprintf(why, why_len, "virtual media is off");
+            return false;
+        }
+        if (strcmp(img, "@rescue") == 0) {
+            kvm_rescue_t r;
+            kvm_storage_rescue_status(&r);
+            if (!r.has_image) {
+                snprintf(why, why_len, "no rescue image");
+                return false;
+            }
+        } else if (img[0]) {
+            uint64_t size;
+            if (img[0] == '@' || strpbrk(img, "/\\") ||
+                kvm_storage_file_size(img, &size) != ESP_OK) {
+                snprintf(why, why_len, "no such image");
+                return false;
+            }
+        }
+        ok = kvm_setting_set_str("msc_image", img) == ESP_OK;
+        if (!ok) {
+            snprintf(why, why_len, "could not save");
         }
     } else if (strcmp(action, "menu") == 0) {
         kvm_menu_open();

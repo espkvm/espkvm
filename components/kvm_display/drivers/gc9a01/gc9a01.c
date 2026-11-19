@@ -35,6 +35,8 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "font5x7.h"
 #include "icons.h"
@@ -51,8 +53,9 @@
 #define LCD_CENTER 120
 #define FB_PIXELS (LCD_W * LCD_H)
 
-/* network, video, health and the picture (KVM_DISP_PAGE_*); disp_pages picks */
-#define PAGE_COUNT 4
+/* network, video, health, the picture and media (KVM_DISP_PAGE_*); disp_pages
+   picks the first four, the core adds media while there is one */
+#define PAGE_COUNT 5
 /* How often the picture page redraws: ten times a second, or twice while a
    browser is watching, so the panel never takes PSRAM time from the stream. */
 #define PICTURE_MS 100
@@ -76,6 +79,9 @@ typedef struct {
     uint8_t splash;
     uint8_t viewers; /* from the last status, for next_render_ms() */
     uint16_t *pic;   /* the picture page's copy of the screen, made on first use */
+    char media_seen[64]; /* the drive's medium at the last render, "" for none */
+    int64_t spun_us;     /* when the last spin-up ended */
+    bool notice_spun;    /* the current "mounted" notice has had its spin-up */
 } gc9a01_ctx_t;
 
 /* RGB565, byte-swapped so the buffer can go straight to the panel (which wants
@@ -428,6 +434,212 @@ static int draw_join_qr(uint16_t *fb, const char *payload)
 }
 
 /*
+ * Virtual media drawn as the thing it is: a CD with the image's name written on
+ * its label, or a USB stick with a label. The menu shows one per entry, and the
+ * Media page shows the one in the drive.
+ *
+ * The label is a soft light grey rather than white, like the QR face, so the
+ * panel does not glare. The disc fills the face inside the rim gauge (radius
+ * 112), so it can turn without touching anything else.
+ */
+#define CD_R 106     /* the disc's edge */
+#define CD_LABEL 103 /* the printable label ends a little inside it */
+#define CD_HOLE 11
+#define STICK_X 22 /* the stick's body, lying on its side, plug to the right */
+#define STICK_Y 82
+#define STICK_W 160
+#define STICK_H 76
+
+static const uint16_t *media_ink(void)
+{
+    static uint16_t c[5];
+    if (!c[0]) {
+        c[0] = rgb(20, 30, 60);    /* marker on the label */
+        c[1] = rgb(70, 80, 100);   /* smaller writing */
+        c[2] = rgb(30, 110, 170);  /* "IN THE DRIVE" */
+        c[3] = rgb(200, 50, 50);   /* "RESCUE" */
+        c[4] = rgb(200, 205, 212); /* the label itself */
+    }
+    return c;
+}
+
+/* The disc, nothing written on it yet. @p empty draws only its outline: the
+   drive with nothing in it. */
+static void cd_blank(uint16_t *fb, bool empty)
+{
+    const uint16_t label = media_ink()[4];
+    for (int y = LCD_CENTER - CD_R; y <= LCD_CENTER + CD_R; y++) {
+        for (int x = LCD_CENTER - CD_R; x <= LCD_CENTER + CD_R; x++) {
+            const int dx = x - LCD_CENTER, dy = y - LCD_CENTER;
+            const int d2 = dx * dx + dy * dy;
+            if (d2 > CD_R * CD_R || d2 < CD_HOLE * CD_HOLE) {
+                continue;
+            }
+            uint16_t c;
+            if (empty) {
+                const bool edge = d2 >= (CD_R - 2) * (CD_R - 2) || (d2 <= 36 * 36 && d2 >= 34 * 34);
+                if (!edge) {
+                    continue;
+                }
+                c = rgb(90, 100, 115);
+            } else if (d2 < 24 * 24) {
+                c = rgb(70, 70, 70); /* clear hub */
+            } else if (d2 < 27 * 27) {
+                c = rgb(120, 120, 120); /* stacking ring */
+            } else if (d2 < 36 * 36) {
+                c = rgb(95, 95, 95);
+            } else if (d2 > CD_LABEL * CD_LABEL) {
+                c = rgb(140, 140, 140);
+            } else {
+                c = label;
+            }
+            put_px(fb, x, y, c);
+        }
+    }
+}
+
+/* The stick, its label blank. */
+static void stick_blank(uint16_t *fb)
+{
+    const int x = STICK_X, y = STICK_Y, w = STICK_W, h = STICK_H;
+    fill_rect(fb, x + 3, y, w - 6, h, rgb(60, 66, 78)); /* body, corners cut */
+    fill_rect(fb, x, y + 3, w, h - 6, rgb(60, 66, 78));
+    fill_rect(fb, x + w, y + 14, 36, h - 28, rgb(170, 175, 185)); /* the plug */
+    fill_rect(fb, x + w + 14, y + 24, 9, 7, rgb(60, 66, 78)); /* the two holes of a USB-A plug */
+    fill_rect(fb, x + w + 14, y + h - 31, 9, 7, rgb(60, 66, 78));
+    fill_rect(fb, x + 18, y + 8, w - 26, h - 16, media_ink()[4]); /* label */
+}
+
+/* The stick's activity light, at the end away from the plug. */
+static void stick_led(uint16_t *fb, bool on)
+{
+    fill_rect(fb, STICK_X + 6, STICK_Y + STICK_H / 2 - 3, 6, 6,
+              on ? rgb(90, 200, 235) : rgb(38, 44, 54));
+}
+
+/* @p str centred on @p cx in @p w pixels, as large as fits up to @p max_s. */
+static void text_box(uint16_t *fb, int cx, int y, int w, const char *str, int max_s, uint16_t c)
+{
+    int s = max_s;
+    while (s > 1 && (int)strlen(str) * 6 * s > w) {
+        s--;
+    }
+    int x = cx - ((int)strlen(str) * 6 * s - s) / 2;
+    for (const char *p = str; *p; p++, x += 6 * s) {
+        draw_char(fb, x, y, *p, s, c);
+    }
+}
+
+/*
+ * Writing on the disc goes round it, like a marker on a real one: the name
+ * along the top, letters standing outward, so a long file name gets far more
+ * room than a straight line across. 2x letters only: at 1x a turned 5x7 glyph
+ * breaks up. @p r is the letters' outer edge. They are spaced along their inner
+ * edge, the tight one, so neighbours never touch. Centred on twelve o'clock.
+ */
+#define ARC_ADV 13 /* 12 px a 2x glyph plus one, along the inner edge */
+
+static void arc_text(uint16_t *fb, int r, const char *str, uint16_t c)
+{
+    const int n = (int)strlen(str);
+    const float rin = (float)(r - 14);
+    const float total = (float)(n * ARC_ADV - 3);
+    for (int i = 0; i < n; i++) {
+        const unsigned char ch = (unsigned char)str[i];
+        const uint8_t *gl = font5x7[(ch < 0x20 || ch > 0x7F) ? 0 : (ch - 0x20)];
+        for (int col = 0; col < 5; col++) {
+            for (int row = 0; row < 7; row++) {
+                if (!(gl[col] & (1 << row))) {
+                    continue;
+                }
+                /* A 2x2 block, stepped finer than a pixel so the turned block
+                   has no holes. */
+                for (int a = 0; a < 6; a++) {
+                    for (int b = 0; b < 6; b++) {
+                        const float u = i * ARC_ADV + col * 2 + a / 3.0f - total / 2;
+                        const float rr = r - (row * 2 + b / 3.0f);
+                        const float th = u / rin;
+                        put_px(fb, (int)lroundf(LCD_CENTER + rr * sinf(th)),
+                               (int)lroundf(LCD_CENTER - rr * cosf(th)), c);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* How many 2x letters arc_text() fits in @p ang radians at @p r. */
+static int arc_fits(float ang, int r)
+{
+    const int n = (int)((ang * (float)(r - 14) + 3) / ARC_ADV);
+    return n < 0 ? 0 : n;
+}
+
+/* A straight line under the hub, as large as fits inside the label. */
+static void label_line(uint16_t *fb, int y, const char *str, uint16_t c)
+{
+    int s = 2;
+    for (; s > 1; s--) {
+        int dy = y + 7 * s - LCD_CENTER;
+        dy = dy < 0 ? -dy : dy;
+        const int half = (int)sqrtf((float)(100 * 100 - dy * dy));
+        if ((int)strlen(str) * 6 * s - s <= 2 * half - 8) {
+            break;
+        }
+    }
+    text_box(fb, LCD_CENTER, y, LCD_W, str, s, c);
+}
+
+/*
+ * One medium with its writing: @p name on the label, @p in adds "IN THE DRIVE",
+ * @p rescue "RESCUE", and @p line1 / @p line2 go under the hole (or under the
+ * stick). The disc is drawn whole, so it can be copied and turned.
+ */
+static void media_face(uint16_t *fb, uint8_t kind, const char *name, bool in, bool rescue,
+                       const char *line1, const char *line2, uint16_t line2_c)
+{
+    const uint16_t *ink = media_ink();
+    char buf[32];
+    if (kind == KVM_DISP_ICON_STICK) {
+        stick_blank(fb);
+        stick_led(fb, in);
+        const int lx = STICK_X + 18, lw = STICK_W - 26;
+        media_name_fit(buf, sizeof(buf), name, 20);
+        if (rescue) {
+            text_box(fb, lx + lw / 2, STICK_Y + 14, lw - 6, "RESCUE", 1, ink[3]);
+        }
+        text_box(fb, lx + lw / 2, STICK_Y + STICK_H / 2 - 6, lw - 6, buf, 2, ink[0]);
+        if (in) {
+            text_fit(fb, 52, "IN THE DRIVE", 2, rgb(90, 200, 235));
+        }
+        if (line1[0]) {
+            text_fit(fb, 168, line1, 2, rgb(140, 150, 165));
+        }
+        if (line2[0]) {
+            text_fit(fb, 188, line2, 2, line2_c);
+        }
+        return;
+    }
+    /* The name on the outer arc, no lower than the hub's middle; "IN THE
+       DRIVE" (or "RESCUE") on an inner one; two straight lines under the hub. */
+    cd_blank(fb, kind == KVM_DISP_ICON_EJECT);
+    const bool empty = kind == KVM_DISP_ICON_EJECT;
+    media_name_fit(buf, sizeof(buf), name, (unsigned)arc_fits((float)M_PI, 99));
+    arc_text(fb, 99, buf, empty ? rgb(235, 238, 245) : ink[0]);
+    if (in) {
+        arc_text(fb, 75, "IN THE DRIVE", ink[2]);
+    } else if (rescue) {
+        arc_text(fb, 75, "RESCUE", ink[3]);
+    }
+    if (line1[0]) {
+        label_line(fb, 160, line1, empty ? rgb(140, 150, 165) : ink[1]);
+    }
+    if (line2[0]) {
+        label_line(fb, 180, line2, empty ? rgb(140, 150, 165) : line2_c);
+    }
+}
+
+/*
  * A notice: one thing, said large, with the rim as its progress gauge.
  *
  * Nothing else is drawn - no status ring, no rotation. Someone reading this is
@@ -442,6 +654,19 @@ static void render_notice(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     const uint16_t grey = rgb(140, 150, 165);
 
     fill(g->fb, bg);
+    const kvm_disp_pic_t *pic = &st->notice_pic;
+    const uint8_t kind = KVM_DISP_ICON_KIND(pic->icon);
+    if (kind != KVM_DISP_ICON_NONE) {
+        /* A media list entry: the disc or the stick, the gauge thinner so the
+           disc fits inside it. */
+        if (st->notice_pct >= 0) {
+            arc(g->fb, 118, 6, st->notice_pct / 100.0f, cyan, rgb(38, 44, 54));
+        }
+        media_face(g->fb, kind, pic->label, pic->icon & KVM_DISP_ICON_IN,
+                   pic->icon & KVM_DISP_ICON_RESCUE, pic->line1, pic->line2,
+                   kind == KVM_DISP_ICON_STICK ? grey : media_ink()[1]); /* under a stick: on black */
+        return;
+    }
     if (st->notice_pct >= 0) {
         arc(g->fb, 118, 10, st->notice_pct / 100.0f, cyan, rgb(38, 44, 54));
     } else {
@@ -526,6 +751,12 @@ static void render_corners(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     corner(g->fb, 3, "UPTIME", buf, white);
 }
 
+/* The drive's medium as a picture: a CD-ROM is a disc, a disk image a stick. */
+static uint8_t media_kind(const kvm_display_status_t *st)
+{
+    return strcmp(st->media_kind, "CD-ROM") == 0 ? KVM_DISP_ICON_CD : KVM_DISP_ICON_STICK;
+}
+
 static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 {
     const uint16_t bg = rgb(8, 10, 14);
@@ -603,6 +834,15 @@ static void render_status(gc9a01_ctx_t *g, const kvm_display_status_t *st)
             }
         }
         break;
+    case KVM_DISP_PAGE_MEDIA: {
+        /* The picture says CD-ROM or disk; the size and the source go under it. */
+        char from[24];
+        media_size_text(buf, sizeof(buf), st->media_mb);
+        snprintf(from, sizeof(from), "from %s", st->media_src);
+        media_face(g->fb, media_kind(st), st->media, true, strcmp(st->media_src, "rescue") == 0,
+                   buf, from, strcmp(st->media_kind, "CD-ROM") == 0 ? rgb(30, 120, 70) : green);
+        break;
+    }
     default: /* health */
         draw_icon(g->fb, 108, 36, icon_health, 3, cyan);
         text_centered(g->fb, 66, "HEALTH", 2, cyan);
@@ -909,6 +1149,71 @@ static esp_err_t flush(gc9a01_ctx_t *g)
     return ESP_OK;
 }
 
+/*
+ * A medium going into the drive: the disc on the screen spins up and comes to
+ * rest, about one and a half seconds; a stick blinks its light instead. The
+ * frame in g->fb is the finished picture, and it is what stays up after.
+ *
+ * Cheap enough to do: turning the disc is one pass over its pixels per frame
+ * (a few ms), and the frames go out as fast as SPI takes them, about 20 a
+ * second on the Mini's ST7789. One copy of the screen in PSRAM while it runs.
+ */
+#define SPIN_MS 1400
+#define SPIN_TURNS 2
+
+static void spin_up(gc9a01_ctx_t *g, uint8_t kind)
+{
+    if (kind == KVM_DISP_ICON_STICK) {
+        for (int i = 0; i < 6; i++) {
+            stick_led(g->fb, i % 2 == 0);
+            flush(g);
+            vTaskDelay(pdMS_TO_TICKS(120));
+        }
+        stick_led(g->fb, true);
+        flush(g);
+        g->spun_us = esp_timer_get_time();
+        return;
+    }
+    uint16_t *still = heap_caps_malloc(FB_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    if (!still) {
+        return; /* no spin, the still picture is already up */
+    }
+    memcpy(still, g->fb, FB_PIXELS * sizeof(uint16_t));
+    const int64_t t0 = esp_timer_get_time();
+    for (;;) {
+        const float t = (float)(esp_timer_get_time() - t0) / (SPIN_MS * 1000.0f);
+        if (t >= 1.0f) {
+            break;
+        }
+        /* Speeds up, then slows to a stop upright: ease in and out. */
+        const float e = t < 0.5f ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+        const float a = e * SPIN_TURNS * 2 * (float)M_PI;
+        const float ca = cosf(a), sa = sinf(a);
+        for (int y = LCD_CENTER - CD_R; y <= LCD_CENTER + CD_R; y++) {
+            const int dy = y - LCD_CENTER;
+            for (int x = LCD_CENTER - CD_R; x <= LCD_CENTER + CD_R; x++) {
+                const int dx = x - LCD_CENTER;
+                const int d2 = dx * dx + dy * dy;
+                if (d2 > CD_R * CD_R || d2 < CD_HOLE * CD_HOLE) {
+                    continue;
+                }
+                int sx = LCD_CENTER + (int)lroundf(dx * ca + dy * sa);
+                int sy = LCD_CENTER + (int)lroundf(-dx * sa + dy * ca);
+                if (sx < 0 || sx >= LCD_W || sy < 0 || sy >= LCD_H) {
+                    continue;
+                }
+                g->fb[y * LCD_W + x] = still[sy * LCD_W + sx];
+            }
+        }
+        flush(g);
+        vTaskDelay(1);
+    }
+    memcpy(g->fb, still, FB_PIXELS * sizeof(uint16_t));
+    heap_caps_free(still);
+    flush(g);
+    g->spun_us = esp_timer_get_time();
+}
+
 static void render_page(gc9a01_ctx_t *g, const kvm_display_status_t *st)
 {
     if (g->screen == KVM_DISP_PAGE_NONE) {
@@ -950,7 +1255,34 @@ static esp_err_t render(void *ctx, const kvm_display_status_t *status)
          * an animation about having just booted is no longer news. */
         g->splash = 0;
         render_notice(g, status);
-        return flush(g);
+        const esp_err_t err = flush(g);
+        /* "mounted" from the menu: the disc spins up, once per notice. */
+        const uint8_t kind = KVM_DISP_ICON_KIND(status->notice_pic.icon);
+        const bool mounted = (status->notice_pic.icon & KVM_DISP_ICON_IN) && status->notice_pct < 0 &&
+                             (kind == KVM_DISP_ICON_CD || kind == KVM_DISP_ICON_STICK);
+        if (mounted && !g->notice_spun && err == ESP_OK) {
+            spin_up(g, kind);
+        }
+        g->notice_spun = mounted;
+        return err;
+    }
+    g->notice_spun = false;
+    /* A new medium in the drive: its page comes up, and spins up unless the
+       menu's notice just did. Not for the one mounted at start-up. */
+    if (strcmp(status->media, g->media_seen) != 0) {
+        snprintf(g->media_seen, sizeof(g->media_seen), "%s", status->media);
+        if (status->media[0] && status->uptime_s > 20 &&
+            (status->pages & (1u << KVM_DISP_PAGE_MEDIA))) {
+            g->splash = 0;
+            g->screen = KVM_DISP_PAGE_MEDIA;
+            g->page_us = now;
+            render_page(g, status);
+            const esp_err_t err = flush(g);
+            if (err == ESP_OK && now - g->spun_us > 8000000) {
+                spin_up(g, media_kind(status));
+            }
+            return err;
+        }
     }
     /* The page button: the next page now, and a full dwell on it. Presses
        from before this panel came up do not count. */

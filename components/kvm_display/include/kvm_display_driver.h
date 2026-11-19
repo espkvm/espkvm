@@ -34,6 +34,28 @@ extern "C" {
  * strings and scalars - no cross-component types - so a driver depends on nothing
  * but this header.
  */
+/* What a notice shows besides its text: the virtual media menu draws each image
+   as the thing it is. The low bits say what, the high bits add to it. */
+enum {
+    KVM_DISP_ICON_NONE,
+    KVM_DISP_ICON_CD,    /* an image the target sees as a CD-ROM */
+    KVM_DISP_ICON_STICK, /* an image the target sees as a USB disk */
+    KVM_DISP_ICON_EJECT, /* the empty drive */
+};
+#define KVM_DISP_ICON_KIND(i) ((i) & 0x0f)
+#define KVM_DISP_ICON_IN 0x80     /* it is in the drive now */
+#define KVM_DISP_ICON_RESCUE 0x40 /* the rescue image */
+
+/** A notice's picture, for the panels that can draw one: @c icon says what,
+    @c label is written on it (a whole file name, longer than the title), and
+    the two lines go under it. A text-only panel shows the title and detail. */
+typedef struct kvm_disp_pic {
+    uint8_t icon; /**< KVM_DISP_ICON_*, NONE for a notice without one */
+    char label[40];
+    char line1[20];
+    char line2[20];
+} kvm_disp_pic_t;
+
 typedef struct {
     char hostname[32]; /**< configured hostname (also the mDNS name) */
     /**
@@ -83,6 +105,7 @@ typedef struct {
     char notice[16];
     char notice_detail[24];
     int8_t notice_pct; /**< 0..100 of progress, or -1 for a notice with none */
+    kvm_disp_pic_t notice_pic; /**< its picture, icon NONE for none */
 
     bool video_signal; /**< HDMI is locked and delivering pixels */
     uint16_t hres;     /**< active width, 0 until locked */
@@ -115,6 +138,13 @@ typedef struct {
         ones it does not have (the picture on a mono OLED), and shows the
         logo when none is left. */
     uint8_t pages;
+    /** The image the target's USB drive holds now, by its file name, or "" when
+        the drive is empty. While it holds one, the core adds the Media page to
+        @c pages: it is not a page anyone has to tick. */
+    char media[64];
+    char media_kind[8];  /**< "CD-ROM" or "disk" */
+    char media_src[12];  /**< where it is read from: "card", "URL", "computer", "rescue", "whole card" */
+    uint32_t media_mb;   /**< its size in MB */
     char version[32];        /**< firmware version, e.g. "v.0.20.0" */
 } kvm_display_status_t;
 
@@ -135,6 +165,7 @@ enum {
     KVM_DISP_PAGE_VIDEO,
     KVM_DISP_PAGE_HEALTH,
     KVM_DISP_PAGE_PICTURE, /* a small copy of the target's screen, colour panels */
+    KVM_DISP_PAGE_MEDIA,   /* the image on the USB drive, only while there is one */
     KVM_DISP_PAGE_NONE = 0xff, /* none of this panel's pages is ticked: the logo */
 };
 

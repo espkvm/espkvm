@@ -26,9 +26,11 @@
 #define OLED_FB_BYTES (MONO_OLED_MAX_W * (MONO_OLED_MAX_H / 8))
 #define I2C_TIMEOUT_MS 100
 
-/* Status pages a mono panel has: network, video, health (KVM_DISP_PAGE_*). The
- * picture needs colour. */
-#define STATUS_SCREENS 3
+/* Status pages a mono panel has: network, video, health (KVM_DISP_PAGE_*), and
+ * media while the USB drive holds an image. The picture needs colour. */
+static const uint8_t k_mono_pages[] = {KVM_DISP_PAGE_NETWORK, KVM_DISP_PAGE_VIDEO,
+                                       KVM_DISP_PAGE_HEALTH, KVM_DISP_PAGE_MEDIA};
+#define MONO_PAGES (sizeof(k_mono_pages) / sizeof(k_mono_pages[0]))
 /* The Wi-Fi join code in a page list: not a status page, so outside 0..2. */
 #define PAGE_JOIN_QR 0xff
 
@@ -328,15 +330,16 @@ static void rows_draw(mono_oled_t *m, const rows_t *r, uint8_t step)
 static void draw_page_dots(mono_oled_t *m, uint8_t page, uint8_t pages)
 {
     uint8_t n = 0;
-    for (uint8_t i = 0; i < STATUS_SCREENS; i++) {
-        n += (pages >> i) & 1u;
+    for (uint8_t j = 0; j < MONO_PAGES; j++) {
+        n += (pages >> k_mono_pages[j]) & 1u;
     }
     if (n < 2) {
         return;
     }
     const int x0 = m->w - 2 - (3 + (n - 1) * 5);
     uint8_t k = 0;
-    for (uint8_t i = 0; i < STATUS_SCREENS; i++) {
+    for (uint8_t j = 0; j < MONO_PAGES; j++) {
+        const uint8_t i = k_mono_pages[j];
         if (!(pages & (1u << i))) {
             continue;
         }
@@ -506,6 +509,22 @@ static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_
         }
         break;
 
+    case KVM_DISP_PAGE_MEDIA:
+        draw_title(m, icon_media, "MEDIA", page, st->pages);
+        {
+            char v[24];
+            /* A long name scrolls on its row, so it stays whole here. */
+            row_add(&r, 0, "%s", st->media);
+            media_size_text(v, sizeof(v), st->media_mb);
+            if (narrow) {
+                row_add(&r, 1, "%s", v);
+            } else {
+                row_add(&r, 1, "%s  %s", st->media_kind, v);
+            }
+            row_add(&r, 2, narrow ? "%s" : "from %s", st->media_src);
+        }
+        break;
+
     default: /* health */
         draw_title(m, icon_health, "HEALTH", page, st->pages);
         {
@@ -530,7 +549,7 @@ static void render_status(mono_oled_t *m, const kvm_display_status_t *st, uint8_
     }
     /* Health spreads out for its bars, but only on glass tall enough to lose
        half its lines and wide enough to put a bar beside the number. */
-    const bool spread = (page >= 2 && m->w >= 96 && rows_that_fit(m, 2) >= 2);
+    const bool spread = (page == KVM_DISP_PAGE_HEALTH && m->w >= 96 && rows_that_fit(m, 2) >= 2);
     rows_draw(m, &r, spread ? 2 : 1);
 
     if (spread) {
@@ -759,10 +778,11 @@ static void render_notice(mono_oled_t *m, const kvm_display_status_t *st)
 /* The pages this panel cycles through, in order: the ticked status pages, and
    in hotspot mode the join code right after the network page (or alone, when
    that page is not ticked), so a phone gets a full dwell at it. */
-static uint8_t page_list(const kvm_display_status_t *st, bool qr, uint8_t out[STATUS_SCREENS + 1])
+static uint8_t page_list(const kvm_display_status_t *st, bool qr, uint8_t out[MONO_PAGES + 1])
 {
     uint8_t n = 0;
-    for (uint8_t p = 0; p < STATUS_SCREENS; p++) {
+    for (uint8_t j = 0; j < MONO_PAGES; j++) {
+        const uint8_t p = k_mono_pages[j];
         if (st->pages & (1u << p)) {
             out[n++] = p;
         }
@@ -786,7 +806,7 @@ esp_err_t mono_oled_show(mono_oled_t *m, const kvm_display_status_t *status)
         render_splash(m, status);
         return flush(m);
     }
-    uint8_t list[STATUS_SCREENS + 1];
+    uint8_t list[MONO_PAGES + 1];
     const uint8_t n = page_list(status, qr_page(m, status), list);
     if (!n) {
         /* No page ticked: the logo, and nothing to page through. */

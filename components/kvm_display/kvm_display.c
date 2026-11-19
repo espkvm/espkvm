@@ -30,6 +30,7 @@
 #include "kvm_cec.h"
 #include "kvm_display_driver.h"
 #include "kvm_ipv6.h"
+#include "kvm_media.h"
 #include "kvm_panels.h"
 #include "kvm_settings.h"
 #include "kvm_thermal.h"
@@ -75,6 +76,7 @@ static struct {
     char title[sizeof(((kvm_display_status_t *)0)->notice)];
     char detail[sizeof(((kvm_display_status_t *)0)->notice_detail)];
     int8_t pct;
+    kvm_disp_pic_t pic;
     bool active;
     int64_t expires_us; /* 0 = no expiry */
 } s_notice;
@@ -95,6 +97,16 @@ static void wake(void)
 
 void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t ttl_ms)
 {
+    kvm_display_notice_pic(title, detail, pct, ttl_ms, NULL);
+}
+
+void kvm_display_notice_pic(const char *title, const char *detail, int pct, uint32_t ttl_ms,
+                            const kvm_disp_pic_t *pic)
+{
+    const kvm_disp_pic_t none = {0};
+    if (!pic) {
+        pic = &none;
+    }
     if (!s_notice_lock) {
         return; /* the feature is off, or this ran before kvm_display_init() */
     }
@@ -108,11 +120,13 @@ void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t
     /* Repaint only on a real change: the reset button calls this every 50 ms,
      * and a full round-LCD frame is 115 KB over SPI. */
     const bool changed = !s_notice.active || s_notice.pct != (int8_t)pct ||
+                         memcmp(&s_notice.pic, pic, sizeof(*pic)) != 0 ||
                          strcmp(s_notice.title, title ? title : "") != 0 ||
                          strcmp(s_notice.detail, detail ? detail : "") != 0;
     snprintf(s_notice.title, sizeof(s_notice.title), "%s", title ? title : "");
     snprintf(s_notice.detail, sizeof(s_notice.detail), "%s", detail ? detail : "");
     s_notice.pct = (int8_t)pct;
+    s_notice.pic = *pic;
     s_notice.active = true;
     s_notice.expires_us = ttl_ms ? esp_timer_get_time() + (int64_t)ttl_ms * 1000 : 0;
     xSemaphoreGive(s_notice_lock);
@@ -153,6 +167,7 @@ static void take_notice(kvm_display_status_t *st)
         snprintf(st->notice, sizeof(st->notice), "%s", s_notice.title);
         snprintf(st->notice_detail, sizeof(st->notice_detail), "%s", s_notice.detail);
         st->notice_pct = s_notice.pct;
+        st->notice_pic = s_notice.pic;
     }
     xSemaphoreGive(s_notice_lock);
 }
@@ -223,6 +238,29 @@ static void target_kind(char *out, size_t len, bool usb_up)
         kind = strcmp(os, "unknown") != 0 ? os : "";
     }
     snprintf(out, len, "%s", kind);
+}
+
+/* The USB drive's medium, for the Media page, which is shown while there is
+   one. The source comes from the Media panel's choice (msc_image). */
+static void media_info(kvm_display_status_t *st)
+{
+    kvm_media_t m;
+    kvm_media_info(&m);
+    if (!m.present) {
+        return;
+    }
+    const char *img = kvm_setting_str("msc_image");
+    const char *src = strcmp(img, "@url") == 0       ? "URL"
+                      : strcmp(img, "@browser") == 0 ? "computer"
+                      : strcmp(img, "@rescue") == 0  ? "rescue"
+                      : strcmp(img, "@wholesd") == 0 ? "whole card"
+                                                     : "card";
+    snprintf(st->media, sizeof(st->media), "%s",
+             m.name[0] ? m.name : strcmp(img, "@wholesd") == 0 ? "microSD card" : img);
+    snprintf(st->media_kind, sizeof(st->media_kind), "%s", m.cdrom ? "CD-ROM" : "disk");
+    snprintf(st->media_src, sizeof(st->media_src), "%s", src);
+    st->media_mb = (uint32_t)(m.block_count * m.block_size / (1024 * 1024));
+    st->pages |= 1u << KVM_DISP_PAGE_MEDIA;
 }
 
 static void gather(kvm_display_status_t *st)
@@ -296,6 +334,7 @@ static void gather(kvm_display_status_t *st)
     const int dwell = (int)kvm_setting_int("disp_dwell");
     st->dwell_s = (uint8_t)(dwell < 0 ? 0 : dwell > 255 ? 255 : dwell);
     st->pages = (uint8_t)(kvm_setting_int("disp_pages") & 0x0f);
+    media_info(st);
     st->usb = usb_hid_target_suspended() ? 3 : usb_hid_ready() ? 2 : usb_hid_bus_alive() ? 1 : 0;
     target_kind(st->target_os, sizeof(st->target_os), st->usb == 2);
 
@@ -485,6 +524,16 @@ void kvm_display_notice(const char *title, const char *detail, int pct, uint32_t
     (void)detail;
     (void)pct;
     (void)ttl_ms;
+}
+
+void kvm_display_notice_pic(const char *title, const char *detail, int pct, uint32_t ttl_ms,
+                            const kvm_disp_pic_t *pic)
+{
+    (void)title;
+    (void)detail;
+    (void)pct;
+    (void)ttl_ms;
+    (void)pic;
 }
 
 void kvm_display_notice_clear(void)

@@ -106,6 +106,21 @@ const char *kvm_storage_mount_point(void);
 /** Size of a regular file. Fails for a directory or a path with "..". */
 esp_err_t kvm_storage_file_size(const char *rel, uint64_t *size);
 
+/**
+ * The files in the card's root that can be offered to the target, one call of
+ * @p cb each: what the console's Media panel and the screen menu list. Dotfiles,
+ * folders and damaged directory entries are left out. Returns how many there
+ * were, or -1 when there is no card or the target holds the whole card.
+ */
+int kvm_storage_list_images(void (*cb)(const char *name, uint64_t size, void *ctx), void *ctx);
+
+/**
+ * Whether the target is to see @p image (an msc_image value: a card file name or
+ * "@url", "@rescue"...) as a CD-ROM: the msc_mode setting, or by itself an .iso
+ * name (for "@url" the name in msc_url).
+ */
+bool kvm_storage_image_is_cdrom(const char *image);
+
 typedef struct kvm_file kvm_file_t;
 
 /** Open for reading at byte @p at. NULL when missing or out of memory. */

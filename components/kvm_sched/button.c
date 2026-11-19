@@ -169,7 +169,7 @@ void kvm_button_init(void)
 {
     /* Internal stack: actions such as the network mode or the display switch
        write settings to flash, and a flash write asserts on a PSRAM stack. */
-    if (xTaskCreate(task, "button", 4096, NULL, 3, NULL) != pdPASS) {
+    if (xTaskCreate(task, "button", 6144, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "could not start the button task");
     }
 }

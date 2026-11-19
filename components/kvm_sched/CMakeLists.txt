@@ -16,5 +16,6 @@ idf_component_register(
         kvm_record
         kvm_display
         kvm_hid
+        kvm_storage
         esp_driver_gpio
 )

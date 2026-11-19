@@ -181,6 +181,20 @@ Reset, a hard off, a restart and a network change ask for a second hold. The
 last item is Back, and the menu closes by itself after 20 s without a press.
 The screen shows whether the action worked, and why not when it did not.
 
+With virtual media on (Settings, Storage), the menu has a Virtual media item.
+It opens a list of the images on the card, the rescue image if there is one,
+Eject and Back. A hold offers the image shown to the target, the same as
+picking it in the console's Media panel, and the one in the drive has a `*`
+in front. Long names show their start on the first line and their end on the
+second. While the drive holds an image, the status screen also has a Media
+page: the file name, CD-ROM or disk, its size and where it is read from.
+
+Colour screens draw each image as what the target will see: an ISO as a disc
+with the file name written round its label, any other image as a USB stick.
+A disc spins up when it goes in, and a stick blinks its light. When an image
+is mounted from anywhere, the console or the API too, the screen turns to the
+Media page.
+
 On the JetKVM Mini both side buttons are buttons here, with their pins fixed:
 the top one (SW3) shows the next status page on a press and turns the screen
 off or on when held, the bottom one (SW2) opens the menu. The bottom one is

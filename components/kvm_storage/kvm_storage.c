@@ -4,9 +4,12 @@
  */
 #include "kvm_storage.h"
 
+#include <dirent.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "sdkconfig.h"
 
@@ -520,6 +523,29 @@ static const kvm_media_ops_t s_card_file_ops = {
     .read_ahead = CARD_READ_AHEAD,
 };
 
+/* msc_mode is the operator's override: 0 = auto, 1 = force CD-ROM, 2 = force
+   disk. The reserved "@" media (rescue, whole card) have no extension, so auto
+   leaves them a disk. */
+bool kvm_storage_image_is_cdrom(const char *image)
+{
+    switch (kvm_setting_int("msc_mode")) {
+    case 1:
+        return true;
+    case 2:
+        return false;
+    default: /* auto */
+        break;
+    }
+    size_t n = strlen(image);
+    if (strcmp(image, "@url") == 0) {
+        image = kvm_setting_str("msc_url");
+        n = strcspn(image, "?#");
+    } else if (image[0] == '@') {
+        return false;
+    }
+    return n >= 4 && strncasecmp(image + n - 4, ".iso", 4) == 0;
+}
+
 esp_err_t kvm_storage_source_image(const char *name, bool cdrom, kvm_media_source_t *out)
 {
     if (!s_card_lock || !name || !name[0]) {
@@ -734,6 +760,54 @@ void kvm_storage_rescue_write_abort(void)
     xSemaphoreTake(s_card_lock, portMAX_DELAY);
     s_rescue_writing = false;
     xSemaphoreGive(s_card_lock);
+}
+
+int kvm_storage_list_images(void (*cb)(const char *name, uint64_t size, void *ctx), void *ctx)
+{
+    kvm_storage_status_t sd;
+    kvm_storage_status(&sd);
+    if (!sd.mounted || kvm_storage_card_handed_over()) {
+        return -1;
+    }
+    DIR *dir = opendir(kvm_storage_mount_point());
+    if (!dir) {
+        return -1;
+    }
+    int n = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.') {
+            continue; /* dotfiles and volume metadata are not media */
+        }
+        /* A name carrying control bytes is a damaged FAT record, not a file
+         * anyone can select. */
+        bool printable = true;
+        for (const char *c = ent->d_name; *c; c++) {
+            if ((unsigned char)*c < 0x20) {
+                printable = false;
+                break;
+            }
+        }
+        if (!printable) {
+            continue;
+        }
+        char path[128];
+        if (snprintf(path, sizeof(path), "%s/%s", kvm_storage_mount_point(), ent->d_name) >=
+            (int)sizeof(path)) {
+            continue;
+        }
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        /* off_t is 32-bit here; exFAT files may pass 4 GB, so ask FatFs. */
+        uint64_t size = (uint32_t)st.st_size;
+        (void)kvm_storage_file_size(ent->d_name, &size);
+        cb(ent->d_name, size, ctx);
+        n++;
+    }
+    closedir(dir);
+    return n;
 }
 
 bool kvm_storage_card_handed_over(void)

@@ -9,7 +9,6 @@
 #include "sdkconfig.h" /* the CONFIG_ guards below are read before any of them */
 
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -151,6 +150,18 @@ static bool image_name_from_query(httpd_req_t *req, char *out, size_t outlen)
 }
 
 /* Full "/sd/<name>" path into buf. Caller has already validated the name. */
+/* One file for the "images" array of GET /api/v1/storage. */
+static void add_image(const char *name, uint64_t size, void *ctx)
+{
+    cJSON *item = cJSON_CreateObject();
+    if (!item) {
+        return;
+    }
+    cJSON_AddStringToObject(item, "name", name);
+    cJSON_AddNumberToObject(item, "size", (double)size);
+    cJSON_AddItemToArray((cJSON *)ctx, item);
+}
+
 static void image_path(char *buf, size_t buflen, const char *name)
 {
     int n = snprintf(buf, buflen, "%s/%s", kvm_storage_mount_point(), name);
@@ -240,44 +251,7 @@ esp_err_t api_storage_images_get(httpd_req_t *req)
     cJSON *images = cJSON_AddArrayToObject(root, "images");
 
     if (sd.mounted && !handed_over && images) {
-        DIR *dir = opendir(kvm_storage_mount_point());
-        if (dir) {
-            struct dirent *ent;
-            while ((ent = readdir(dir)) != NULL) {
-                if (ent->d_name[0] == '.') {
-                    continue; /* dotfiles and volume metadata are not media */
-                }
-                /* Skip corrupt directory entries: a name carrying control bytes
-                 * is a damaged FAT record, not a file anyone can select. */
-                bool printable = true;
-                for (const char *c = ent->d_name; *c; c++) {
-                    if ((unsigned char)*c < 0x20) {
-                        printable = false;
-                        break;
-                    }
-                }
-                if (!printable) {
-                    continue;
-                }
-                char path[128];
-                image_path(path, sizeof(path), ent->d_name);
-                struct stat st;
-                if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
-                    continue;
-                }
-                cJSON *item = cJSON_CreateObject();
-                if (!item) {
-                    break;
-                }
-                cJSON_AddStringToObject(item, "name", ent->d_name);
-                /* off_t is 32-bit here; exFAT files may pass 4 GB, so ask FatFs. */
-                uint64_t size = (uint32_t)st.st_size;
-                (void)kvm_storage_file_size(ent->d_name, &size);
-                cJSON_AddNumberToObject(item, "size", (double)size);
-                cJSON_AddItemToArray(images, item);
-            }
-            closedir(dir);
-        }
+        (void)kvm_storage_list_images(add_image, images);
     }
 
     char *json = cJSON_PrintUnformatted(root);
