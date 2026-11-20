@@ -581,13 +581,6 @@ jobs:
       - name: Publish the translations
         run: node tools/i18n_strings.mjs --publish site/locales
 
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v5
-
       # fw.espkvm.io is served by its own repository, espkvm/fw, so that this
       # repository's Pages stays at espkvm.github.io/espkvm with no redirect:
       # devices on 0.56.x and older read their manifests there and follow no
@@ -617,3 +610,15 @@ jobs:
           git commit -q -m "${GITHUB_REF_NAME}"
           GIT_SSH_COMMAND="ssh -i ~/.ssh/fw_key -o IdentitiesOnly=yes" \
             git push -f git@github.com:espkvm/fw.git main
+
+      # espkvm.github.io/espkvm, for devices on 0.56.x and older. After
+      # fw.espkvm.io, so a failure here does not hold back the main channel:
+      # deploy-pages sometimes does not see the artefact uploaded a moment
+      # before, and a re-run then finds two of them.
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5
+
