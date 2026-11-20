@@ -173,6 +173,11 @@ bool kvm_cap_available(kvm_cap_t cap)
 
 static bool cap_enabled(kvm_cap_t cap)
 {
+    /* A feature left out of this build has no setting to read: the speaker's
+       spk_knock exists only where the speaker is compiled in. */
+    if (!s_desc[cap].compiled) {
+        return false;
+    }
     const char *key = s_desc[cap].enable_key;
     const char *alt = s_desc[cap].enable_alt;
     return !key || kvm_setting_bool(key) || (alt && kvm_setting_bool(alt));

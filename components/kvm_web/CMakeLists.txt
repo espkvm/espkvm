@@ -35,12 +35,15 @@ idf_component_register(
         "webrtc_api.c"
         "ts_api.c"
         "push_api.c"
+        "locale_api.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES
         esp_http_server
         esp_https_server
     PRIV_REQUIRES
+        fatfs
+        wear_levelling
         kvm_proto
         kvm_timing
         tcp_transport

@@ -135,6 +135,33 @@ static const char *typed_char(const keylog_t *k, uint8_t key, uint8_t mod)
     return NULL;
 }
 
+static const keymap_entry_t *dead_key(const keylog_t *k, uint8_t key, uint8_t mod)
+{
+    const uint8_t want = ((mod & MOD_SHIFT) ? MOD_LSHIFT : 0) | (mod & MOD_RALT);
+    const keymap_layout_t *l = &keymap_layouts[k->layout];
+    for (size_t i = 0; i < l->dead_count; i++) {
+        if (l->dead[i].hid == key && l->dead[i].mod == want) {
+            return &l->dead[i];
+        }
+    }
+    return NULL;
+}
+
+/* What the waiting dead key and this key make together, or NULL. */
+static const char *paired_char(const keylog_t *k, uint8_t key, uint8_t mod)
+{
+    const uint8_t want = ((mod & MOD_SHIFT) ? MOD_LSHIFT : 0) | (mod & MOD_RALT);
+    const keymap_layout_t *l = &keymap_layouts[k->layout];
+    for (size_t i = 0; i < l->pair_count; i++) {
+        const keymap_pair_t *p = &l->pairs[i];
+        if (p->dead_hid == k->dead_hid && p->dead_mod == k->dead_mod && p->hid == key &&
+            p->mod == want) {
+            return p->utf8;
+        }
+    }
+    return NULL;
+}
+
 static void flush(keylog_t *k)
 {
     if (k->pending == PENDING_NONE) {
@@ -247,11 +274,32 @@ static void press(keylog_t *k, int64_t t, uint8_t key, uint8_t mod)
             add_text(k, t, BACKSPACE, false);
             return;
         }
+        /* A dead key types nothing until the next key: then the pair, such as
+         * ´ and e for é, or the accent and that key's own character. */
+        const char *waiting = k->dead;
+        k->dead = NULL;
+        if (waiting) {
+            const char *pair = paired_char(k, key, mod);
+            if (pair) {
+                add_text(k, t, k->mode == KEYLOG_FULL ? pair : DOT, false);
+                return;
+            }
+            add_text(k, t, k->mode == KEYLOG_FULL ? waiting : DOT, false);
+        }
+        const keymap_entry_t *dead = dead_key(k, key, mod);
+        if (dead) {
+            k->dead = dead->utf8;
+            k->dead_hid = key;
+            k->dead_mod = dead->mod;
+            return;
+        }
         const char *ch = typed_char(k, key, mod);
         if (ch) {
             add_text(k, t, k->mode == KEYLOG_FULL ? ch : DOT, false);
             return;
         }
+    } else {
+        k->dead = NULL;
     }
     char prefix[40], buf[16], label[64];
     const bool shift_shown = command || !typed_char(k, key, 0);

@@ -145,6 +145,7 @@ typedef struct {
     char media_kind[8];  /**< "CD-ROM" or "disk" */
     char media_src[12];  /**< where it is read from: "card", "URL", "computer", "rescue", "whole card" */
     uint32_t media_mb;   /**< its size in MB */
+    bool media_busy;     /**< the target is reading or writing it right now */
     char version[32];        /**< firmware version, e.g. "v.0.20.0" */
 } kvm_display_status_t;
 

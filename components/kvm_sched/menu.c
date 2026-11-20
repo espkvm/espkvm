@@ -268,7 +268,11 @@ void kvm_menu_pick(void)
         }
         char img[MEDIA_NAME];
         snprintf(img, sizeof(img), "%s", s_media[s_at].name);
-        close_menu();
+        /* Closed without clearing the panel: the entry stays up while the card
+           is opened, until the result below replaces it. Cleared, the status
+           page flashed in between. */
+        media_close();
+        s_at = -1;
         char why[64] = "";
         const bool ok = kvm_action_run("menu", "media", img, "menu", why, sizeof(why));
         ESP_LOGI(TAG, "media %s: %s", img[0] ? img : "(eject)", ok ? "done" : why);

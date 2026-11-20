@@ -84,11 +84,17 @@ jobs:
       - run: npm ci
         working-directory: web
       - run: node tools/check_layouts.mjs
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xkb-data
+        # Translations: every t() call has a fixed English key, and every
+        # language file is valid with only the placeholders its English has.
+      - run: node tools/i18n_strings.mjs --check
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xkb-data libxkbcommon0
         # --require-xkb: without it the script skips itself where the database is
         # missing, which is right on a developer's machine and useless here - a
         # check that silently passes is worse than no check.
       - run: python3 tools/check_layouts_xkb.py --require-xkb
+        # The generated layouts: rebuilt from CLDR and xkb, they must come out
+        # the same as the committed web/src/layoutsGen.ts.
+      - run: python3 tools/gen_layouts.py --check
 
   build:
     runs-on: ubuntu-latest
@@ -456,7 +462,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7   # for boards/boards.json
+      - uses: actions/checkout@v7   # for boards/boards.json and the console's translations
+        with:
+          submodules: recursive
       - uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
@@ -566,6 +574,12 @@ jobs:
           cat site/flash/boards.json
 
           find site -name manifest.json -print -exec cat {} \;
+
+      # The console's translations (web/locales), which it downloads into the
+      # browser, the list of them with how much of each is translated, and
+      # every English string for the console's translation editor.
+      - name: Publish the translations
+        run: node tools/i18n_strings.mjs --publish site/locales
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

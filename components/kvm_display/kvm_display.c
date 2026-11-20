@@ -260,6 +260,7 @@ static void media_info(kvm_display_status_t *st)
     snprintf(st->media_kind, sizeof(st->media_kind), "%s", m.cdrom ? "CD-ROM" : "disk");
     snprintf(st->media_src, sizeof(st->media_src), "%s", src);
     st->media_mb = (uint32_t)(m.block_count * m.block_size / (1024 * 1024));
+    st->media_busy = kvm_media_busy(400);
     st->pages |= 1u << KVM_DISP_PAGE_MEDIA;
 }
 

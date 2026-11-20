@@ -82,6 +82,10 @@ typedef struct {
     char media_seen[64]; /* the drive's medium at the last render, "" for none */
     int64_t spun_us;     /* when the last spin-up ended */
     bool notice_spun;    /* the current "mounted" notice has had its spin-up */
+    uint16_t *still;     /* the Media page before turning its disc, made on first use */
+    float turn;          /* how far the disc on the Media page is turned, radians */
+    int64_t turn_us;     /* when it was last turned */
+    bool turning;        /* it turns (or blinks) now: render often */
 } gc9a01_ctx_t;
 
 /* RGB565, byte-swapped so the buffer can go straight to the panel (which wants
@@ -1161,6 +1165,77 @@ static esp_err_t flush(gc9a01_ctx_t *g)
 #define SPIN_MS 1400
 #define SPIN_TURNS 2
 
+/* The disc in @p still, turned by @p a radians, into @p fb. Only the disc's
+   pixels change: the rim, the corners and the hole stay. */
+static void turn_disc(uint16_t *fb, const uint16_t *still, float a)
+{
+    const float ca = cosf(a), sa = sinf(a);
+    for (int y = LCD_CENTER - CD_R; y <= LCD_CENTER + CD_R; y++) {
+        const int dy = y - LCD_CENTER;
+        for (int x = LCD_CENTER - CD_R; x <= LCD_CENTER + CD_R; x++) {
+            const int dx = x - LCD_CENTER;
+            const int d2 = dx * dx + dy * dy;
+            if (d2 > CD_R * CD_R || d2 < CD_HOLE * CD_HOLE) {
+                continue;
+            }
+            const int sx = LCD_CENTER + (int)lroundf(dx * ca + dy * sa);
+            const int sy = LCD_CENTER + (int)lroundf(-dx * sa + dy * ca);
+            if (sx >= 0 && sx < LCD_W && sy >= 0 && sy < LCD_H) {
+                fb[y * LCD_W + x] = still[sy * LCD_W + sx];
+            }
+        }
+    }
+}
+
+/*
+ * While the target reads the medium, the Media page shows it like a drive: the
+ * disc turns, a stick's light blinks. When the reading stops, the disc turns on
+ * to upright and stops there, so its writing can be read again.
+ *
+ * It costs a frame every TURN_MS (TURN_WATCHED_MS while a browser watches, like
+ * the picture page, so the panel takes little PSRAM time from the stream): one
+ * pass over the disc's pixels and the SPI write. Idle, nothing moves and the
+ * page draws once a second as before.
+ */
+#define TURN_MS 100
+#define TURN_WATCHED_MS 250
+#define TURN_SPEED 3.5f /* radians a second, about a turn in two seconds */
+
+static void media_motion(gc9a01_ctx_t *g, const kvm_display_status_t *st)
+{
+    const int64_t now = esp_timer_get_time();
+    const float dt = g->turn_us ? (float)(now - g->turn_us) / 1e6f : 0;
+    g->turn_us = now;
+    if (media_kind(st) == KVM_DISP_ICON_STICK) {
+        g->turning = st->media_busy;
+        if (st->media_busy) {
+            stick_led(g->fb, (now / 150000) & 1);
+        }
+        return;
+    }
+    const float full = 2 * (float)M_PI;
+    if (st->media_busy) {
+        g->turn = fmodf(g->turn + TURN_SPEED * (dt > 0.5f ? 0.5f : dt), full);
+    } else if (g->turn > 0) {
+        g->turn += TURN_SPEED * (dt > 0.5f ? 0.5f : dt);
+        if (g->turn >= full) {
+            g->turn = 0; /* upright again: stop */
+        }
+    }
+    g->turning = st->media_busy || g->turn > 0;
+    if (g->turn <= 0) {
+        return;
+    }
+    if (!g->still) {
+        g->still = heap_caps_malloc(FB_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+        if (!g->still) {
+            return;
+        }
+    }
+    memcpy(g->still, g->fb, FB_PIXELS * sizeof(uint16_t));
+    turn_disc(g->fb, g->still, g->turn);
+}
+
 static void spin_up(gc9a01_ctx_t *g, uint8_t kind)
 {
     if (kind == KVM_DISP_ICON_STICK) {
@@ -1188,23 +1263,7 @@ static void spin_up(gc9a01_ctx_t *g, uint8_t kind)
         /* Speeds up, then slows to a stop upright: ease in and out. */
         const float e = t < 0.5f ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
         const float a = e * SPIN_TURNS * 2 * (float)M_PI;
-        const float ca = cosf(a), sa = sinf(a);
-        for (int y = LCD_CENTER - CD_R; y <= LCD_CENTER + CD_R; y++) {
-            const int dy = y - LCD_CENTER;
-            for (int x = LCD_CENTER - CD_R; x <= LCD_CENTER + CD_R; x++) {
-                const int dx = x - LCD_CENTER;
-                const int d2 = dx * dx + dy * dy;
-                if (d2 > CD_R * CD_R || d2 < CD_HOLE * CD_HOLE) {
-                    continue;
-                }
-                int sx = LCD_CENTER + (int)lroundf(dx * ca + dy * sa);
-                int sy = LCD_CENTER + (int)lroundf(-dx * sa + dy * ca);
-                if (sx < 0 || sx >= LCD_W || sy < 0 || sy >= LCD_H) {
-                    continue;
-                }
-                g->fb[y * LCD_W + x] = still[sy * LCD_W + sx];
-            }
-        }
+        turn_disc(g->fb, still, a);
         flush(g);
         vTaskDelay(1);
     }
@@ -1228,12 +1287,24 @@ static void render_page(gc9a01_ctx_t *g, const kvm_display_status_t *st)
     if (g->square) {
         render_corners(g, st);
     }
+    if (g->screen == KVM_DISP_PAGE_MEDIA) {
+        media_motion(g, st);
+    } else {
+        g->turning = false;
+        g->turn = 0;
+    }
 }
 
 static uint32_t next_render_ms(void *ctx)
 {
     const gc9a01_ctx_t *g = ctx;
-    if (g->screen != KVM_DISP_PAGE_PICTURE || g->splash) {
+    if (g->splash) {
+        return 0;
+    }
+    if (g->screen == KVM_DISP_PAGE_MEDIA && g->turning) {
+        return g->viewers ? TURN_WATCHED_MS : TURN_MS;
+    }
+    if (g->screen != KVM_DISP_PAGE_PICTURE) {
         return 0;
     }
     return g->viewers ? PICTURE_WATCHED_MS : PICTURE_MS;
@@ -1339,6 +1410,7 @@ static void detach(void *ctx)
         gpio_set_level(g->bl, 0);
     }
     free(g->pic);
+    heap_caps_free(g->still);
     free(g->fb);
     free(g);
 }

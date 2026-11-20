@@ -115,6 +115,10 @@ bool kvm_media_is(const kvm_media_ops_t *ops);
  *  can ask it at any time. */
 void kvm_media_info(kvm_media_t *out);
 
+/** Whether the target read or wrote the medium in the last @p ms: the status
+    screen turns its disc while it does. */
+bool kvm_media_busy(uint32_t ms);
+
 /**
  * Read @p len bytes at byte @p off into @p buf, on the media task. @p buf must
  * stay valid until @p done is called. Past the end of the medium the bytes are

@@ -71,6 +71,9 @@ if [ "$what" = all ] || [ "$what" = web ]; then
     echo
     echo "== the firmware's copy of the layouts, for subtitles =="
     node "$here/tools/gen_keymap.mjs" --check
+    echo
+    echo "== translations: fixed keys, valid language files =="
+    node "$here/tools/i18n_strings.mjs" --check
 fi
 
 echo "all good"

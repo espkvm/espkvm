@@ -95,7 +95,8 @@ our own language - DuckyScript has no equivalent.
 ## Typing
 
 `type` is different in the two places. A macro sends each character through
-the keyboard layout chosen in Settings -> Input, so it can type what that
+the keyboard layout chosen in Settings -> Input (and the Target OS, where
+Windows and Linux place a character differently), so it can type what that
 layout can. A runbook runs on the device, which has no layout tables: it types
 printable US ASCII only, and the editor refuses a line with anything else.
 

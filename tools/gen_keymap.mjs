@@ -23,7 +23,7 @@ const bundle = join(out, "layouts.mjs");
 try {
   execFileSync(
     join(here, "..", "web", "node_modules", ".bin", "esbuild"),
-    [join(here, "..", "web", "src", "layouts.ts"), "--format=esm", `--outfile=${bundle}`,
+    [join(here, "..", "web", "src", "layouts.ts"), "--bundle", "--format=esm", `--outfile=${bundle}`,
      "--log-level=error"],
     { stdio: "inherit" },
   );
@@ -51,22 +51,42 @@ let c = `/*
 #include "keymap.h"
 
 `;
-const ids = Object.keys(LAYOUTS);
-for (const id of ids) {
-  const rows = Object.entries(LAYOUTS[id].map)
+const hex = (n) => `0x${n.toString(16).padStart(2, "0")}`;
+const bySlot = (a, b) => a.hid - b.hid || a.mod - b.mod;
+function entries(name, map) {
+  const rows = Object.entries(map)
     .filter(([ch]) => !SKIP.has(ch))
     .map(([ch, e]) => ({ ch, hid: e.hid, mod: e.mod }))
-    .sort((a, b) => a.hid - b.hid || a.mod - b.mod);
-  c += `static const keymap_entry_t k_${id}[] = {\n`;
-  for (const r of rows) {
-    c += `    {0x${r.hid.toString(16).padStart(2, "0")}, 0x${r.mod.toString(16).padStart(2, "0")}, ${cString(r.ch)}},\n`;
-  }
+    .sort(bySlot);
+  if (!rows.length) return "NULL";
+  c += `static const keymap_entry_t ${name}[] = {\n`;
+  for (const r of rows) c += `    {${hex(r.hid)}, ${hex(r.mod)}, ${cString(r.ch)}},\n`;
   c += `};\n\n`;
+  return name;
+}
+const count = (name) => (name === "NULL" ? "0" : `sizeof(${name}) / sizeof(${name}[0])`);
+
+/* The subtitles have no idea of the target's OS, so they use the table both
+   Windows and Linux agree on, the same one paste uses when the OS is unknown. */
+const ids = Object.keys(LAYOUTS);
+const rows = [];
+for (const id of ids) {
+  const L = LAYOUTS[id];
+  const keys = entries(`k_${id}`, L.map);
+  const dead = entries(`k_${id}_dead`, L.dead);
+  const pairs = Object.entries(L.seq).map(([ch, [d, b]]) => ({ ch, d, b }))
+    .sort((x, y) => bySlot(x.d, y.d) || bySlot(x.b, y.b));
+  let pairName = "NULL";
+  if (pairs.length) {
+    pairName = `k_${id}_pairs`;
+    c += `static const keymap_pair_t ${pairName}[] = {\n`;
+    for (const p of pairs) c += `    {${hex(p.d.hid)}, ${hex(p.d.mod)}, ${hex(p.b.hid)}, ${hex(p.b.mod)}, ${cString(p.ch)}},\n`;
+    c += `};\n\n`;
+  }
+  rows.push(`    {"${id}", ${keys}, ${count(keys)}, ${dead}, ${count(dead)}, ${pairName}, ${count(pairName)}},\n`);
 }
 c += `const keymap_layout_t keymap_layouts[] = {\n`;
-for (const id of ids) {
-  c += `    {"${id}", k_${id}, sizeof(k_${id}) / sizeof(k_${id}[0])},\n`;
-}
+c += rows.join("");
 c += `};\n\nconst int keymap_layout_count = ${ids.length};\n`;
 
 if (process.argv.includes("--check")) {

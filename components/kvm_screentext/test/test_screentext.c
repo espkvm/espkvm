@@ -359,9 +359,9 @@ int main(int argc, char **argv)
     const uint32_t wcols = 240, wrows = 67;
     uint8_t *wtext = malloc(wcols * wrows);
     memset(wtext, ' ', wcols * wrows);
-    const char *w0 = "Ubuntu 26.04.1 LTS spev-laptop tty3";
+    const char *w0 = "Ubuntu 26.04.1 LTS alex-laptop tty3";
     const char *w1 = "Welcome to Ubuntu 26.04.1 LTS (GNU/Linux 7.0.0-29-generic x86_64)";
-    const char *w2 = "spev@spev-laptop:~$";
+    const char *w2 = "alex@alex-laptop:~$";
     memcpy(wtext + 0 * wcols, w0, strlen(w0));
     memcpy(wtext + 4 * wcols, w1, strlen(w1));
     memcpy(wtext + 15 * wcols, w2, strlen(w2));
@@ -458,7 +458,7 @@ int main(int argc, char **argv)
         check(grid.confidence == 100, "every inked cell was named");
         screentext_to_utf8(&grid, out, sizeof out);
         check(strstr(out, "Ubuntu 26.04.1 LTS") != NULL, "the first line came back");
-        check(strstr(out, "spev-laptop login:") != NULL, "so did the login prompt");
+        check(strstr(out, "alex-laptop login:") != NULL, "so did the login prompt");
         check(strstr(out, "Welcome to Ubuntu 26.04.1 LTS (GNU/Linux") != NULL,
               "and the welcome line");
     }

@@ -10,8 +10,9 @@
 | Keyboard, absolute and relative pointer, media keys | works |
 | Alt+Tab, Ctrl+W and the Windows key reaching the target | works in Chrome and Edge; full screen, with control taken, and the keyboard lock button on (the keyboard with a padlock). With it, Esc goes to the target too, and holding Esc leaves full screen and gives control back. Firefox and Safari have no way to give a page those keys |
 | Waking a sleeping target from the keyboard | works; over USB, if the machine allows it. Otherwise Wake-on-LAN or the ATX button |
-| Pasting text with a keyboard layout | works; US English, Russian, Czech, Ukrainian, Lithuanian |
+| Pasting text with a keyboard layout | works; US English, Russian, Czech, Ukrainian, Lithuanian. Sixteen Western layouts are built from the Windows and Linux layout data and checked against it, not yet tried on every target: German, French, Spanish, English (UK), Italian, English (US, international), Portuguese, Portuguese (Brazil), Spanish (Latin America), Swedish / Finnish, Norwegian, Danish, Polish, Belgian, Swiss German, Swiss French |
 | Use from a phone or tablet | works; touch trackpad, pinch zoom and on-screen keyboard |
+| The console in other languages | English built in; other languages as files, see [TRANSLATING.md](TRANSLATING.md) |
 | Multiple viewers, one in control at a time with takeover | works |
 | User-defined key macros | works; the commands are in [SCRIPTS.md](SCRIPTS.md) |
 | Command palette: any action or setting by name | works; Ctrl+K or Ctrl+Shift+P |
@@ -142,6 +143,22 @@ An old BIOS that does not find the keyboard inside that bundle can be given a
 keyboard alone, at USB 1.1 speed: Settings &rarr; Input &rarr; Old BIOS keyboard.
 Everything is released when the browser goes away, so a dropped connection cannot
 leave a key held down on the target.
+
+Pasting text means typing it out, so the console has to know where each
+character sits on the target's keyboard: Settings -> Input -> Target keyboard
+layout, also offered next to the paste box. The Western layouts have dead keys,
+so é on a German target goes as ´ then e. Windows and Linux do not always agree
+on a layout. On French, ~ is a dead key on Windows and a plain key on Linux. So
+for these layouts the console keeps both versions and follows the Target OS
+setting. With the OS unknown (a BIOS, macOS) it types only what both agree on
+and names the characters it cannot type. The tables come from Unicode CLDR for
+Windows and from the X keyboard database for Linux, through
+`tools/gen_layouts.py`.
+
+When the console sees from your typing that your own keyboard has another
+layout, it says so once and offers that layout next to the paste box. It never
+switches by itself. What counts is the target's layout, and a desk with a
+Russian keyboard often drives a server with a US one.
 
 One thing to know about the absolute pointer: it addresses the target's whole
 desktop, not the single output being captured. On a target with a second display

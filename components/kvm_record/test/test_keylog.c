@@ -97,6 +97,19 @@ int main(void)
     keylog_flush(&k);
     expect("russian", (const char *const[]){"Typed: \xd0\xbf\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82"}, 1);
 
+    /* German: ´ then e is é, ´ then z (the Y key) is the accent and z, and
+     * ^ then space is ^ alone. */
+    n = 0;
+    keylog_init(&k, KEYLOG_FULL, true, "de_de", on_cue, NULL);
+    tap(0, 0, 0x2e);                 /* dead ´ */
+    tap(100 * MS, 0, 0x08);          /* e */
+    tap(200 * MS, 0, 0x2e);          /* dead ´ */
+    tap(300 * MS, 0, 0x1c);          /* z */
+    tap(400 * MS, 0, 0x35);          /* dead ^ */
+    tap(500 * MS, 0, 0x2c);          /* space */
+    keylog_flush(&k);
+    expect("german dead keys", (const char *const[]){"Typed: \xc3\xa9\xc2\xb4z^"}, 1);
+
     /* Shortcuts are named, even in masked mode; repeats are counted. */
     n = 0;
     keylog_init(&k, KEYLOG_MASKED, true, "en_us", on_cue, NULL);

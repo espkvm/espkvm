@@ -41,6 +41,7 @@ int web_mem_guard_json(char *out, size_t cap);
 void kvm_web_peer_ip(int fd, char *out, size_t cap);
 /** Device profiles. See profiles_api.c. */
 const httpd_uri_t *profiles_api_routes(size_t *count);
+const httpd_uri_t *locale_api_routes(size_t *count);
 
 /** Screen areas. See regions_api.c. */
 const httpd_uri_t *regions_api_routes(size_t *count);

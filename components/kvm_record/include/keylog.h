@@ -42,6 +42,9 @@ typedef struct {
     uint8_t mods_alone; /* modifiers pressed since the last key-free moment */
     bool key_since_mods;
     uint8_t prev_buttons;
+    /* A dead key waiting for the next key: it types nothing on its own. */
+    const char *dead;
+    uint8_t dead_hid, dead_mod;
     uint16_t prev_consumer;
 
     /* The cue being built. */

@@ -74,7 +74,10 @@ static const char *const s_engage_choices[] = {"click", "hover"};
 static const char *const s_cursor_choices[] = {"arrow", "dot", "hidden"};
 /* Must match the layout ids in web/src/layouts.ts. New ones go on the end:
    the value is stored as an index, so reordering would move everyone's setting. */
-static const char *const s_layout_choices[] = {"en_us", "ru_ru", "cs_cz", "uk_ua", "lt_lt"};
+static const char *const s_layout_choices[] = {"en_us", "ru_ru", "cs_cz", "uk_ua", "lt_lt",
+                                               "de_de", "fr_fr", "es_es", "en_gb", "it_it",
+                                               "en_intl", "pt_pt", "pt_br", "es_latam", "sv_se",
+                                               "nb_no", "da_dk", "pl_pl", "fr_be", "de_ch", "fr_ch"};
 static const char *const s_media_choices[] = {"auto", "cdrom", "disk"};
 /* Index 1 is what dashcam.c calls on_card(). */
 static const char *const s_rtc_chip_choices[] = {"Auto", "Off", "DS3231", "PCF8563 / BM8563",
@@ -182,7 +185,12 @@ static const char *const s_fallback_choices[] = {"keep_trying", "hotspot"};
 /* What the console shows for a choice, where the name the API takes would read
    badly. Same length and order as the choices beside them. */
 static const char *const s_codec_labels[] = {"MJPEG", "H.264"};
-static const char *const s_layout_labels[] = {"English (US)", "Russian", "Czech", "Ukrainian", "Lithuanian"};
+static const char *const s_layout_labels[] = {"English (US)", "Russian", "Czech", "Ukrainian", "Lithuanian",
+                                              "German", "French", "Spanish", "English (UK)", "Italian",
+                                              "English (US, international)", "Portuguese",
+                                              "Portuguese (Brazil)", "Spanish (Latin America)",
+                                              "Swedish / Finnish", "Norwegian", "Danish", "Polish",
+                                              "Belgian", "Swiss German", "Swiss French"};
 static const char *const s_media_labels[] = {"Auto", "CD-ROM", "Disk"};
 static const char *const s_targetos_labels[] = {"Detect", "Windows", "macOS", "Linux", "Android"};
 static const char *const s_usbname_choices[] = {"espkvm", "plain", "custom"};
@@ -633,8 +641,9 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "kbd_layout", .section = "input", .group = "Keyboard", .type = KVM_VT_ENUM,
         .title = "Target keyboard layout",
-        .help = "Used when pasting text, so the characters sent match what the target "
-                "actually types. A KVM sends key positions, not characters.",
+        .help = "Used when pasting text and in macros, so the characters sent match what "
+                "the target types. A KVM sends key positions, not characters. Where Windows "
+                "and Linux place a character differently, the target OS setting decides.",
         .min = 0, .max = ENUM_MAX(s_layout_choices), .def = 0, .choices = s_layout_choices, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
         .labels = s_layout_labels,

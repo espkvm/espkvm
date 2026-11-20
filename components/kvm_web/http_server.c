@@ -837,6 +837,11 @@ httpd_handle_t http_server_start(void)
     for (size_t i = 0; i < n_prof; i++) {
         register_route(h, &prof_uris[i]);
     }
+    size_t n_loc = 0;
+    const httpd_uri_t *loc_uris = locale_api_routes(&n_loc);
+    for (size_t i = 0; i < n_loc; i++) {
+        register_route(h, &loc_uris[i]);
+    }
     size_t n_rgn = 0;
     const httpd_uri_t *rgn_uris = regions_api_routes(&n_rgn);
     for (size_t i = 0; i < n_rgn; i++) {

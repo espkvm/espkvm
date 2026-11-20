@@ -40,6 +40,7 @@ typedef struct {
  */
 static SemaphoreHandle_t s_lock;
 static QueueHandle_t s_queue;
+static volatile TickType_t s_last_io; /* when the last request came, 0 before any */
 static kvm_media_source_t s_src;
 static bool s_present;
 
@@ -310,7 +311,14 @@ static esp_err_t queue(bool write, uint64_t off, void *buf, uint32_t len, kvm_me
         return ESP_ERR_INVALID_STATE;
     }
     const media_req_t r = {.write = write, .off = off, .buf = buf, .len = len, .done = done, .arg = arg};
+    s_last_io = xTaskGetTickCount() | 1; /* never 0 once there was one */
     return xQueueSend(s_queue, &r, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+bool kvm_media_busy(uint32_t ms)
+{
+    const TickType_t t = s_last_io;
+    return t && xTaskGetTickCount() - t < pdMS_TO_TICKS(ms);
 }
 
 esp_err_t kvm_media_read_async(uint64_t off, void *buf, uint32_t len, kvm_media_done_t done, void *arg)
