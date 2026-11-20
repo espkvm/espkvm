@@ -2,6 +2,19 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
+## [0.90.0] - 2026-11-21
+
+### Added
+
+- Sixteen more keyboard layouts for pasting text: German, French, Spanish, English (UK), Italian, English (US, international), Portuguese, Portuguese (Brazil), Spanish (Latin America), Swedish / Finnish, Norwegian, Danish, Polish, Belgian, Swiss German and Swiss French. Accented letters go as a dead key and the letter, ´ then e for é. Where Windows and Linux put a character on different keys (~ on French), the Target OS setting decides. With the OS unknown, only what both agree on is typed. Macros and the phone keyboard use the same tables, and recording subtitles read them too.
+- The console can now be translated. Settings -> UI -> Language downloads a language into the browser, so each viewer can pick their own. The device can keep one language for every browser that has not picked one, which works with no internet and covers the sign-in page. A language file can also be loaded by hand. The console checks every file it loads: a broken one is refused, and a bad line in it shows in English. A browser set to a language the console has is offered it once. Setting titles and help from the device are translated too. Text not translated yet stays in English, and so does text changed in English since, so a translation is never out of date. A translation editor in the console (Settings -> UI -> Language -> Edit...) shows each English string next to its translation, how much is done and what has a problem, applies a change at once and exports the file. It works in the demo, with no device, and a link such as `?lang=de&edit=1` opens it on a language. A file names its translators, and the console shows them under the language. espkvm.io/translations/ lists the languages and shows each next to the English. No language ships yet. docs/TRANSLATING.md says how to take one (open an issue first) and send it.
+- The layout can be picked next to the paste box. When the console sees from your typing that your own keyboard has another layout, it suggests that one once. It never switches by itself, because the target's layout is what counts.
+
+### Fixed
+
+- The key left of Z on European keyboards (< and > on German, French, Spanish and others) did nothing on the target. It works now, and so do the extra / ? key of Brazilian keyboards and the ¥ key of Japanese ones.
+- Mounting an image from the screen menu showed the status page for a moment before the disc spun up. The menu entry now stays on the screen until the result replaces it.
+
 ## [0.89.0] - 2026-11-19
 
 ### Added

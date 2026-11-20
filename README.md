@@ -70,7 +70,7 @@ Useful for what it does today, and honest about the rest.
 | | |
 |---|---|
 | Video: follows the target's resolution, MJPEG and H.264 | works; H.264 needs HTTPS |
-| Keyboard, mouse, media keys, pasting text in a layout | works |
+| Keyboard, mouse, media keys, pasting text in a layout | works; 21 layouts, dead keys included |
 | From a phone or a tablet | works; touch trackpad, pointer stick, pinch zoom and on-screen keyboard |
 | Several viewers, one in control | works; plus a view-only sign-in for others |
 | VNC: TigerVNC and other clients with Open H.264 or Tight encoding, over TLS | new, off by default |
@@ -78,6 +78,7 @@ Useful for what it does today, and honest about the rest.
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |
+| The console in another language | new; no translations yet, [help welcome](docs/TRANSLATING.md) |
 | A command palette (Ctrl+K), your own buttons on the bar | new; the palette also finds every setting by name |
 | Notifications to Telegram, ntfy, a webhook or the browser, with a screenshot | works |
 | Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |
