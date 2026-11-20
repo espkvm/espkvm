@@ -25,17 +25,17 @@ listing them.
 
 ```json
 {
-  "@language": "ru",
-  "@name": "Русский",
-  "@offer": "Консоль есть на русском: Настройки → Интерфейс → Язык.",
-  "@translators": ["Anna", "Ivan"],
-  "Paste from clipboard": "Вставить из буфера обмена",
-  "Stopped after {n} of {total} characters": "Остановлено после {n} из {total} символов",
+  "@language": "lt",
+  "@name": "Lietuvių",
+  "@offer": "Konsolė yra ir lietuvių kalba: Nustatymai → Sąsaja → Kalba.",
+  "@translators": ["Rūta", "Jonas"],
+  "Paste from clipboard": "Įklijuoti iš iškarpinės",
+  "Stopped after {n} of {total} characters": "Sustabdyta po {n} iš {total} simbolių",
   "Copied {n} line from the screen": {
-    "one": "Скопирована {n} строка с экрана",
-    "few": "Скопированы {n} строки с экрана",
-    "many": "Скопировано {n} строк с экрана",
-    "other": "Скопировано {n} строки с экрана"
+    "one": "Nukopijuota {n} eilutė iš ekrano",
+    "few": "Nukopijuotos {n} eilutės iš ekrano",
+    "many": "Nukopijuota {n} eilutės iš ekrano",
+    "other": "Nukopijuota {n} eilučių iš ekrano"
   }
 }
 ```
@@ -85,7 +85,7 @@ to the issue. A partial file is fine.
 
 ```sh
 node tools/i18n_strings.mjs               # how much each language covers
-node tools/i18n_strings.mjs --missing ru  # what ru lacks, ready to fill in
+node tools/i18n_strings.mjs --missing lt  # what lt lacks, ready to fill in
 node tools/i18n_strings.mjs --check       # what CI runs
 ```
 
