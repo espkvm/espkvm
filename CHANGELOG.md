@@ -2,6 +2,16 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
+## [Unreleased]
+
+### Added
+
+- Belarusian translation of the console. Languages now reach fw.espkvm.io as soon as they are merged, with no firmware release.
+
+### Changed
+
+- The release workflow publishes fw.espkvm.io before the Pages deploy, so a Pages hiccup no longer holds back updates.
+
 ## [0.90.0] - 2026-11-21
 
 ### Added

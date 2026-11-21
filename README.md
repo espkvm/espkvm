@@ -78,7 +78,7 @@ Useful for what it does today, and honest about the rest.
 | Recording, screenshots, dashcam, timelapse | works; on a microSD card |
 | Reading a text screen as text, watching it for words | works; text modes only |
 | Macros, runbooks, a scheduler | works |
-| The console in another language | new; no translations yet, [help welcome](docs/TRANSLATING.md) |
+| The console in another language | new; Belarusian so far, [more welcome](docs/TRANSLATING.md) |
 | A command palette (Ctrl+K), your own buttons on the bar | new; the palette also finds every setting by name |
 | Notifications to Telegram, ntfy, a webhook or the browser, with a screenshot | works |
 | Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |

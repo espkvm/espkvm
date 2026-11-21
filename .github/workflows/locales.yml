@@ -1,0 +1,82 @@
+# The console's translations on fw.espkvm.io, without a firmware release.
+#
+# The console downloads a language from fw.espkvm.io/locales/, so a new or
+# better translation needs no new firmware: it only has to reach that folder.
+# The release workflow publishes the folder too, with everything else; this one
+# runs when the console (and so web/locales) moves on main, and changes only
+# locales/ in espkvm/fw, as one more commit. The next release replaces the
+# whole of espkvm/fw as before, translations included.
+#
+# strings.json then lists the console on main, which can be a little ahead of
+# the latest release. A translation of a string the release does not have yet
+# simply waits unused, so that is harmless.
+name: locales
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web
+      - tools/i18n_strings.mjs
+      - .github/workflows/locales.yml
+  workflow_dispatch:
+
+# One run of this at a time. The release workflow force-pushes espkvm/fw with
+# its own copy of locales/, so if that lands between the clone and the push
+# below, the push is refused and the step starts again from a fresh clone.
+concurrency:
+  group: locales
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: node tools/i18n_strings.mjs --check
+      - run: node tools/i18n_strings.mjs --publish out/locales
+
+      - name: Publish to fw.espkvm.io (espkvm/fw)
+        env:
+          FW_DEPLOY_KEY: ${{ secrets.FW_DEPLOY_KEY }}
+        run: |
+          [ -n "${FW_DEPLOY_KEY}" ] || { echo "FW_DEPLOY_KEY is not set"; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "${FW_DEPLOY_KEY}" > ~/.ssh/fw_key
+          chmod 600 ~/.ssh/fw_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/fw_key -o IdentitiesOnly=yes"
+          publish() {
+            rm -rf fw
+            git clone -q --depth 1 git@github.com:espkvm/fw.git fw
+            rm -rf fw/locales
+            cp -r out/locales fw/locales
+            cd fw
+            git add -A locales
+            if git diff --cached --quiet; then
+              echo "locales/ unchanged"
+              cd ..
+              return 0
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -q -m "locales from espkvm ${GITHUB_SHA::7}"
+            git push -q origin main && git show --stat HEAD | tail -n +6
+            local rc=$?
+            cd ..
+            return $rc
+          }
+          for try in 1 2 3; do
+            publish && exit 0
+            echo "push refused, trying again from a fresh clone"
+            sleep 20
+          done
+          exit 1
