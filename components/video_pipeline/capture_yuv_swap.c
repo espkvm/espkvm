@@ -26,7 +26,7 @@
 
 #include "capture_pixfmt.h"
 
-#if CAPTURE_YUV_SWAP
+#if CAPTURE_YUV_CODE
 
 #include "driver/ppa.h"
 #include "esp_cache.h"
@@ -164,6 +164,9 @@ void *capture_yuv_swap(capture_ctx_t *c, void *src)
     return s_buf;
 }
 
+#endif /* CAPTURE_YUV_CODE */
+
+#if CAPTURE_YUV_SWAP
 /*
  * The same frame, rearranged for the H.264 encoder instead.
  *

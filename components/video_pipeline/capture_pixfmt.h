@@ -64,7 +64,17 @@ typedef struct {
 #define CAPTURE_YUV_SWAP 0
 #endif
 
-/** The active capture pixel format, selected by chip revision at build time. */
+/*
+ * The fourth: any other rev < 3.0 image meeting a bridge that sends only YUV422
+ * (the RK628, kvm_bridge_t.yuv422_only). The same reorder-for-JPEG path as the
+ * LT6911D, chosen at start-up rather than at build time, since the same image
+ * also has to drive a TC358743 in RGB888 (which H.264 on this revision needs).
+ * MJPEG only. CAPTURE_YUV_CODE says the reorder code is in the image at all.
+ */
+#define CAPTURE_YUV_CODE (!CAPTURE_DIRECT_ENCODE)
+
+/** The active capture pixel format: by chip revision at build time, and on rev
+ *  < 3.0 by the bridge as well (capture_pixfmt_select). */
 const capture_pixfmt_t *capture_pixfmt(void);
 
 /** Bytes per captured pixel (bpp / 8): 3 for RGB/BGR888, 2 for YUV422. */
@@ -72,3 +82,7 @@ static inline unsigned capture_pixfmt_bytes(void)
 {
     return capture_pixfmt()->bpp / 8u;
 }
+
+/** Pick the profile for the bridge that answered; before this, the build's own.
+ *  Only a rev < 3.0 image without CAPTURE_YUV_SWAP has a choice to make. */
+void capture_pixfmt_select(bool bridge_yuv422_only);

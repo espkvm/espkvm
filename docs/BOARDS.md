@@ -490,8 +490,9 @@ The [Waveshare HDMI to CSI Adapter (B)](https://www.waveshare.com/hdmi-to-csi-ad
 [WarpKVM rk628-22p](https://github.com/WarpKVM/rk628-bridge-boards) all carry a
 **Rockchip RK628H**. I have none of them. The driver (`components/rk628`) is written
 from what Rockchip's own Linux driver does and is in every image, found by itself
-after the TC358743 and the LT6911D. It needs a rev 3.x ESP32-P4: the chip sends only
-YUV422, and the rev 1.x images capture RGB888. Two lanes at 1296 Mbit/s carry 1080p60,
+after the TC358743 and the LT6911D. The chip sends only YUV422, so on a rev 1.x
+ESP32-P4 it is MJPEG only: the same path, tried with a TC358743 sent to YUV422,
+gives about 7 fps at 1080p. Two lanes at 1296 Mbit/s carry 1080p60,
 and a 4K source is scaled down on the chip. HDMI-CEC goes through the chip's own
 controller, if the board wires the CEC pin to it. If you have one of these, the
 log lines tagged `rk628` from start-up to plugging a source in are what I need, in

@@ -137,10 +137,10 @@ static esp_err_t mjpeg_open_locked(void)
         return err;
     }
 
-#if CAPTURE_YUV_SWAP
+#if CAPTURE_YUV_CODE
     /* Before the outputs: MJPEG encodes nothing without it, and taken on the
      * first frame instead it loses to whatever grabbed the PSRAM meanwhile. */
-    if (capture_yuv_swap_reserve(capture_yuv_swap_max_bytes()) != ESP_OK) {
+    if (capture_pixfmt()->swap_bytes && capture_yuv_swap_reserve(capture_yuv_swap_max_bytes()) != ESP_OK) {
         jpeg_del_encoder_engine(s_enc);
         s_enc = NULL;
         return ESP_ERR_NO_MEM;
@@ -209,7 +209,10 @@ void capture_release_idle_buffers(void)
 
 size_t capture_psram_keep_block(void)
 {
-#if CAPTURE_YUV_SWAP
+#if CAPTURE_YUV_CODE
+    if (!capture_pixfmt()->swap_bytes) {
+        return 0;
+    }
     return capture_yuv_swap_held() ? 0 : capture_yuv_swap_max_bytes();
 #else
     return 0;

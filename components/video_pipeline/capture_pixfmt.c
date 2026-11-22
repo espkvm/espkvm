@@ -94,6 +94,46 @@ static const capture_pixfmt_t k_yuv422_swap = {
 };
 #endif
 
+#if CAPTURE_YUV_CODE && !CAPTURE_YUV_SWAP
+/*
+ * rev < 3.0 with a bridge that sends only YUV422 (the RK628). The same bytes
+ * land in memory as the LT6911D's, luma first, and the same reversal puts
+ * them in the JPEG engine's order: checked with the TC358743 sent to UYVY on
+ * a P4-ETH rev 1.3 (CONFIG_KVM_CAPTURE_TEST_YUV422), colours and columns
+ * matching its RGB888 picture. Only the range differs. MJPEG only.
+ */
+static const capture_pixfmt_t k_uyvy_swap = {
+    .name = "uyvy+swap",
+    .csi_dt = 0x1eu,
+    .bpp = 16u,
+    .v_align_mb = false,
+    .direct = false,
+    .swap_bytes = true,
+    .luma_first = true,
+    .cam_color = CAM_CTLR_COLOR_YUV422_UYVY,
+    .isp_color = ISP_COLOR_YUV422,
+    .h264_pic = ESP_H264_RAW_FMT_O_UYY_E_VYY, /* never reached: no H.264 here */
+    .jpeg_src = JPEG_ENCODE_IN_FORMAT_YUV422,
+    .jpeg_subsample = JPEG_DOWN_SAMPLING_YUV422,
+    .full_range = true, /* the RK628 is set to full range, as the TC358743 is */
+};
+static bool s_uyvy;
+#if defined(CONFIG_KVM_CAPTURE_TEST_YUV422) && CONFIG_KVM_CAPTURE_TEST_YUV422
+#define TEST_YUV422 1
+#else
+#define TEST_YUV422 0
+#endif
+#endif
+
+void capture_pixfmt_select(bool bridge_yuv422_only)
+{
+#if CAPTURE_YUV_CODE && !CAPTURE_YUV_SWAP
+    s_uyvy = bridge_yuv422_only || TEST_YUV422;
+#else
+    (void)bridge_yuv422_only;
+#endif
+}
+
 const capture_pixfmt_t *capture_pixfmt(void)
 {
 #if CAPTURE_DIRECT_ENCODE
@@ -101,6 +141,6 @@ const capture_pixfmt_t *capture_pixfmt(void)
 #elif CAPTURE_YUV_SWAP
     return &k_yuv422_swap;
 #else
-    return &k_rgb888;
+    return s_uyvy ? &k_uyvy_swap : &k_rgb888;
 #endif
 }

@@ -145,6 +145,13 @@ esp_err_t capture_thumbnail(uint16_t *dst, int max_w, int max_h, bool swap, int 
     if (!dst || max_w < 1 || max_h < 1 || !out_w || !out_h) {
         return ESP_ERR_INVALID_ARG;
     }
+#if CAPTURE_YUV_CODE
+    /* A YUV422-only bridge on rev < 3.0 (capture_pixfmt.c): the PPA cannot
+     * read YUV422 on this revision, as with the LT6911D below. */
+    if (capture_pixfmt()->swap_bytes) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#endif
     kvm_video_status_t vs;
     capture_status_get(&vs);
     if (!vs.signal) {

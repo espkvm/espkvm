@@ -158,6 +158,9 @@ typedef struct {
     bool knows_ddc5v;
     /** The chip sends the HDMI sound out as I2S, for kvm_audio to read. */
     bool i2s_audio;
+    /** The chip sends only YUV422. Before chip rev 3.0 the capture then takes
+     *  the MJPEG-only path (capture_pixfmt.c) instead of RGB888. */
+    bool yuv422_only;
     /**
      * The CSI lane rate the chip sends at, in Mbit/s, for a bridge whose rate is
      * its own rather than the board's. 0: the board's CONFIG_KVM_MIPI_LANE_MBPS,

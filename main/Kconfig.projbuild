@@ -230,6 +230,14 @@ menu "ESP-KVM"
                 200 ms high pulse on every change. With it the mode is read
                 again at once instead of at the next 200 ms poll.
 
+        config KVM_CAPTURE_TEST_YUV422
+            bool "Bench test: have the TC358743 send YUV422 on a rev 1.x board"
+            default n
+            help
+                Takes the path a YUV422-only bridge (the RK628) needs on a rev 1.x
+                chip - UYVY in, a PPA pass to the JPEG engine's order, MJPEG only -
+                with the TC358743 that is on the bench. Never in a release image.
+
         config KVM_LT6911
             bool "LT6911D capture bridge (M5Stack Add-on Display In)"
             default n

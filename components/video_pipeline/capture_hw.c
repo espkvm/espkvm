@@ -515,11 +515,8 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     capture_fill_esp_cam_color_types(&csi_cfg, &isp_cfg);
 
     ESP_RETURN_ON_ERROR(esp_cam_new_csi_ctlr(&csi_cfg, &s_cam), CAPTURE_LOG_TAG, "csi ctlr");
-#if CAPTURE_YUV_SWAP
-    s_gate_on = hres * vres > 1280u * 720u;
-#else
-    s_gate_on = false;
-#endif
+    /* The reorder pass costs PSRAM bandwidth the capture DMA also needs. */
+    s_gate_on = capture_pixfmt()->swap_bytes && hres * vres > 1280u * 720u;
     s_gate_closed = false;
 
     esp_cam_ctlr_evt_cbs_t cbs = {
@@ -709,6 +706,19 @@ capture_ctx_t *capture_hw_init_start(void)
         ESP_LOGE(CAPTURE_LOG_TAG, "bridge detect failed: %s", esp_err_to_name(probe_err));
         return NULL;
     }
+    /* Before anything sizes a frame: the bridge decides the pixel format on a
+     * rev < 3.0 image (capture_pixfmt.c). A YUV422-only bridge there means
+     * MJPEG only - the H.264 encoder on this revision is fed RGB through the
+     * PPA, and the PPA cannot make its input from YUV422. */
+    capture_pixfmt_select(s_cap.bridge.yuv422_only);
+#if CAPTURE_YUV_CODE && !CAPTURE_YUV_SWAP
+    if (capture_pixfmt()->swap_bytes) {
+        ESP_LOGI(CAPTURE_LOG_TAG, "%s sends YUV422: MJPEG only on this chip revision", s_cap.bridge.name);
+        kvm_cap_report(KVM_CAP_H264, false,
+                       "the %s sends only YUV422, and before chip rev 3.0 the H.264 encoder needs RGB",
+                       s_cap.bridge.name);
+    }
+#endif
     /* The setting's choices are in the same order as the driver's enum. Only
      * a 16-bit capture can take 1080p50 (see tools/gen_edid.py), the default;
      * a 24-bit one offered it would show nothing, so it gets "full". */
@@ -751,20 +761,24 @@ capture_ctx_t *capture_hw_init_start(void)
     size_t align = 0;
     ESP_ERROR_CHECK(esp_cache_get_alignment(MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA, &align));
     const uint32_t caps = MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-    /* One slot more than the ring: the last is drop_fb. */
-    uint8_t *blk =
-        heap_caps_aligned_calloc(align, CAPTURE_FB_COUNT + 1u, CAPTURE_MAX_FRAME_BYTES, caps);
+    /* One slot more than the ring: the last is drop_fb. Sized by the format the
+     * bridge chose, not the build's largest: a rev < 3.0 image meeting a
+     * YUV422-only bridge needs two bytes a pixel, and the 6 MB that saves is
+     * what the reorder buffer for the JPEG engine lives on. */
+    const size_t max_frame =
+        (size_t)CAPTURE_MAX_H_RES * (size_t)CAPTURE_MAX_V_ALLOC * (size_t)capture_pixfmt_bytes();
+    uint8_t *blk = heap_caps_aligned_calloc(align, CAPTURE_FB_COUNT + 1u, max_frame, caps);
     if (!blk) {
         ESP_LOGE(CAPTURE_LOG_TAG, "CSI frame buffer alloc failed (%ux%zu bytes) - PSRAM exhausted",
-                 CAPTURE_FB_COUNT + 1u, CAPTURE_MAX_FRAME_BYTES);
+                 CAPTURE_FB_COUNT + 1u, max_frame);
         kvm_cap_report(KVM_CAP_VIDEO, false, "no PSRAM for %ux%u frame buffers", CAPTURE_MAX_H_RES,
                        CAPTURE_MAX_V_RES);
         return NULL;
     }
     for (int i = 0; i < CAPTURE_FB_COUNT; i++) {
-        s_cap.fb[i] = blk + ((size_t)i * CAPTURE_MAX_FRAME_BYTES);
+        s_cap.fb[i] = blk + ((size_t)i * max_frame);
     }
-    s_cap.drop_fb = blk + ((size_t)CAPTURE_FB_COUNT * CAPTURE_MAX_FRAME_BYTES);
+    s_cap.drop_fb = blk + ((size_t)CAPTURE_FB_COUNT * max_frame);
     s_cap.ping_fb_idx = 0;
     s_cap.done_fb = NULL;
     s_cap.fb_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
@@ -775,7 +789,7 @@ capture_ctx_t *capture_hw_init_start(void)
     s_cap.csi_get_new_irqs = 0;
 
     ESP_LOGI(CAPTURE_LOG_TAG, "CSI %s %ubpp ring %ux%zu bytes for up to %ux%u (align %zu)",
-             capture_pixfmt()->name, capture_pixfmt()->bpp, CAPTURE_FB_COUNT, CAPTURE_MAX_FRAME_BYTES,
+             capture_pixfmt()->name, capture_pixfmt()->bpp, CAPTURE_FB_COUNT, max_frame,
              CAPTURE_MAX_H_RES, CAPTURE_MAX_V_RES, align);
 
     s_cap.csi_done_sem = xSemaphoreCreateCounting(32, 0);

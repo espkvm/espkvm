@@ -2,6 +2,16 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
+## [0.91.1] - 2026-11-22
+
+### Added
+
+- The RK628H bridge on a rev 1.x ESP32-P4 too, MJPEG only. The chip sends only YUV422, and before chip rev 3.0 the H.264 encoder needs RGB, so a rev 1.x image now picks its capture format by the bridge it finds: RGB888 for the TC358743 as before, YUV422 for the RK628, through the path the M5Stack LT6911D board already uses. Tried with a TC358743 sent to YUV422 on a P4-ETH rev 1.3: the same picture as in RGB, about 7 fps at 1080p. The RK628 itself is still untested.
+
+### Fixed
+
+- When no video codec could start at boot (short of memory), the device restarted a few seconds later. It now keeps trying, as it already did when a codec failed later on.
+
 ## [0.91.0] - 2026-11-22
 
 ### Added

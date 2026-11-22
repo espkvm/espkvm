@@ -1048,7 +1048,8 @@ static esp_err_t op_set_edid_id(void *dev, const kvm_bridge_edid_id_t *id)
     return d->ready ? op_set_edid_profile(dev, d->profile) : ESP_OK;
 }
 
-/* The chip only sends UYVY. A board that captures RGB888 cannot use it. */
+/* The chip only sends UYVY; the capture picks a YUV422 path for it
+ * (yuv422_only), so a request for RGB888 is a bug. */
 static void op_set_csi_uyvy422(void *dev, bool uyvy422)
 {
     (void)dev;
@@ -1218,16 +1219,6 @@ static esp_err_t rk628_detect(i2c_master_bus_handle_t bus, kvm_bridge_t *out)
         free(d);
         return ESP_ERR_NOT_FOUND;
     }
-#if !(defined(CONFIG_ESP_REV_MIN_FULL) && CONFIG_ESP_REV_MIN_FULL >= 300)
-    /* The chip sends only YUV422, and a rev 1.x build captures RGB888 (its H.264
-     * path needs that). Taking the chip would give a garbled picture, so say what
-     * it is and leave it. */
-    ESP_LOGE(TAG, "RK628F/H found, but it sends only YUV422 and this rev 1.x image captures RGB888: "
-                  "it needs a board with a rev 3.x chip");
-    (void)i2c_master_bus_rm_device(d->i2c);
-    free(d);
-    return ESP_ERR_NOT_SUPPORTED;
-#endif
     uint32_t ver = 0;
     (void)raw_read(d, RK_CSI0 + CSI_VERSION, &ver);
     ESP_LOGI(TAG, "RK628F/H (0x%08" PRIx32 "), CSI TX version 0x%08" PRIx32 " - this driver is untested on hardware",
@@ -1238,6 +1229,7 @@ static esp_err_t rk628_detect(i2c_master_bus_handle_t bus, kvm_bridge_t *out)
     out->knows_ddc5v = false; /* no 5 V detect wired on the adapters */
     out->i2s_audio = true;
     out->lane_mbps = LANE_MBPS;
+    out->yuv422_only = true; /* rev 1.x: MJPEG only, see capture_pixfmt.c */
     return ESP_OK;
 }
 

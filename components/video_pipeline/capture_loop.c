@@ -324,9 +324,10 @@ void capture_loop_run(capture_ctx_t *c)
 
     const capture_codec_t *codec = codec_switch(NULL, codec_wanted());
     if (!codec) {
-        ESP_LOGE(CAPTURE_LOG_TAG, "no codec could be started");
-        vTaskDelete(NULL);
-        return;
+        /* Into the loop all the same: it retries a missing codec every two
+         * seconds. Deleting this task instead left it on the task watchdog,
+         * which restarted the device a few seconds later. */
+        ESP_LOGE(CAPTURE_LOG_TAG, "no codec could be started; retrying");
     }
 
     int64_t hdmi_recover_cooldown_until_us = 0;
@@ -644,7 +645,7 @@ void capture_loop_run(capture_ctx_t *c)
             capture_thumb_tick(c, src);
         }
 
-#if CAPTURE_YUV_SWAP
+#if CAPTURE_YUV_CODE
         /*
          * The readers above want the captured bytes as they came. The JPEG
          * engine wants them reordered; the H.264 path wants them as they came
@@ -653,8 +654,9 @@ void capture_loop_run(capture_ctx_t *c)
          * a JPEG whatever is streaming - pays for the pass itself on the rare
          * frame someone asks for a picture of.
          */
+        const bool swapping = capture_pixfmt()->swap_bytes;
         const bool h264_running = (codec == capture_codec_h264());
-        if (!h264_running) {
+        if (swapping && !h264_running) {
             void *ordered = capture_yuv_swap(c, src);
             if (!ordered) {
                 capture_park_frame_end();
@@ -664,8 +666,8 @@ void capture_loop_run(capture_ctx_t *c)
         }
 #endif
 
-#if CAPTURE_YUV_SWAP
-        if (h264_running && (capture_snapshot_wanted() || capture_vnc_snapshot_wanted())) {
+#if CAPTURE_YUV_CODE
+        if (swapping && h264_running && (capture_snapshot_wanted() || capture_vnc_snapshot_wanted())) {
             void *ordered = capture_yuv_swap(c, src);
             if (ordered) {
                 capture_snapshot_tick(c, ordered);

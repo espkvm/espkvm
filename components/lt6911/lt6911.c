@@ -392,6 +392,7 @@ static esp_err_t lt6911_detect(i2c_master_bus_handle_t bus, kvm_bridge_t *out)
     log_chip_id(d);
 
     out->name = "LT6911D";
+    out->yuv422_only = true;
     out->ops = &s_ops;
     out->dev = d;
     return ESP_OK;
