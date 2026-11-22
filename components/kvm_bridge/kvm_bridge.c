@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "kvm_bridge.h"
+#include "kvm_bridge_edid_data.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -205,4 +206,88 @@ bool kvm_bridge_timings_valid(const kvm_bridge_timings_t *t)
     /* Guard against half-latched counters while the source retrains: a mode is
      * only believable if the active area fits inside the total. */
     return t->hact >= 320u && t->vact >= 200u && t->htotal > t->hact && t->vtotal > t->vact;
+}
+
+/* ---- EDID ------------------------------------------------------------------ */
+
+_Static_assert(KVM_EDID_TOTAL_LEN == KVM_BRIDGE_EDID_LEN, "regenerate kvm_bridge_edid_data.h");
+
+/* The operator's monitor name and IDs over the built-in ones, in block 0,
+ * then its checksum again. The layout is EDID 1.3/1.4: maker at 8-9,
+ * product 10-11 and serial 12-15 little-endian, the name in the 0xFC
+ * descriptor (gen_edid.py puts one in every profile). */
+static void edid_apply_id(uint8_t *e, const kvm_bridge_edid_id_t *id)
+{
+    if (id->mfr[0]) {
+        const uint16_t m = (uint16_t)(((id->mfr[0] - '@') & 31) << 10 |
+                                      ((id->mfr[1] - '@') & 31) << 5 | ((id->mfr[2] - '@') & 31));
+        e[8] = (uint8_t)(m >> 8);
+        e[9] = (uint8_t)m;
+    }
+    if (id->has_product) {
+        e[10] = (uint8_t)id->product;
+        e[11] = (uint8_t)(id->product >> 8);
+    }
+    if (id->has_serial) {
+        for (int i = 0; i < 4; i++) {
+            e[12 + i] = (uint8_t)(id->serial >> (8 * i));
+        }
+    }
+    if (id->name[0]) {
+        for (int off = 54; off <= 108; off += 18) {
+            if (e[off] == 0 && e[off + 1] == 0 && e[off + 2] == 0 && e[off + 3] == 0xFC) {
+                /* 13 bytes: the name, 0x0A after a short one, spaces after that. */
+                const size_t n = strnlen(id->name, 13);
+                memset(e + off + 5, ' ', 13);
+                memcpy(e + off + 5, id->name, n);
+                if (n < 13) {
+                    e[off + 5 + n] = 0x0A;
+                }
+                break;
+            }
+        }
+    }
+    uint8_t sum = 0;
+    for (int i = 0; i < 127; i++) {
+        sum += e[i];
+    }
+    e[127] = (uint8_t)(0x100 - sum);
+}
+
+void kvm_bridge_edid_build(kvm_bridge_edid_profile_t profile, const kvm_bridge_edid_id_t *id,
+                           uint8_t out[KVM_BRIDGE_EDID_LEN], const char **what)
+{
+    const uint8_t *bin = kvm_edid_full;
+    const char *w = "full mode list";
+    switch (profile) {
+    case KVM_BRIDGE_EDID_1080P30:
+        bin = kvm_edid_1080p30;
+        w = "1080p30 only";
+        break;
+    case KVM_BRIDGE_EDID_720P:
+        bin = kvm_edid_720p;
+        w = "up to 720p";
+        break;
+    case KVM_BRIDGE_EDID_1024X768:
+        bin = kvm_edid_1024x768;
+        w = "up to 1024x768";
+        break;
+    case KVM_BRIDGE_EDID_480P:
+        bin = kvm_edid_480p;
+        w = "up to 720x480";
+        break;
+    case KVM_BRIDGE_EDID_FULL_16BPP:
+        bin = kvm_edid_full16;
+        w = "full mode list, 1080p50 preferred";
+        break;
+    default:
+        break;
+    }
+    memcpy(out, bin, KVM_BRIDGE_EDID_LEN);
+    if (id) {
+        edid_apply_id(out, id);
+    }
+    if (what) {
+        *what = w;
+    }
 }

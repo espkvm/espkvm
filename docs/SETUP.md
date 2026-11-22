@@ -109,7 +109,8 @@ console tells you when a newer build is out and installs it in one click. Your
 browser asks, not the device. The device asks by itself only if you tick **New
 firmware** for a notification channel, to tell you about a release while the
 console is closed (see [NOTIFICATIONS](NOTIFICATIONS.md#new-firmware)).
-With the check on, the browser also tells check.espkvm.io once a day a random id
+With the check on, the browser also tells check.espkvm.io, once a day and again
+after an update, a random id
 of the device (not taken from the hardware; erasing the flash makes a new one),
 its board, its version and the chip revision. That is how I count the devices in use. Nothing else
 is sent. check.espkvm.io passes the counts on to Google Analytics, under a hash

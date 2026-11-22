@@ -93,6 +93,20 @@ node tools/i18n_strings.mjs --check       # what CI runs
 into the language's plural forms. Fill them in and merge them into the file.
 Untranslated text simply stays English, so a partial file is fine.
 
+When an English sentence changes, keep the old key and its translation next to
+the new one. fw.espkvm.io serves one file to every version, and a device on an
+older release still looks the text up by the old English. Old keys are cleared
+now and then:
+
+```sh
+node tools/i18n_strings.mjs --prune      # drop keys no console of the last 10 releases uses
+node tools/i18n_strings.mjs --prune 20   # or of the last 20
+node tools/i18n_strings.mjs --history    # which English text left the console in which release
+```
+
+CI warns when a language falls behind the English, and when a file has more
+than a hundred keys the console no longer uses.
+
 ## In the code
 
 `t("English")` where text is shown, `tn("{n} file", "{n} files", n)` for a

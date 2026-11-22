@@ -2,15 +2,18 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
-## [Unreleased]
+## [0.91.0] - 2026-11-22
 
 ### Added
 
 - Belarusian translation of the console. Languages now reach fw.espkvm.io as soon as they are merged, with no firmware release.
+- A driver for the Rockchip RK628H bridge, on the Waveshare HDMI to CSI Adapter (B), the Radxa 4K HDMI IN adapter and the WarpKVM rk628-22p. It is not tested on hardware and may not work: I have none of these boards. It is in every image and finds the chip by itself, on boards with a rev 3.x ESP32-P4. HDMI-CEC goes through the chip's own controller. If you have one, the log lines tagged `rk628` are what I need.
 
 ### Changed
 
 - The release workflow publishes fw.espkvm.io before the Pages deploy, so a Pages hiccup no longer holds back updates.
+- The device count hears about an update the same day: the console reports again right after the device moves to another version, not only once a day.
+- Over Tailscale the device log no longer fills with "DISCO PONG ... from an address we did not ping" warnings. It is ordinary behind NAT and now logs at debug level.
 
 ## [0.90.0] - 2026-11-21
 

@@ -17,7 +17,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "kvm_board.h"
-#include "tc358743_edid.h"
 #include "tc358743_hdmi_debug.h"
 
 /* CEC is on: keep its block out of reset and its events unmasked across a re-init. */
@@ -703,85 +702,17 @@ static void hpd_set(tc358743_t *d, bool on)
     wr8_and_or(d, HPD_CTL, (uint8_t)~MASK_HPD_OUT0, on ? MASK_HPD_OUT0 : 0);
 }
 
-/* The operator's monitor name and IDs over the built-in ones, in block 0,
- * then its checksum again. The layout is EDID 1.3/1.4: maker at 8-9,
- * product 10-11 and serial 12-15 little-endian, the name in the 0xFC
- * descriptor (gen_edid.py puts one in every profile). */
-static void edid_apply_id(uint8_t *e, const kvm_bridge_edid_id_t *id)
-{
-    if (id->mfr[0]) {
-        const uint16_t m = (uint16_t)(((id->mfr[0] - '@') & 31) << 10 |
-                                      ((id->mfr[1] - '@') & 31) << 5 | ((id->mfr[2] - '@') & 31));
-        e[8] = (uint8_t)(m >> 8);
-        e[9] = (uint8_t)m;
-    }
-    if (id->has_product) {
-        e[10] = (uint8_t)id->product;
-        e[11] = (uint8_t)(id->product >> 8);
-    }
-    if (id->has_serial) {
-        for (int i = 0; i < 4; i++) {
-            e[12 + i] = (uint8_t)(id->serial >> (8 * i));
-        }
-    }
-    if (id->name[0]) {
-        for (int off = 54; off <= 108; off += 18) {
-            if (e[off] == 0 && e[off + 1] == 0 && e[off + 2] == 0 && e[off + 3] == 0xFC) {
-                /* 13 bytes: the name, 0x0A after a short one, spaces after that. */
-                const size_t n = strnlen(id->name, 13);
-                memset(e + off + 5, ' ', 13);
-                memcpy(e + off + 5, id->name, n);
-                if (n < 13) {
-                    e[off + 5 + n] = 0x0A;
-                }
-                break;
-            }
-        }
-    }
-    uint8_t sum = 0;
-    for (int i = 0; i < 127; i++) {
-        sum += e[i];
-    }
-    e[127] = (uint8_t)(0x100 - sum);
-}
-
 /**
  * Load EDID into internal RAM (HPD must stay low, source must not DDC during this).
  * Caller raises HPD after PLL/CSI and any other sink setup (Linux: delayed hotplug ~143 ms).
  */
 static void edid_write_builtin(tc358743_t *d)
 {
-    const uint8_t *bin = tc358743_edid_full;
-    const char *what = "full mode list";
-    switch (d->edid_profile) {
-    case TC358743_EDID_1080P30:
-        bin = tc358743_edid_1080p30;
-        what = "1080p30 only";
-        break;
-    case TC358743_EDID_720P:
-        bin = tc358743_edid_720p;
-        what = "up to 720p";
-        break;
-    case TC358743_EDID_1024X768:
-        bin = tc358743_edid_1024x768;
-        what = "up to 1024x768";
-        break;
-    case TC358743_EDID_480P:
-        bin = tc358743_edid_480p;
-        what = "up to 720x480";
-        break;
-    case TC358743_EDID_FULL_16BPP:
-        bin = tc358743_edid_full16;
-        what = "full mode list, 1080p50 preferred";
-        break;
-    default:
-        break;
-    }
+    const char *what = NULL;
+    uint8_t edid[KVM_BRIDGE_EDID_LEN];
+    kvm_bridge_edid_build(d->edid_profile, &d->edid_id, edid, &what);
     ESP_LOGI(TAG, "EDID profile: %s", what);
-    uint8_t edid[TC358743_EDID_TOTAL_LEN];
-    memcpy(edid, bin, sizeof(edid));
-    edid_apply_id(edid, &d->edid_id);
-    const uint16_t edid_len = TC358743_EDID_TOTAL_LEN;
+    const uint16_t edid_len = KVM_BRIDGE_EDID_LEN;
     wr8(d, EDID_LEN1, edid_len & 0xff);
     wr8(d, EDID_LEN2, edid_len >> 8);
     for (uint16_t i = 0; i < edid_len; i += 128) {

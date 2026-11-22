@@ -409,7 +409,8 @@ which is worth having before the board does.
 
 The capture board is what turns the target's HDMI into something the ESP32-P4 can
 read. Either of the two below does it; both carry the same TC358743 bridge. There
-is a third, further down, that fits one board only.
+is a third, further down, that fits one board only, and a group of RK628 boards
+after it that nobody has tried yet.
 
 <table>
 <tr>
@@ -481,6 +482,20 @@ Checked on hardware: at 1280&times;720 about 22 fps over MJPEG and 17 over H.264
 </td>
 </tr>
 </table>
+
+**RK628 adapters** (not tested on hardware, may not work)
+
+The [Waveshare HDMI to CSI Adapter (B)](https://www.waveshare.com/hdmi-to-csi-adapter-b.htm)
+(22-pin), the Radxa 4K HDMI IN to MIPI CSI-2 Adapter (15-pin) and the open-hardware
+[WarpKVM rk628-22p](https://github.com/WarpKVM/rk628-bridge-boards) all carry a
+**Rockchip RK628H**. I have none of them. The driver (`components/rk628`) is written
+from what Rockchip's own Linux driver does and is in every image, found by itself
+after the TC358743 and the LT6911D. It needs a rev 3.x ESP32-P4: the chip sends only
+YUV422, and the rev 1.x images capture RGB888. Two lanes at 1296 Mbit/s carry 1080p60,
+and a 4K source is scaled down on the chip. HDMI-CEC goes through the chip's own
+controller, if the board wires the CEC pin to it. If you have one of these, the
+log lines tagged `rk628` from start-up to plugging a source in are what I need, in
+[Discussions](https://github.com/orgs/espkvm/discussions/11) or an issue.
 
 <table>
 <tr>

@@ -762,7 +762,7 @@ Every wrong byte order above still produced a picture a person would describe as
 |---|---|
 | `tools/env.sh` | activate ESP-IDF |
 | `tools/install-idf.sh` | reproducible toolchain install |
-| `tools/gen_edid.py` | regenerate the EDID profiles |
+| `tools/gen_edid.py` | regenerate the EDID profiles (into `components/kvm_bridge/kvm_bridge_edid_data.h`) |
 | `tools/check_hid_desc.py` | decode HID descriptors out of the ELF and check report sizes |
 | `tools/check_layouts.mjs` | catch duplicate key positions in paste tables |
 | `tools/hid_probe.py` | drive the control channel without a browser |

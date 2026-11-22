@@ -82,6 +82,13 @@ docs/             HARDWARE-NOTES.md (measured facts), PORTING.md
   + available (probe) + enabled (setting); the UI shows a disabled control with
   the device's own reason rather than a control that fails. `net_static` and the
   disabled SD upload/delete are the examples to follow.
+- **A changed or new console string lands in every shipped language.** Text
+  in `t()` is keyed by its English, so editing a sentence orphans its
+  translations. In the same change, run `node tools/i18n_strings.mjs` and
+  fill what `--missing <code>` lists in `web/locales/<code>.json`. When only
+  the English changed, add the new key and keep the old one: older releases
+  read the same file. `--prune` clears keys no recent release uses. CI warns
+  when a language is behind or old keys pile up.
 - **A REST change lands in two repos.** The agent-facing skill that documents
   this API lives in [espkvm/skills](https://github.com/espkvm/skills)
   (`plugins/espkvm/skills/operate/SKILL.md`), and the MCP server in

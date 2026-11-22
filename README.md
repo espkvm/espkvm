@@ -130,7 +130,7 @@ are optional.
 
 **The capture board:** a [Geekworm C790](https://wiki.geekworm.com/C790) or a
 [Waveshare HDMI to CSI Adapter](https://www.waveshare.com/wiki/HDMI_to_CSI_Adapter).
-The M5Stack Unit PoE-P4 takes its own [Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d) instead. The JetKVM Mini has one built in.
+The M5Stack Unit PoE-P4 takes its own [Add-on Display In](https://shop.m5stack.com/products/add-on-display-in-for-poe-p4-lt6911d) instead. The JetKVM Mini has one built in. RK628H adapters (Waveshare HDMI to CSI Adapter (B), Radxa, WarpKVM) have a driver that has not run on hardware yet: see [BOARDS.md](docs/BOARDS.md#companion-boards).
 
 **The ESP32-P4 board**, one of these:
 

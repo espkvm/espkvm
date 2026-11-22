@@ -1890,8 +1890,8 @@ static const kvm_setting_t s_settings[] = {
         .key = "upd_check", .section = "system", .group = "Updates", .type = KVM_VT_BOOL,
         .title = "Offer firmware updates",
         .help = "The browser asks the address below whether a newer build exists and offers to "
-                "install it. With the project's own address it also tells check.espkvm.io, at "
-                "most once a day, this device's random id, its board, its version and the chip revision, so "
+                "install it. With the project's own address it also tells check.espkvm.io, once "
+                "a day and again after an update, this device's random id, its board, its version and the chip revision, so "
                 "the author can count the devices in use. The counts also go on to Google "
                 "Analytics, under a hash of the id, never the id or your address. The id is not taken from the hardware; "
                 "erasing the flash makes a new one. The device itself asks only when New firmware "

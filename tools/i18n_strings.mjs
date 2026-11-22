@@ -5,6 +5,8 @@
  *     node tools/i18n_strings.mjs --missing ru  what ru lacks, as JSON to fill in
  *     node tools/i18n_strings.mjs --check       fail on a broken call or language file
  *     node tools/i18n_strings.mjs --publish DIR the files fw.espkvm.io/locales/ serves
+ *     node tools/i18n_strings.mjs --prune [N]   drop keys no console of the last N releases uses
+ *     node tools/i18n_strings.mjs --history [N] which English text left the console in which release
  *
  * The English text is the key (see web/src/i18n.ts). It is collected from:
  * - t("..."), tn("...", "...", n) and tm("...") calls in web/src, string literals only;
@@ -12,7 +14,9 @@
  *   titles, help, group names and choice labels, which the console passes
  *   through t() as they arrive.
  */
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -70,6 +74,12 @@ function joined(s, i) {
   }
 }
 
+/*
+ * Every key one console uses: its own text under srcDir and the setting text
+ * of the firmware beside it. Run on the working tree, and by --prune on the
+ * sources of past releases.
+ */
+function collect(srcDir, settingsFile, base = root) {
 const strings = new Map(); // text -> where
 const plurals = new Map(); // the English singular of each tn() -> its English plural
 const problems = [];
@@ -78,9 +88,9 @@ function add(text, where) {
   if (text.trim() && !strings.has(text)) strings.set(text, where);
 }
 
-for (const file of walk(src)) {
+for (const file of walk(srcDir)) {
   const s = readFileSync(file, "utf8");
-  const rel = relative(root, file);
+  const rel = relative(base, file);
   const re = /(?<![\w.$])(t|tn|tm)\(/g;
   let m;
   while ((m = re.exec(s))) {
@@ -106,7 +116,7 @@ for (const file of walk(src)) {
 
 /* The firmware's setting text. */
 {
-  const c = readFileSync(join(root, "components", "kvm_config", "kvm_settings_table.c"), "utf8");
+  const c = readFileSync(settingsFile, "utf8");
   const cstr = (body) => [...body.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((x) => x[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")).join("");
   for (const m of c.matchAll(/\.(title|help|group|unit)\s*=\s*((?:"(?:[^"\\]|\\.)*"\s*)+)/g)) {
     add(cstr(m[2]), "kvm_settings_table.c");
@@ -137,6 +147,10 @@ for (const file of walk(src)) {
     }
   }
 }
+return { strings, plurals, problems };
+}
+
+const { strings, plurals, problems } = collect(src, join(root, "components", "kvm_config", "kvm_settings_table.c"));
 
 const placeholders = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((x) => x[1]).sort().join(",");
 
@@ -206,6 +220,78 @@ if (args[0] === "--missing") {
  * list the console offers, with how much of each is translated) and
  * strings.json (every English string, for the console's translation editor).
  */
+/*
+ * Old keys stay in a language file on purpose: fw.espkvm.io serves one file to
+ * every version, and a device on an older release still looks its text up by
+ * the old English. --prune drops only the keys that no console of the last N
+ * releases (default 10) and not the working tree uses. The sources of each
+ * release come from git: the tag, and the console commit it pins.
+ */
+/* The keys of the last @p n releases, newest first: [{tag, keys}], read from
+ * git - the tag, and the console commit it pins. */
+function releaseKeys(n) {
+  const git = (cwd, ...a) => execFileSync("git", a, { cwd, encoding: "utf8", maxBuffer: 64 << 20 });
+  const version = (t) => t.slice(2).split(".").map(Number);
+  const tags = git(root, "tag", "-l", "v.*")
+    .split("\n")
+    .filter((t) => /^v\.\d+\.\d+\.\d+$/.test(t))
+    .sort((a, b) => {
+      const x = version(a), y = version(b);
+      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+    })
+    .slice(0, n);
+  const out = [];
+  const tmp = mkdtempSync(join(tmpdir(), "i18n-"));
+  try {
+    for (const tag of tags) {
+      const web = git(root, "ls-tree", tag, "web").split(/\s+/)[2];
+      const dir = join(tmp, tag);
+      mkdirSync(join(dir, "fw"), { recursive: true });
+      writeFileSync(join(dir, "fw", "settings.c"), git(root, "show", `${tag}:components/kvm_config/kvm_settings_table.c`));
+      execFileSync("sh", ["-c", `git -C web archive ${web} src | tar -x -C "${dir}"`], { cwd: root });
+      out.push({ tag, keys: new Set(collect(join(dir, "src"), join(dir, "fw", "settings.c"), dir).strings.keys()) });
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  return out;
+}
+
+/*
+ * Which English text left the console in which release: each release against
+ * the one before it, and the working tree against the latest. Only releases
+ * whose console translates (0.90.0 on) have keys to lose.
+ */
+if (args[0] === "--history") {
+  const rel = releaseKeys(Number(args[1] ?? 10));
+  const steps = [{ tag: "working tree", keys: new Set(entries) }, ...rel];
+  for (let i = 0; i + 1 < steps.length; i++) {
+    const gone = [...steps[i + 1].keys].filter((k) => !steps[i].keys.has(k));
+    if (!steps[i + 1].keys.size || !gone.length) continue;
+    console.log(`gone in ${steps[i].tag} (last in ${steps[i + 1].tag}): ${gone.length}`);
+    for (const k of gone) console.log(`  ${JSON.stringify(k.length > 110 ? k.slice(0, 107) + "..." : k)}`);
+  }
+  process.exit(0);
+}
+
+if (args[0] === "--prune") {
+  const rel = releaseKeys(Number(args[1] ?? 10));
+  const tags = rel.map((r) => r.tag);
+  const keep = new Set(entries);
+  for (const r of rel) for (const k of r.keys) keep.add(k);
+  for (const l of locales) {
+    const out = {};
+    let dropped = 0;
+    for (const [k, v] of Object.entries(l.data)) {
+      if (k.startsWith("@") || keep.has(k)) out[k] = v;
+      else dropped++;
+    }
+    writeFileSync(join(localesDir, `${l.code}.json`), JSON.stringify(out, null, 2) + "\n");
+    console.log(`  ${l.code}: dropped ${dropped} key(s) no console of ${tags.join(", ")} or the working tree uses`);
+  }
+  process.exit(0);
+}
+
 if (args[0] === "--publish") {
   const dir = args[1];
   mkdirSync(dir, { recursive: true });
@@ -226,6 +312,17 @@ for (const l of locales) {
   const keys = Object.keys(l.data).filter((k) => !k.startsWith("@"));
   const done = translated(l.data);
   console.log(`  ${l.code}: ${done} translated (${percent(l.data)}%), ${keys.length - done} no longer used`);
+  /* A string added or changed in English and not yet in a shipped language is
+     not an error - it shows in English - but it should not go unnoticed: in
+     CI it becomes a warning on the run, with the command that lists it. */
+  if (done < entries.length && process.env.GITHUB_ACTIONS) {
+    console.log(`::warning title=Translation behind::web/locales/${l.code}.json lacks ${entries.length - done} string(s); node tools/i18n_strings.mjs --missing ${l.code}`);
+  }
+  /* Old keys serve devices on older releases, so they stay; past a hundred it
+     is time for --prune. */
+  if (keys.length - done > 100 && process.env.GITHUB_ACTIONS) {
+    console.log(`::warning title=Old translations piling up::web/locales/${l.code}.json has ${keys.length - done} key(s) the console no longer uses; node tools/i18n_strings.mjs --prune`);
+  }
 }
 if (problems.length) {
   for (const p of problems) console.log(`  FAIL ${p}`);

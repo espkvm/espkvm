@@ -310,6 +310,13 @@ unsigned capture_csi_bpp(void)
     return capture_pixfmt()->bpp;
 }
 
+/* The bridge's own lane rate when it has one (the RK628 sends at a fixed
+ * 1296), else the board's. The CSI receiver has to be set to the same. */
+static uint32_t capture_lane_mbps(void)
+{
+    return s_cap.bridge.lane_mbps ? s_cap.bridge.lane_mbps : (uint32_t)KVM_BOARD_MIPI_LANE_MBPS;
+}
+
 void capture_fill_esp_cam_color_types(esp_cam_ctlr_csi_config_t *csi, esp_isp_processor_cfg_t *isp)
 {
     const capture_pixfmt_t *pf = capture_pixfmt();
@@ -482,7 +489,7 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
         .h_res = hres,
         .v_res = vres,
         .data_lane_num = 2,
-        .lane_bit_rate_mbps = KVM_BOARD_MIPI_LANE_MBPS,
+        .lane_bit_rate_mbps = capture_lane_mbps(),
         .queue_items = CAPTURE_FB_COUNT,
         .byte_swap_en = false,
         /* No driver backup buffer: cam_on_get_new always hands one back, drop_fb
@@ -593,7 +600,7 @@ static uint64_t mode_pixel_rate(const kvm_bridge_timings_t *t)
 
 static uint64_t csi_pixel_capacity(void)
 {
-    return (uint64_t)CSI_LANES * KVM_BOARD_MIPI_LANE_MBPS * 1000000u / capture_csi_bpp();
+    return (uint64_t)CSI_LANES * capture_lane_mbps() * 1000000u / capture_csi_bpp();
 }
 
 /* "1920x1080p60", or "1920x1080p" when the rate is not known. */
