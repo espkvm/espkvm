@@ -936,6 +936,28 @@ void usb_hid_reattach(void)
     reattach(USB_REATTACH_LONG_MS);
 }
 
+/*
+ * Leave the bus the way a pulled cable does before a deliberate restart. Reset
+ * alone drops the device while the host still has it configured, and a host
+ * that stays powered - a BIOS, a console - can keep that half-gone device
+ * around. A second off the bus reads as a removal to any hub. The idea is from
+ * ZacharyLeahan's espkvm-xbox, where a powered original Xbox kept a dead
+ * controller otherwise. Nothing reconnects it: the restart follows.
+ */
+void usb_hid_prepare_restart(void)
+{
+    if (!s_reconnect_timer) {
+        return; /* USB never came up */
+    }
+    s_replugging = true;
+    (void)esp_timer_stop(s_reconnect_timer);
+    if (s_watchdog_timer) {
+        (void)esp_timer_stop(s_watchdog_timer);
+    }
+    tud_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(USB_REATTACH_LONG_MS));
+}
+
 /* ---- serial port (CDC ACM) ---------------------------------------------- */
 /*
  * A serial port on the cable the target already has: Linux makes it ttyACM0,

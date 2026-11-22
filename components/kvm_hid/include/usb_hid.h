@@ -253,6 +253,13 @@ void usb_hid_msc_set_type(bool cdrom);
  */
 void usb_hid_reattach(void);
 
+/**
+ * Before a deliberate restart: off the bus for a second, so the target sees the
+ * device removed rather than gone while configured. Blocks for that second;
+ * called from the restart path (capture.c wraps esp_restart).
+ */
+void usb_hid_prepare_restart(void);
+
 #ifdef __cplusplus
 }
 #endif

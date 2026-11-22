@@ -382,8 +382,15 @@ void capture_park_frame_end(void)
 
 void __real_esp_restart(void) __attribute__((noreturn));
 
+/* kvm_hid supplies it when USB is in the image; weak, so video does not have to
+ * depend on the target interface. */
+void usb_hid_prepare_restart(void) __attribute__((weak));
+
 void __wrap_esp_restart(void)
 {
+    if (usb_hid_prepare_restart) {
+        usb_hid_prepare_restart();
+    }
     atomic_store(&s_parking, true);
     capture_hw_quiesce();
     for (int i = 0; i < 30 && atomic_load(&s_frames_busy) > 0; i++) {

@@ -2,6 +2,12 @@
 
 All notable changes to ESP-KVM are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow semantic versioning while it is pre-1.0 (a new feature bumps the minor, a fix bumps the patch).
 
+## [Unreleased]
+
+### Changed
+
+- Before a restart the device leaves the target's USB the way a pulled cable does, for a second, so a host that stays powered (a BIOS, a console) sees it removed rather than gone while configured. The idea is from ZacharyLeahan's espkvm-xbox fork.
+
 ## [0.91.1] - 2026-11-22
 
 ### Added
