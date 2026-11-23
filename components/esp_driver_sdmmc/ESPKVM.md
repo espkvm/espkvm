@@ -13,5 +13,9 @@ It overrides the IDF component of the same name. Changes are marked `espkvm:`.
   without the wait. Before, every later command failed with 0x107.
 - `sd_trans_sdmmc.c`: the DMA descriptor ring wraps at its size, not at the
   number of descriptors being refilled.
+- `sd_host_sdmmc.c`, `sd_host_private.h`: while the other slot runs, a slot
+  keeps the controller's host divider and sets its speed with its own card
+  divider only. The host divider is shared, so the microSD and the WiFi chip
+  used to change each other's clock.
 
 Re-check each against upstream when IDF is bumped.

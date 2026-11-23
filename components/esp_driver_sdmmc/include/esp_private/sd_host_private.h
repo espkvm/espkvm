@@ -146,6 +146,7 @@ struct sd_host_sdmmc_ctlr_t {
     int                            host_id;                          //host id
     sd_host_sdmmc_slot_t           *slot[SOC_SDMMC_NUM_SLOTS];       //slot
     int                            registered_slot_nums;             //registered slot nums
+    int                            host_div;                         //espkvm: host divider in use, 0 before the first
     sdmmc_hal_context_t            hal;                              //hal context
 
     sdmmc_desc_t                   *dma_desc;                        //pointer to dma descriptors

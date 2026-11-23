@@ -460,7 +460,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy-again.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7   # for boards/boards.json and the console's translations
         with:
@@ -612,13 +612,21 @@ jobs:
             git push -f git@github.com:espkvm/fw.git main
 
       # espkvm.github.io/espkvm, for devices on 0.56.x and older. After
-      # fw.espkvm.io, so a failure here does not hold back the main channel:
-      # deploy-pages sometimes does not see the artefact uploaded a moment
-      # before, and a re-run then finds two of them.
+      # fw.espkvm.io, so a failure here does not hold back the main channel.
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - id: deploy
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      # deploy-pages sometimes does not see the artefact uploaded seconds before
+      # ("No artifacts named github-pages"), or Pages answers "try again later".
+      # One more try a minute later, in the same job: a re-run would upload a
+      # second github-pages artefact, which deploy-pages then refuses.
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 60
+      - id: deploy-again
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v5
 

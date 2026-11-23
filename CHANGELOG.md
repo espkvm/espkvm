@@ -4,6 +4,12 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.91.3] - 2026-11-24
+
+### Fixed
+
+- On boards with both a microSD slot and a Wi-Fi chip (the NANO, the P4-POE, the Function EV and others), the two share one SD controller, and each could change the other's clock: a card that had slowed down after errors was pushed back to full speed, and a card slowing to 4 MHz pushed the Wi-Fi chip to 80 MHz. Each now keeps its own speed ([#104](https://github.com/espkvm/espkvm/issues/104)).
+
 ## [0.91.2] - 2026-11-24
 
 ### Changed

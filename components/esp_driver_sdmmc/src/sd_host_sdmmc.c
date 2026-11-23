@@ -1083,6 +1083,7 @@ static void sd_host_set_clk_div(sd_host_sdmmc_ctlr_t *ctlr, soc_periph_sdmmc_clk
     ESP_ERROR_CHECK(esp_clk_tree_enable_src((soc_module_clk_t)src, true));
     PERIPH_RCC_ATOMIC() {
         sdmmc_ll_set_clock_div(ctlr->hal.dev, div);
+        ctlr->host_div = div; /* espkvm */
         sdmmc_ll_select_clk_source(ctlr->hal.dev, src);
         sdmmc_ll_init_phase_delay(ctlr->hal.dev);
 #if SDMMC_LL_SDIO_PLL_SUPPORTED
@@ -1172,6 +1173,28 @@ static void sd_host_slot_get_clk_dividers(sd_host_sdmmc_slot_t *slot, uint32_t f
                 }
             }
         }
+
+    /*
+     * espkvm: the host divider and the clock source belong to the controller,
+     * not to a slot. With the other slot running (the WiFi chip next to the
+     * microSD), changing them retunes that slot too: the WiFi chip setting
+     * 40 MHz pushed a card that had slowed to 20 MHz back to 40, and a card
+     * slowing to 4 MHz (host divider 2) pushed the WiFi chip to 80 MHz. Keep the
+     * divider the running slot uses and reach this slot's speed with its own
+     * card divider, never faster than asked.
+     */
+    const sd_host_sdmmc_slot_t *other = slot->ctlr->slot[slot->slot_id ? 0 : 1];
+    if (other && other->freq.real_freq_hz > 0 && other->clk_src == clk_src && slot->ctlr->host_div > 0) {
+        const uint32_t base_hz = clk_src_freq_hz / (uint32_t)slot->ctlr->host_div;
+        const uint32_t target_hz = freq_khz * 1000u;
+        *host_div = slot->ctlr->host_div;
+        if (base_hz <= target_hz) {
+            *card_div = 0;
+        } else {
+            uint32_t c = (base_hz + 2u * target_hz - 1u) / (2u * target_hz);
+            *card_div = (int)(c > 255u ? 255u : c);
+        }
+    }
 
     ESP_LOGD(TAG, "host_div: %d, card_div: %d", *host_div, *card_div);
 
