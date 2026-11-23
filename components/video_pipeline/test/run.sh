@@ -17,3 +17,8 @@ out=$(mktemp -d)
 cc -std=c11 -Wall -Wextra -O2 -I "$here/.." "$here/test_fps_gate.c" -o "$out/test_fps_gate"
 "$out/test_fps_gate"
 rm -rf "$out"
+out=$(mktemp -d)
+cc -std=c11 -Wall -Wextra -O2 -I "$here/.." \
+   "$here/test_capture_dirty.c" "$here/../capture_dirty.c" -o "$out/test_capture_dirty"
+"$out/test_capture_dirty"
+rm -rf "$out"

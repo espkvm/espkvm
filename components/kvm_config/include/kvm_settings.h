@@ -43,6 +43,7 @@ enum {
                                  @p choices (bit 0 first). The console draws the
                                  mask settings of one group as a table: a row per
                                  bit, a column per setting. */
+    KVM_SF_ASCII = 1u << 7,   /**< a STR of printable ASCII only (0x20-0x7e) */
 };
 
 typedef struct {

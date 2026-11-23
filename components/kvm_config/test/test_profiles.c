@@ -485,6 +485,20 @@ static void release_row_again(void)
     CHECK(kvm_setting_int("notify_tg_ev") == 63);
 }
 
+/* A printable-ASCII setting (the VNC password) refuses anything else, over
+ * the API and from code, and keeps what it had. */
+static void ascii_only(void)
+{
+    char err[96] = "";
+    CHECK(kvm_settings_apply_json("{\"vnc_pass\":\"Pa$s 9~\"}", err, sizeof(err)) == ESP_OK);
+    CHECK(strcmp(kvm_setting_str("vnc_pass"), "Pa$s 9~") == 0);
+    CHECK(kvm_settings_apply_json("{\"vnc_pass\":\"\u043f\u0430\u0440\"}", err, sizeof(err)) ==
+          ESP_ERR_INVALID_ARG);
+    CHECK(strstr(err, "printable ASCII") != NULL);
+    CHECK(kvm_setting_set_str("vnc_pass", "tab\there") == ESP_ERR_INVALID_ARG);
+    CHECK(strcmp(kvm_setting_str("vnc_pass"), "Pa$s 9~") == 0);
+}
+
 int main(void)
 {
     fake_nvs_clear();
@@ -502,6 +516,7 @@ int main(void)
     seed_old_table();
     bad += run(release_row);
     bad += run(release_row_again);
+    bad += run(ascii_only);
     if (bad) {
         printf("profiles: %d phase(s) failed\n", bad);
         return 1;

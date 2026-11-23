@@ -278,9 +278,9 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "vnc_pass", .section = "video", .group = "VNC server", .type = KVM_VT_STR,
         .title = "VNC password",
-        .help = "Up to 8 characters, a limit of VNC itself, so use all 8. It is never shown "
-                "again. Changing it disconnects the client.",
-        .def_str = "", .max_len = 8, .requires_cap = -1, .flags = KVM_SF_SECRET,
+        .help = "Up to 8 characters, a limit of VNC itself, so use all 8. Latin letters, digits "
+                "and symbols only. It is never shown again. Changing it disconnects the client.",
+        .def_str = "", .max_len = 8, .requires_cap = -1, .flags = KVM_SF_SECRET | KVM_SF_ASCII,
     },
     {
         .key = "vnc_hotspot", .section = "video", .group = "VNC server", .type = KVM_VT_BOOL,

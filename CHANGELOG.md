@@ -4,9 +4,16 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.91.2] - 2026-11-24
+
 ### Changed
 
+- H.264 at 1080p is faster on boards with a rev 1.x chip. The capture skips frames the encoder would not take, which leaves it more memory bandwidth, and only the parts of the picture that changed are converted for it. Measured on a P4-ETH rev 1.3 at 1080p30: 7.2 frames a second before, 8.4 with the first change on any picture, about 10.8 with both on a mostly still screen like a terminal. Video and scrolling gain the first part only.
 - Before a restart the device leaves the target's USB the way a pulled cable does, for a second, so a host that stays powered (a BIOS, a console) sees it removed rather than gone while configured. The idea is from ZacharyLeahan's espkvm-xbox fork.
+
+### Fixed
+
+- A VNC password with letters outside Latin (Cyrillic, say) was saved, and then VNC sign-in always failed. The console and the device now refuse it and say why. The console check came from [@Gamer08YT](https://github.com/Gamer08YT).
 
 ## [0.91.1] - 2026-11-22
 

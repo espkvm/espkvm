@@ -515,8 +515,13 @@ static esp_err_t csi_create(capture_ctx_t *c, uint32_t hres, uint32_t vres)
     capture_fill_esp_cam_color_types(&csi_cfg, &isp_cfg);
 
     ESP_RETURN_ON_ERROR(esp_cam_new_csi_ctlr(&csi_cfg, &s_cam), CAPTURE_LOG_TAG, "csi ctlr");
-    /* The reorder pass costs PSRAM bandwidth the capture DMA also needs. */
-    s_gate_on = capture_pixfmt()->swap_bytes && hres * vres > 1280u * 720u;
+    /* Before rev 3.0 PSRAM bandwidth is the ceiling above 720p: frames nobody
+     * encodes only take it from the encoder. Measured on a P4-ETH rev 1.3 at
+     * 1080p30, the same picture both ways: H.264 7.2 -> 8.4 fps, encode
+     * 57 -> 48 ms; MJPEG encode 54 -> 47 ms. On rev 3.x, where the encoder is
+     * the limit, it made things worse (Function EV, 720p60 and 1080p30), so it
+     * stays off there. */
+    s_gate_on = CAPTURE_YUV_CODE && hres * vres > 1280u * 720u;
     s_gate_closed = false;
 
     esp_cam_ctlr_evt_cbs_t cbs = {

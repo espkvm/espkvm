@@ -438,6 +438,14 @@ esp_err_t kvm_setting_set_int(const char *key, int32_t value)
     return err;
 }
 
+static bool ascii_ok(const char *s)
+{
+    for (; *s; s++) {
+        if ((unsigned char)*s < 0x20 || (unsigned char)*s > 0x7e) return false;
+    }
+    return true;
+}
+
 esp_err_t kvm_setting_set_str(const char *key, const char *value)
 {
     ESP_RETURN_ON_FALSE(s_values && value, ESP_ERR_INVALID_STATE, TAG, "not initialised");
@@ -446,6 +454,8 @@ esp_err_t kvm_setting_set_str(const char *key, const char *value)
     const kvm_setting_t *d = &s_table[idx];
     ESP_RETURN_ON_FALSE(!is_numeric(d), ESP_ERR_INVALID_ARG, TAG, "'%s' is numeric", key);
     ESP_RETURN_ON_FALSE(strlen(value) <= d->max_len, ESP_ERR_INVALID_SIZE, TAG, "'%s' too long", key);
+    ESP_RETURN_ON_FALSE(!(d->flags & KVM_SF_ASCII) || ascii_ok(value), ESP_ERR_INVALID_ARG, TAG,
+                        "'%s' takes only printable ASCII", key);
 
     lock();
     const bool to_profile = (d->flags & KVM_SF_PROFILE) && profiles_custom_active();
@@ -661,6 +671,9 @@ char *kvm_settings_schema_json(void)
              * so the console renders it as a password field and submits it only when
              * the operator types a new one. */
             cJSON_AddBoolToObject(o, "secret", true);
+        }
+        if (d->flags & KVM_SF_ASCII) {
+            cJSON_AddBoolToObject(o, "ascii", true);
         }
         if (d->flags & KVM_SF_PIN) {
             cJSON_AddBoolToObject(o, "pin", true);
@@ -913,6 +926,13 @@ esp_err_t kvm_settings_apply_json(const char *json, char *err, size_t err_len)
                 if (err) {
                     snprintf(err, err_len, "'%s' must be a string of at most %u characters",
                              d->key, (unsigned)d->max_len);
+                }
+                cJSON_Delete(root);
+                return ESP_ERR_INVALID_ARG;
+            }
+            if ((d->flags & KVM_SF_ASCII) && !ascii_ok(it->valuestring)) {
+                if (err) {
+                    snprintf(err, err_len, "'%s' takes only printable ASCII characters", d->key);
                 }
                 cJSON_Delete(root);
                 return ESP_ERR_INVALID_ARG;
