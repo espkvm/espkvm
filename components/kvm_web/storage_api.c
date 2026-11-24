@@ -273,6 +273,11 @@ esp_err_t api_storage_images_get(httpd_req_t *req)
  * reboot. The same async hand-off the MJPEG stream uses keeps the control task
  * free while the bytes land on the card.
  */
+/* Both upload stacks are in PSRAM. Left to the default allocator they went to
+ * the chip's slow LP RAM whenever the fast internal RAM had no block that big
+ * (on a Function EV with Tailscale and Wi-Fi up), and the TLS decrypt, which
+ * keeps its state on the stack, ran 36 times slower: 78 KB/s uploads. A PSRAM
+ * stack costs the decrypt nothing measurable. */
 #define UPLOAD_WORKER_STACK (8 * 1024)
 /* Just below the control task (idle+6), like the stream worker, so it never
  * starves the task accepting connections. */
@@ -329,7 +334,7 @@ static void upload_writer_task(void *arg)
         xQueueSend(w->empty, &b, portMAX_DELAY);
     }
     xSemaphoreGive(w->done);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static void upload_finish(httpd_req_t *req)
@@ -361,7 +366,7 @@ static void upload_worker_task(void *arg)
         send_json_error(req, "500 Internal Server Error", "cannot create file on card");
         upload_finish(req);
         free(ctx);
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
     ESP_LOGW(TAG, "image upload: %zu bytes at %llu -> %s", ctx->content_len,
@@ -403,8 +408,8 @@ static void upload_worker_task(void *arg)
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
                  (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
     }
-    const bool writer = ok && xTaskCreate(upload_writer_task, "kvm_upload_wr", UPLOAD_WRITER_STACK,
-                                          &w, UPLOAD_WORKER_PRIO, NULL) == pdPASS;
+    const bool writer = ok && xTaskCreateWithCaps(upload_writer_task, "kvm_upload_wr", UPLOAD_WRITER_STACK,
+                                                  &w, UPLOAD_WORKER_PRIO, NULL, MALLOC_CAP_SPIRAM) == pdPASS;
     ok = writer;
 
     const int64_t started_us = esp_timer_get_time();
@@ -494,7 +499,7 @@ static void upload_worker_task(void *arg)
     }
     upload_finish(req);
     free(ctx);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 esp_err_t api_storage_upload_post(httpd_req_t *req)
@@ -570,8 +575,8 @@ esp_err_t api_storage_upload_post(httpd_req_t *req)
         free(ctx);
         return send_json_error(req, "500 Internal Server Error", "upload busy");
     }
-    if (xTaskCreate(upload_worker_task, "kvm_upload", UPLOAD_WORKER_STACK, ctx, UPLOAD_WORKER_PRIO,
-                    NULL) != pdPASS) {
+    if (xTaskCreateWithCaps(upload_worker_task, "kvm_upload", UPLOAD_WORKER_STACK, ctx,
+                            UPLOAD_WORKER_PRIO, NULL, MALLOC_CAP_SPIRAM) != pdPASS) {
         web_async_complete(ctx->req);
         free(ctx);
         return send_json_error(req, "503 Service Unavailable", "upload task");

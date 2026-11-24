@@ -404,7 +404,7 @@ static void download_task(void *arg)
     download_finish(req);
     free(dl);
     s_downloads--;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static esp_err_t captures_file_get(httpd_req_t *req)
@@ -470,7 +470,9 @@ static esp_err_t captures_file_get(httpd_req_t *req)
         return send_json_error(req, "503 Service Unavailable", "download busy");
     }
     s_downloads++;
-    if (xTaskCreate(download_task, "kvm_download", DOWNLOAD_STACK, dl, DOWNLOAD_PRIO, NULL) != pdPASS) {
+    /* PSRAM stack, as the upload's (storage_api.c): the default could land in slow LP RAM. */
+    if (xTaskCreateWithCaps(download_task, "kvm_download", DOWNLOAD_STACK, dl, DOWNLOAD_PRIO, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
         s_downloads--;
         web_async_complete(dl->req);
         free(dl);

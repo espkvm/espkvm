@@ -17,10 +17,14 @@
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_tls_errors.h"
+#include "esp_transport.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "kvm_ota_trial.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "kvm_board_header.h"
 #include "kvm_display.h"
@@ -31,6 +35,8 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "mbedtls/ssl.h"
 
 static const char *TAG = "fw_install";
 
@@ -143,10 +149,147 @@ static void drop_tls(void)
     }
 }
 
+/*
+ * The flash work runs in its own small task with an internal stack, and the
+ * install task, which reads the download, runs from PSRAM. One task could not
+ * do both: a flash write turns the cache off, so its stack must be internal,
+ * but left to the default allocator an internal stack can land in the chip's
+ * slow LP RAM, where the TLS decrypt (state on the stack) ran six times slower.
+ * The upload does the same split (storage_api.c).
+ */
+#define FLASH_STACK 4096
+
+typedef struct {
+    esp_err_t (*fn)(void *arg);
+    void *arg;
+    esp_err_t ret;
+} flash_job_t;
+
+static QueueHandle_t s_flash_q;
+static SemaphoreHandle_t s_flash_done;
+
+static void flash_task(void *arg)
+{
+    (void)arg;
+    flash_job_t *job;
+    while (xQueueReceive(s_flash_q, &job, portMAX_DELAY) == pdTRUE && job) {
+        job->ret = job->fn(job->arg);
+        xSemaphoreGive(s_flash_done);
+    }
+    xSemaphoreGive(s_flash_done);
+    vTaskDelete(NULL);
+}
+
+static bool flash_start(void)
+{
+    if (!s_flash_q) {
+        s_flash_q = xQueueCreate(1, sizeof(flash_job_t *));
+        s_flash_done = xSemaphoreCreateBinary();
+    }
+    return s_flash_q && s_flash_done &&
+           xTaskCreate(flash_task, "fw_flash", FLASH_STACK, NULL, TASK_PRIO, NULL) == pdPASS;
+}
+
+static esp_err_t flash_run(esp_err_t (*fn)(void *), void *arg)
+{
+    flash_job_t job = {.fn = fn, .arg = arg};
+    flash_job_t *p = &job;
+    xQueueSend(s_flash_q, &p, portMAX_DELAY);
+    xSemaphoreTake(s_flash_done, portMAX_DELAY);
+    return job.ret;
+}
+
+static void flash_stop(void)
+{
+    flash_job_t *none = NULL;
+    xQueueSend(s_flash_q, &none, portMAX_DELAY);
+    xSemaphoreTake(s_flash_done, portMAX_DELAY);
+}
+
+typedef struct {
+    const esp_partition_t *part;
+    size_t size;
+    esp_ota_handle_t *handle;
+} ota_begin_args_t;
+
+static esp_err_t do_ota_begin(void *a)
+{
+    ota_begin_args_t *b = a;
+    return esp_ota_begin(b->part, b->size, b->handle);
+}
+
+typedef struct {
+    esp_ota_handle_t handle;
+    const void *data;
+    size_t len;
+} ota_write_args_t;
+
+static esp_err_t do_ota_write(void *a)
+{
+    ota_write_args_t *w = a;
+    return esp_ota_write(w->handle, w->data, w->len);
+}
+
+static esp_err_t do_ota_end(void *a)
+{
+    return esp_ota_end(*(esp_ota_handle_t *)a);
+}
+
+static esp_err_t do_ota_abort(void *a)
+{
+    return esp_ota_abort(*(esp_ota_handle_t *)a);
+}
+
+static esp_err_t do_arm_and_boot(void *a)
+{
+    const esp_partition_t *target = a;
+    if (kvm_ota_trial_arm(target, s_trial_s) != ESP_OK) {
+        return ESP_ERR_INVALID_STATE; /* reported as "could not store the trial" */
+    }
+    return esp_ota_set_boot_partition(target);
+}
+
+static esp_err_t do_restart(void *a)
+{
+    (void)a;
+    esp_restart();
+    return ESP_OK;
+}
+
+/* The install task was made in PSRAM, or, without room there, the usual way. */
+static bool s_task_with_caps;
+
+static void install_task_end(void)
+{
+    flash_stop();
+    if (s_task_with_caps) {
+        vTaskDeleteWithCaps(NULL);
+    } else {
+        vTaskDelete(NULL);
+    }
+}
+
+/* The TLS session could not get its memory (MBEDTLS_ERR_SSL_ALLOC_FAILED, the
+ * PSA "insufficient memory" code). Internal RAM runs short for a moment on a
+ * busy device, and mem_guard.c then closes idle connections, so a little later
+ * the same connection opens. It is not a refusal of the cipher. */
+#define TLS_MEM_RETRIES 3
+#define TLS_MEM_WAIT_MS 3000
+
+static bool tls_out_of_memory(void)
+{
+    if (!s_tls) {
+        return false;
+    }
+    const esp_tls_error_handle_t e = esp_transport_get_error_handle(s_tls);
+    /* esp-tls keeps the mbedTLS code negated (it stores -ret). */
+    return e && e->esp_tls_error_code == -MBEDTLS_ERR_SSL_ALLOC_FAILED;
+}
+
 static void fail(esp_http_client_handle_t http, esp_ota_handle_t ota, const char *why)
 {
     if (ota) {
-        esp_ota_abort(ota);
+        (void)flash_run(do_ota_abort, &ota);
     }
     if (http) {
         esp_http_client_close(http);
@@ -171,7 +314,7 @@ static void install_task(void *arg)
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
     if (!target) {
         fail(NULL, 0, "no second app slot to write into");
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
 
@@ -201,7 +344,7 @@ static void install_task(void *arg)
     esp_http_client_handle_t http = esp_http_client_init(&cfg);
     if (!http) {
         fail(NULL, 0, "could not start an HTTPS client");
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
 
@@ -218,8 +361,18 @@ static void install_task(void *arg)
     esp_err_t err = ESP_OK;
     int64_t total = 0;
     int status = 0;
+    int mem_retries = 0;
     for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
         err = esp_http_client_open(http, 0);
+        if (err != ESP_OK && cfg.transport && tls_out_of_memory() && mem_retries < TLS_MEM_RETRIES) {
+            mem_retries++;
+            ESP_LOGW(TAG, "TLS out of memory; trying again in %d s (%d/%d)", TLS_MEM_WAIT_MS / 1000,
+                     mem_retries, TLS_MEM_RETRIES);
+            esp_http_client_close(http);
+            vTaskDelay(pdMS_TO_TICKS(TLS_MEM_WAIT_MS));
+            hop--;
+            continue;
+        }
         if (err != ESP_OK && cfg.transport) {
             /* A host without ChaCha20: start over with the default suites. */
             ESP_LOGI(TAG, "no ChaCha20 there; trying the default cipher suites");
@@ -229,7 +382,7 @@ static void install_task(void *arg)
             http = esp_http_client_init(&cfg);
             if (!http) {
                 fail(NULL, 0, "could not start an HTTPS client");
-                vTaskDelete(NULL);
+                install_task_end();
                 return;
             }
             hop = -1;
@@ -237,7 +390,7 @@ static void install_task(void *arg)
         }
         if (err != ESP_OK) {
             fail(http, 0, "could not reach GitHub - is the device online?");
-            vTaskDelete(NULL);
+            install_task_end();
             return;
         }
         total = esp_http_client_fetch_headers(http);
@@ -248,7 +401,7 @@ static void install_task(void *arg)
         }
         if (hop == MAX_REDIRECTS) {
             fail(http, 0, "the download redirected too many times");
-            vTaskDelete(NULL);
+            install_task_end();
             return;
         }
         esp_http_client_set_redirection(http);
@@ -257,27 +410,28 @@ static void install_task(void *arg)
 
     if (status == 404) {
         fail(http, 0, "that release has no image for this board");
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
     if (status != 200) {
         char why[64];
         snprintf(why, sizeof(why), "the download answered %d", status);
         fail(http, 0, why);
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
     if (total > 0 && (size_t)total > target->size) {
         fail(http, 0, "that image is larger than the app slot");
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
 
     esp_ota_handle_t ota = 0;
-    err = esp_ota_begin(target, total > 0 ? (size_t)total : OTA_WITH_SEQUENTIAL_WRITES, &ota);
+    ota_begin_args_t begin = {target, total > 0 ? (size_t)total : OTA_WITH_SEQUENTIAL_WRITES, &ota};
+    err = flash_run(do_ota_begin, &begin);
     if (err != ESP_OK) {
         fail(http, 0, esp_err_to_name(err));
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
     ESP_LOGW(TAG, "writing %lld bytes into %s", (long long)total, target->label);
@@ -286,7 +440,7 @@ static void install_task(void *arg)
     char *chunk = malloc(CHUNK);
     if (!chunk) {
         fail(http, ota, "out of memory");
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
 
@@ -315,7 +469,7 @@ static void install_task(void *arg)
             snprintf(why, sizeof(why), "the download broke off after %lld of %lld bytes",
                      (long long)received, (long long)total);
             fail(http, ota, why);
-            vTaskDelete(NULL);
+            install_task_end();
             return;
         }
         stalls = 0;
@@ -326,16 +480,17 @@ static void install_task(void *arg)
             if (total > 0 && received < total) {
                 free(chunk);
                 fail(http, ota, "the download stopped part-way");
-                vTaskDelete(NULL);
+                install_task_end();
                 return;
             }
             break;
         }
-        err = esp_ota_write(ota, chunk, (size_t)n);
+        ota_write_args_t wr = {ota, chunk, (size_t)n};
+        err = flash_run(do_ota_write, &wr);
         if (err != ESP_OK) {
             free(chunk);
             fail(http, ota, esp_err_to_name(err));
-            vTaskDelete(NULL);
+            install_task_end();
             return;
         }
         received += n;
@@ -355,24 +510,18 @@ static void install_task(void *arg)
 
     set_state(FW_INSTALL_RUNNING, 100, "checking the image");
     kvm_display_notice("ROLLBACK", "verifying", 100, 30000);
-    err = esp_ota_end(ota);
+    err = flash_run(do_ota_end, &ota);
     if (err != ESP_OK) {
         fail(NULL, 0, err == ESP_ERR_OTA_VALIDATE_FAILED
                           ? "what arrived is not a valid firmware image"
                           : esp_err_to_name(err));
-        vTaskDelete(NULL);
+        install_task_end();
         return;
     }
-    err = kvm_ota_trial_arm(target, s_trial_s);
+    err = flash_run(do_arm_and_boot, (void *)target);
     if (err != ESP_OK) {
-        fail(NULL, 0, "could not store the trial");
-        vTaskDelete(NULL);
-        return;
-    }
-    err = esp_ota_set_boot_partition(target);
-    if (err != ESP_OK) {
-        fail(NULL, 0, esp_err_to_name(err));
-        vTaskDelete(NULL);
+        fail(NULL, 0, err == ESP_ERR_INVALID_STATE ? "could not store the trial" : esp_err_to_name(err));
+        install_task_end();
         return;
     }
 
@@ -385,7 +534,7 @@ static void install_task(void *arg)
      * an image that will not run is reverted by the bootloader.
      */
     vTaskDelay(pdMS_TO_TICKS(1500));
-    esp_restart();
+    (void)flash_run(do_restart, NULL);
 }
 
 /*
@@ -505,9 +654,19 @@ esp_err_t fw_install_start(const char *version, uint32_t trial_s)
     portEXIT_CRITICAL(&s_lock);
     set_state(FW_INSTALL_RUNNING, -1, "starting");
 
-    if (xTaskCreate(install_task, "fw_install", TASK_STACK, NULL, TASK_PRIO, NULL) != pdPASS) {
-        set_state(FW_INSTALL_FAILED, -1, "could not start the download task");
+    if (!flash_start()) {
+        set_state(FW_INSTALL_FAILED, -1, "could not start the flash task");
         return ESP_ERR_NO_MEM;
+    }
+    s_task_with_caps = true; /* set first: the task may end before the call returns */
+    if (xTaskCreateWithCaps(install_task, "fw_install", TASK_STACK, NULL, TASK_PRIO, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
+        s_task_with_caps = false;
+        if (xTaskCreate(install_task, "fw_install", TASK_STACK, NULL, TASK_PRIO, NULL) != pdPASS) {
+            flash_stop();
+            set_state(FW_INSTALL_FAILED, -1, "could not start the download task");
+            return ESP_ERR_NO_MEM;
+        }
     }
     return ESP_OK;
 }

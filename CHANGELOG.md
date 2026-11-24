@@ -4,6 +4,13 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.91.4] - 2026-11-24
+
+### Fixed
+
+- Uploads to the microSD card could crawl at about 80 KB/s on a device short of fast internal memory, for example a Function EV with Tailscale and Wi-Fi both on. The upload task could get its stack in the chip's slow LP memory, and the TLS decryption, which keeps its state on the stack, ran 36 times slower there. The upload tasks now run from PSRAM, and so does the recording download: a 20 MB upload took 4.5 minutes on that board and now takes 8 seconds.
+- On the same kind of busy device, installing an update from the device itself (it downloads the release from GitHub) took minutes. The download now runs from PSRAM and the flash writes in a small task of their own: 147 s down to 23 s on that board.
+
 ## [0.91.3] - 2026-11-24
 
 ### Fixed
