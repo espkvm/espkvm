@@ -4,6 +4,17 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.91.5] - 2026-11-24
+
+### Changed
+
+- Downloading an image from a URL onto the card is faster: the card is written while the next part downloads, the way uploads already worked. 2.2 MB/s before, 3 MB/s now on a Function EV over Ethernet.
+
+### Fixed
+
+- On boards where the microSD and the Wi-Fi chip share the SD controller (NANO, P4-POE, Function EV and others), a card put in after boot was found only after a restart. Now it is mounted within a few seconds, as on the other boards. The slot is asked once the Wi-Fi chip has joined its network, with two short commands instead of a full mount: asking it while the chip was still joining kept it from joining.
+- On a device short of fast internal memory (a Function EV with Tailscale and Wi-Fi on), a new HTTPS connection could fail outright, and installing an update from the device stopped with "could not reach GitHub". The hardware AES and SHA drivers need a small piece of that memory for every call. TLS now does AES and SHA in software: the sessions use ChaCha20 anyway, and the handshake time and transfer speeds stayed the same.
+
 ## [0.91.4] - 2026-11-24
 
 ### Fixed

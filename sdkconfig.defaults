@@ -193,6 +193,16 @@ CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y
 
+# AES and SHA in software. The hardware drivers take a small block of internal
+# DMA-capable RAM for every hash and every AES call, and with Tailscale and
+# Wi-Fi up that RAM is fragmented: new TLS sessions then failed with
+# "mbedtls_ssl_setup -0x008D" (a 116-byte SHA context had no room). The
+# sessions use ChaCha20-Poly1305 anyway, and SHA only runs in the handshake:
+# on a Function EV the handshake stayed at 232 ms, page downloads at 2.2 MB/s
+# and uploads at 2.7 MB/s with these off. ECC and MPI stay in hardware.
+# CONFIG_MBEDTLS_HARDWARE_AES is not set
+# CONFIG_MBEDTLS_HARDWARE_SHA is not set
+
 # microlink would mark an OTA image valid only once Tailscale connects, and roll
 # back after 5 minutes otherwise. The device has its own update trial
 # (kvm_web/ota_trial.c), and Tailscale is optional, so that stays off.

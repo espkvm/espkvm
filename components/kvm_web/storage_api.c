@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "esp_err.h"
+#include "card_writer.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -285,17 +286,8 @@ esp_err_t api_storage_images_get(httpd_req_t *req)
 /* Give up if the sender goes quiet this many receive-timeouts in a row, so a
  * dropped connection leaves neither a zombie task nor a half-written file. */
 #define UPLOAD_MAX_IDLE 3
-/*
- * The body is read into big buffers and a second task writes them to the card,
- * so the network is not waiting while the card writes (on a Function EV at
- * 40 MHz each costs about the same). Buffers are PSRAM, cache-line aligned so
- * the SD driver sends each in one DMA multi-block command. UPLOAD_BUFS bounds
- * the memory; when all are queued the reader waits, and TCP slows the sender.
- */
-#define UPLOAD_CHUNK (256 * 1024)
-#define UPLOAD_BUFS 4
-#define UPLOAD_CHUNK_MIN (32 * 1024)
-#define UPLOAD_WRITER_STACK (4 * 1024)
+/* The body goes to the card through card_writer.c: big PSRAM buffers, written
+ * by a second task while the next one fills. */
 
 typedef struct {
     httpd_req_t *req;
@@ -303,39 +295,6 @@ typedef struct {
     size_t content_len;
     uint64_t offset; /* where this part goes; 0 starts a new file */
 } upload_ctx_t;
-
-typedef struct {
-    char *data;
-    size_t len;
-} upload_buf_t;
-
-typedef struct {
-    int fd;
-    QueueHandle_t full;  /* reader -> writer; a NULL data pointer ends it */
-    QueueHandle_t empty; /* writer -> reader */
-    SemaphoreHandle_t done;
-    volatile bool failed;
-    int64_t write_us;
-} upload_writer_t;
-
-static void upload_writer_task(void *arg)
-{
-    upload_writer_t *w = (upload_writer_t *)arg;
-    upload_buf_t b;
-    while (xQueueReceive(w->full, &b, portMAX_DELAY) == pdTRUE && b.data) {
-        if (!w->failed) {
-            const int64_t t0 = esp_timer_get_time();
-            if (write(w->fd, b.data, b.len) != (ssize_t)b.len) {
-                ESP_LOGE(TAG, "write failed: %s", strerror(errno));
-                w->failed = true;
-            }
-            w->write_us += esp_timer_get_time() - t0;
-        }
-        xQueueSend(w->empty, &b, portMAX_DELAY);
-    }
-    xSemaphoreGive(w->done);
-    vTaskDeleteWithCaps(NULL);
-}
 
 static void upload_finish(httpd_req_t *req)
 {
@@ -360,8 +319,8 @@ static void upload_worker_task(void *arg)
      * stdio: fopen "ab" seeks through a 32-bit off_t, which breaks at 2 GB.
      * write() with O_APPEND seeks inside FatFs, in 64 bits. */
     const int flags = O_WRONLY | O_CREAT | (ctx->offset ? O_APPEND : O_TRUNC);
-    upload_writer_t w = {.fd = open(path, flags, 0644)};
-    if (w.fd < 0) {
+    const int fd = open(path, flags, 0644);
+    if (fd < 0) {
         ESP_LOGE(TAG, "cannot create '%s': %s", path, strerror(errno));
         send_json_error(req, "500 Internal Server Error", "cannot create file on card");
         upload_finish(req);
@@ -374,60 +333,25 @@ static void upload_worker_task(void *arg)
     video_frame_upload_begin();
 
     const char *why = "out of memory";
-    bool ok = true;
-    w.full = xQueueCreate(UPLOAD_BUFS + 1, sizeof(upload_buf_t));
-    w.empty = xQueueCreate(UPLOAD_BUFS, sizeof(upload_buf_t));
-    w.done = xSemaphoreCreateBinary();
-    ok = w.full && w.empty && w.done;
-    /* PSRAM is mostly taken by video, and what is left can be in pieces: take
-     * smaller buffers, or fewer, rather than refuse the upload. */
-    size_t chunk = UPLOAD_CHUNK;
-    int bufs = 0;
-    while (ok && bufs < UPLOAD_BUFS) {
-        upload_buf_t b = {.data = heap_caps_aligned_alloc(64, chunk, MALLOC_CAP_SPIRAM)};
-        if (b.data) {
-            xQueueSend(w.empty, &b, 0);
-            bufs++;
-        } else if (bufs < 2 && chunk > UPLOAD_CHUNK_MIN) {
-            chunk /= 2;
-            while (xQueueReceive(w.empty, &b, 0) == pdTRUE) { /* all one size */
-                free(b.data);
-            }
-            bufs = 0;
-        } else {
-            break;
-        }
-    }
-    ok = ok && bufs > 0;
-    if (ok && (chunk != UPLOAD_CHUNK || bufs != UPLOAD_BUFS)) {
-        ESP_LOGW(TAG, "upload: %d buffers of %u KB (PSRAM largest %u KB)", bufs,
-                 (unsigned)(chunk / 1024),
-                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
-    } else if (!ok) {
-        ESP_LOGE(TAG, "upload: no buffers (PSRAM free %u KB, largest %u KB)",
-                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
-                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
-    }
-    const bool writer = ok && xTaskCreateWithCaps(upload_writer_task, "kvm_upload_wr", UPLOAD_WRITER_STACK,
-                                                  &w, UPLOAD_WORKER_PRIO, NULL, MALLOC_CAP_SPIRAM) == pdPASS;
-    ok = writer;
+    card_writer_t *w = card_writer_start(fd, "kvm_upload_wr");
+    bool ok = w != NULL;
+    const size_t chunk = ok ? card_writer_chunk(w) : 0;
 
     const int64_t started_us = esp_timer_get_time();
     size_t received = 0;
     int idle = 0;
     while (ok && received < ctx->content_len) {
-        upload_buf_t b = {0};
-        xQueueReceive(w.empty, &b, portMAX_DELAY);
-        b.len = 0; /* it comes back holding the length it was written with */
+        char *buf = card_writer_get(w);
+        size_t len = 0;
         /* Fill the buffer, or take whatever arrived before a lull. recv hands
          * back a TLS record at a time; batching them makes a few large writes. */
-        while (b.len < chunk && received + b.len < ctx->content_len) {
-            const size_t room = chunk - b.len;
-            const size_t left = ctx->content_len - received - b.len;
-            const int n = httpd_req_recv(req, b.data + b.len, room < left ? room : left);
+        while (len < chunk && received + len < ctx->content_len) {
+            const size_t room = chunk - len;
+            const size_t left = ctx->content_len - received - len;
+            const int n = httpd_req_recv(req, buf + len, room < left ? room : left);
             if (kvm_recv_stalled(n)) {
                 if (++idle >= UPLOAD_MAX_IDLE) {
-                    ESP_LOGE(TAG, "upload stalled after %zu of %zu bytes", received + b.len,
+                    ESP_LOGE(TAG, "upload stalled after %zu of %zu bytes", received + len,
                              ctx->content_len);
                     why = "upload stalled; the network is too slow or dropped";
                     ok = false;
@@ -436,49 +360,28 @@ static void upload_worker_task(void *arg)
             }
             idle = 0;
             if (n <= 0) {
-                ESP_LOGE(TAG, "upload cut short after %zu of %zu bytes", received + b.len,
+                ESP_LOGE(TAG, "upload cut short after %zu of %zu bytes", received + len,
                          ctx->content_len);
                 why = "upload cut short by the client";
                 ok = false;
                 break;
             }
-            b.len += (size_t)n;
+            len += (size_t)n;
         }
-        received += b.len;
-        if (b.len) {
-            xQueueSend(w.full, &b, portMAX_DELAY);
-        } else {
-            xQueueSend(w.empty, &b, portMAX_DELAY);
-        }
-        if (w.failed) {
+        received += len;
+        card_writer_put(w, buf, len);
+        if (card_writer_failed(w)) {
             why = "write to the card failed; it may be full";
             ok = false;
         }
     }
 
-    if (writer) {
-        const upload_buf_t end = {0};
-        xQueueSend(w.full, &end, portMAX_DELAY);
-        xSemaphoreTake(w.done, portMAX_DELAY);
-        if (w.failed) {
-            why = "write to the card failed; it may be full";
-            ok = false;
-        }
+    int64_t write_us = 0;
+    if (w && !card_writer_finish(w, &write_us)) {
+        why = "write to the card failed; it may be full";
+        ok = false;
     }
-    upload_buf_t b;
-    while (w.empty && xQueueReceive(w.empty, &b, 0) == pdTRUE) {
-        free(b.data);
-    }
-    if (w.full) {
-        vQueueDelete(w.full);
-    }
-    if (w.empty) {
-        vQueueDelete(w.empty);
-    }
-    if (w.done) {
-        vSemaphoreDelete(w.done);
-    }
-    close(w.fd);
+    close(fd);
     video_frame_upload_end();
 
     if (!ok) {
@@ -489,7 +392,7 @@ static void upload_worker_task(void *arg)
         ESP_LOGW(TAG, "image '%s' written, %zu bytes in %lld ms (%llu KB/s), card %lld ms",
                  ctx->name, received, (long long)ms,
                  (unsigned long long)(ms > 0 ? (uint64_t)received / (uint64_t)ms : 0),
-                 (long long)(w.write_us / 1000));
+                 (long long)(write_us / 1000));
         char body[128];
         int bn = snprintf(body, sizeof(body),
                           "{\"status\":\"written\",\"name\":\"%s\",\"size\":%llu}",

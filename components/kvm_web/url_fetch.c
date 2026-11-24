@@ -35,6 +35,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "card_writer.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -291,6 +292,7 @@ static void fetch_task(void *arg)
     char path[96] = {0};
     char part[104] = {0};
     int fd = -1;
+    card_writer_t *cw = NULL;
     char *whole = NULL; /* the rescue image, held in PSRAM until it is all here */
     if (!bad) {
         if (rescue) {
@@ -305,9 +307,16 @@ static void fetch_task(void *arg)
             if (fd < 0) {
                 snprintf(why, sizeof(why), "could not create the file on the card (%d)", errno);
                 bad = why;
+            } else if (!(cw = card_writer_start(fd, "url_fetch_wr"))) {
+                bad = "out of memory for the card writer";
             }
         }
     }
+    /* The card is written by card_writer.c while the next part downloads:
+     * one after the other, the card writes took as long as the reads. */
+    char *wbuf = cw ? card_writer_get(cw) : NULL;
+    size_t wlen = 0;
+    const size_t wcap = cw ? card_writer_chunk(cw) : 0;
 
     uint64_t got = 0;
     int stalls = 0;
@@ -345,12 +354,18 @@ static void fetch_task(void *arg)
             memcpy(whole + got, chunk, (size_t)n);
         } else {
             for (int off = 0; off < n;) {
-                const ssize_t w = write(fd, chunk + off, (size_t)(n - off));
-                if (w <= 0) {
-                    bad = "writing the card failed (full?)";
-                    break;
+                const size_t take = (size_t)(n - off) < wcap - wlen ? (size_t)(n - off) : wcap - wlen;
+                memcpy(wbuf + wlen, chunk + off, take);
+                wlen += take;
+                off += (int)take;
+                if (wlen == wcap) {
+                    card_writer_put(cw, wbuf, wlen);
+                    wbuf = card_writer_get(cw);
+                    wlen = 0;
                 }
-                off += (int)w;
+            }
+            if (card_writer_failed(cw)) {
+                bad = "writing the card failed (full?)";
             }
         }
         got += (uint64_t)n;
@@ -388,6 +403,12 @@ static void fetch_task(void *arg)
         }
         free(whole);
     } else if (fd >= 0) {
+        if (cw) {
+            card_writer_put(cw, wbuf, bad ? 0 : wlen);
+            if (!card_writer_finish(cw, NULL) && !bad) {
+                bad = "writing the card failed (full?)";
+            }
+        }
         fsync(fd);
         close(fd);
         if (bad) {

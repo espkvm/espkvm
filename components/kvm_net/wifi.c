@@ -443,6 +443,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         }
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         s_up = false;
+        kvm_storage_set_other_slot_joined(false);
         s_rssi = 0;
         if ((s_retries++ % 8u) == 0u) {
             wifi_event_sta_disconnected_t *e = (wifi_event_sta_disconnected_t *)data;
@@ -459,6 +460,7 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     (void)id;
     ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
     s_up = true;
+    kvm_storage_set_other_slot_joined(true);
     s_retries = 0;
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {

@@ -24,6 +24,7 @@
 #include "esp_vfs_fat.h"
 #include "ff.h"
 #include "sdmmc_cmd.h"
+#include "esp_private/sdmmc_common.h"
 #include "esp_heap_caps.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
@@ -84,6 +85,7 @@ static volatile int64_t s_next_probe_us; /* 0: nothing to win back */
 static volatile uint32_t s_probe_wait_s = SD_PROBE_FIRST_S;
 static volatile int64_t s_climbed_us;
 static volatile bool s_other_slot_busy;
+static volatile bool s_other_slot_joined;
 static volatile bool s_probing; /* the probe sets the next wait itself */
 static volatile bool s_presence_poll; /* the slot watcher is asking, not reading data */
 static volatile bool s_slot_recheck;  /* a real transfer failed; look at the slot now */
@@ -92,6 +94,8 @@ static void (*s_slot_cb)(void);       /* told when a card appears or goes away *
 static void (*s_leaving_cb)(const char *why); /* told before the filesystem goes */
 
 static esp_err_t sd_mount(int attempts);
+static bool sd_card_answers(void);
+static void sd_driver_logs(esp_log_level_t level);
 
 static uint32_t sd_step_below(uint32_t khz)
 {
@@ -126,6 +130,11 @@ static uint32_t sd_start_khz(void)
 void kvm_storage_set_other_slot_busy(bool busy)
 {
     s_other_slot_busy = busy;
+}
+
+void kvm_storage_set_other_slot_joined(bool joined)
+{
+    s_other_slot_joined = joined;
 }
 
 void kvm_storage_set_slot_changed_cb(void (*cb)(void))
@@ -1017,15 +1026,22 @@ static void sd_probe_task(void *arg)
             xSemaphoreTake(s_card_lock, 0) == pdTRUE) {
             s_slot_recheck = false;
             bool changed = false;
-            if (!s_card && !s_handed_over && !s_other_slot_busy && sd_cd_says_card()) {
+            if (!s_card && !s_handed_over && sd_cd_says_card() &&
+                (!s_other_slot_busy || s_other_slot_joined)) {
                 /*
-                 * One quiet try; the next tick is five seconds away. Not while
-                 * the co-processor holds the other slot: mounting re-initialises
-                 * the SD host both slots share, so on a board running WiFi a card
-                 * put in after boot waits for the next restart. Losing one is
-                 * still noticed - that is a read, not a re-init.
+                 * One quiet try; the next tick is five seconds away. Next to a
+                 * Wi-Fi chip, only once it has joined its network (asking the
+                 * slot during the join kept it from joining), and the slot is
+                 * asked first (sd_card_answers), so an empty one costs a few
+                 * milliseconds.
                  */
-                if (sd_mount(1) == ESP_OK) {
+                bool try_mount = true;
+                if (s_other_slot_busy) {
+                    sd_driver_logs(ESP_LOG_NONE);
+                    try_mount = sd_card_answers();
+                    sd_driver_logs(CONFIG_LOG_DEFAULT_LEVEL);
+                }
+                if (try_mount && sd_mount(1) == ESP_OK) {
                     while (!sd_read_test(SD_MOUNT_TEST_SECTORS) && s_bus_khz > SD_FLOOR_KHZ) {
                     }
                     sd_log_mounted();
@@ -1096,6 +1112,53 @@ static void sd_probe_task(void *arg)
  * many tries it gets - the boot gives it ten, the slot watcher one, because it
  * comes back in five seconds anyway.
  */
+static void sd_slot_config(sdmmc_slot_config_t *slot)
+{
+    *slot = (sdmmc_slot_config_t)SDMMC_SLOT_CONFIG_DEFAULT();
+    slot->width = 4;
+    slot->clk = KVM_BOARD_SD_CLK_GPIO;
+    slot->cmd = KVM_BOARD_SD_CMD_GPIO;
+    slot->d0 = KVM_BOARD_SD_D0_GPIO;
+    slot->d1 = KVM_BOARD_SD_D1_GPIO;
+    slot->d2 = KVM_BOARD_SD_D2_GPIO;
+    slot->d3 = KVM_BOARD_SD_D3_GPIO;
+    /* The board carries external pull-ups; the internal ones are enabled too as
+     * a belt-and-suspenders, harmless where the externals already hold. */
+    slot->flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+}
+
+/*
+ * Is a card in the slot? Asked before a mount on a board whose Wi-Fi chip
+ * shares the SD controller. A mount of an empty slot keeps the controller for
+ * about a second of retries, and every five seconds that kept the Wi-Fi chip
+ * from joining its network. CMD0 then CMD8 take a few milliseconds and an empty
+ * slot answers CMD8 with a quick timeout. A card from before SD 2.0 does not
+ * know CMD8; it still answers CMD55.
+ */
+static bool sd_card_answers(void)
+{
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = kvm_storage_sd_slot();
+    sdmmc_slot_config_t slot;
+    sd_slot_config(&slot);
+    if (sdmmc_host_init() != ESP_OK || sdmmc_host_init_slot(host.slot, &slot) != ESP_OK) {
+        return false;
+    }
+    slot_power_settle();
+    sdmmc_card_t card = {.host = host};
+    bool here = false;
+    if (sdmmc_send_cmd_go_idle_state(&card) == ESP_OK) {
+        if (sdmmc_send_cmd_send_if_cond(&card, SD_OCR_VOL_MASK) == ESP_OK) {
+            here = true;
+        } else {
+            sdmmc_command_t cmd = {.opcode = MMC_APP_CMD, .flags = SCF_CMD_AC | SCF_RSP_R1};
+            here = sdmmc_send_cmd(&card, &cmd) == ESP_OK;
+        }
+    }
+    (void)sdmmc_host_deinit_slot(host.slot);
+    return here;
+}
+
 /*
  * The sdmmc driver, the FAT layer and the GPIO driver all shout when a mount
  * finds nothing. That is the normal answer for an empty slot, and the watcher
@@ -1104,8 +1167,8 @@ static void sd_probe_task(void *arg)
  */
 static void sd_driver_logs(esp_log_level_t level)
 {
-    static const char *const tags[] = {"vfs_fat_sdmmc", "sdmmc_common", "sdmmc_sd",
-                                       "sdmmc_io",      "SD_HOST",      "gpio"};
+    static const char *const tags[] = {"vfs_fat_sdmmc", "sdmmc_common", "sdmmc_sd", "sdmmc_io",
+                                       "SD_HOST",       "gpio",         "sdmmc_periph", "sdmmc_cmd"};
     for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
         esp_log_level_set(tags[i], level);
     }
@@ -1152,17 +1215,8 @@ static esp_err_t sd_mount(int attempts)
      * underrun 0xe00) while a 32 GB card wrote fine on the same board.
      */
 
-    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot.width = 4;
-    slot.clk = KVM_BOARD_SD_CLK_GPIO;
-    slot.cmd = KVM_BOARD_SD_CMD_GPIO;
-    slot.d0 = KVM_BOARD_SD_D0_GPIO;
-    slot.d1 = KVM_BOARD_SD_D1_GPIO;
-    slot.d2 = KVM_BOARD_SD_D2_GPIO;
-    slot.d3 = KVM_BOARD_SD_D3_GPIO;
-    /* The board carries external pull-ups; the internal ones are enabled too as
-     * a belt-and-suspenders, harmless where the externals already hold. */
-    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    sdmmc_slot_config_t slot;
+    sd_slot_config(&slot);
 
     const esp_vfs_fat_sdmmc_mount_config_t mount = {
         /* Never reformat a card that will not mount: it may be the operator's,

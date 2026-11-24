@@ -5,6 +5,7 @@ idf_component_register(
         "screentext_api.c"
         "update_api.c"
         "storage_api.c"
+        "card_writer.c"
         "hid_api.c"
         "automation_api.c"
         "ws_server.c"
