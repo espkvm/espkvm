@@ -321,9 +321,11 @@ static esp_err_t get_vmedia(httpd_req_t *req)
         char url[URL_MAX + 1];
         snprintf(url, sizeof(url), "%s", kvm_setting_str("msc_url"));
         url[strcspn(url, "?#")] = '\0';
-        char *at = strchr(url, '@');
+        /* A password may hold a '/' too, so everything up to the last '@'
+         * goes: a path with an '@' in it shows shorter, never a password. */
+        char *at = strrchr(url, '@');
         char *scheme = strstr(url, "://");
-        if (at && scheme && at > scheme && !memchr(scheme + 3, '/', (size_t)(at - scheme - 3))) {
+        if (at && scheme && at > scheme) {
             memmove(scheme + 3, at + 1, strlen(at + 1) + 1);
         }
         const char *slash = strrchr(url, '/');

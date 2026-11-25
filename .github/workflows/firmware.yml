@@ -254,7 +254,8 @@ jobs:
 
       - name: Test the console
         if: matrix.board.id == 'jetkvm-mini'
-        run: make test-console
+        working-directory: web
+        run: npm test
 
       # A tag is the version. Without this the firmware would report the commit
       # it was built from, which tells an operator nothing about what to expect.
@@ -287,7 +288,9 @@ jobs:
 
       - name: Test USB video on the host
         if: matrix.board.id == 'jetkvm-mini'
-        run: make test-usb-video test-usb-video-transport
+        run: |
+          sh components/kvm_usb_video/test/run.sh
+          sh components/kvm_usb_video/test/run-transport.sh
 
       - name: Collect what a person or a device might want
         run: |

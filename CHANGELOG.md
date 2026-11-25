@@ -4,11 +4,13 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.92.0] - 2026-11-25
+
 ### Added
 
-- USB screen sharing with a paired OS Services sender. The wired JetKVM Mini builds it in by default, and other boards can opt in under ESP-KVM > Features. Sharing starts disabled, and enabling it allocates the receiver task and video buffers. Changing the setting briefly reconnects the target's USB devices to add or remove the video interface. The target may ask to allow the new configuration. Video settings show the pairing fingerprint and available displays. The console uses the USB picture while sharing and returns to HDMI when sharing stops. Sharing works alongside ESP-KVM Tools over USB serial. Senders that support capture bounds can keep the desktop at its current resolution. The receiver checks H.264 stream parameters against its supported formats and granted dimensions. Screen text, screen-area readings, MJPEG, and device-side JPEG screenshots are unavailable during USB sharing. VNC clients need H.264 support to view the USB picture.
-- A third way to start controlling the target: Settings, Input, Pointer, "Start controlling on" -> "Click anywhere". Any click on the picture takes control, and the button over the picture is not shown, so a screen you only watch stays clean. That first click only moves the pointer there and clicks nothing on the target.
-- Redfish, the server-management API of iDRAC and iLO, so server tools can drive the target (checked with redfishtool and sushy, the client OpenStack Ironic uses): power on, off and reset through the ATX wiring (without it, a wake), and booting it from an image at a URL. Off by default, with a password of its own that opens power and virtual media only: Settings, Security, Redfish. The calls are in [docs/API.md](docs/API.md#redfish).
+- Redfish, the server-management API of iDRAC and iLO. Server tools can power the target on and off and reset it through the ATX wiring, or only wake it without the wiring, and boot it from an image at a URL. I checked it with redfishtool and with sushy, the client OpenStack Ironic uses. Off by default: Settings, Security, Redfish. It has a password of its own, which opens power and virtual media only. The calls are in [docs/API.md](docs/API.md#redfish).
+- The target can send its screen over USB instead of HDMI, from JetKVM's open-source [OS Services](https://github.com/jetkvm/os-services) running on it. It is built in on the wired JetKVM Mini, and other boards can turn it on at build time. Switch it on in Settings, Video, USB screen sharing. The target's USB reconnects once to add the video interface, and the console shows that picture until sharing stops, then goes back to HDMI. Sharing is off after every restart and takes no RAM while off. Screen text, screen areas, MJPEG and screenshots do not work while it runs. From [@rvben](https://github.com/rvben) ([#103](https://github.com/espkvm/espkvm/pull/103)).
+- A third way to start controlling the target: Settings, Input, Pointer, "Start controlling on", "Click anywhere". Any click on the picture takes control, and there is no button over the picture, so a screen you only watch stays clean. The first click only moves the pointer there and clicks nothing on the target.
 
 ## [0.91.5] - 2026-11-24
 

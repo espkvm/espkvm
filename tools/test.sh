@@ -60,8 +60,9 @@ if [ "$what" = all ] || [ "$what" = host ]; then
     echo "== VeNCrypt: version and TLS subtype negotiation =="
     sh "$here/components/kvm_vnc/test/run.sh"
     echo
-    echo "== USB video display reports =="
+    echo "== USB video: display reports, descriptors and endpoints =="
     sh "$here/components/kvm_usb_video/test/run.sh"
+    sh "$here/components/kvm_usb_video/test/run-transport.sh"
     echo
 fi
 

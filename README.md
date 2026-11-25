@@ -99,6 +99,7 @@ Useful for what it does today, and honest about the rest.
 | Home Assistant over MQTT | works; off by default |
 | Updates over the network, with rollback and a trial for remote devices | works |
 | A small status display, a battery-backed clock | works; optional |
+| The target's screen over USB instead of HDMI, from OS Services running on it | new; built in on the wired JetKVM Mini |
 | HDMI audio, in the console and in recordings | new; on TC358743 boards, three wires to the P4 |
 | Sound over USB: the device as a USB speaker for the target | new; for boards without HDMI audio, such as the JetKVM Mini |
 
