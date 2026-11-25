@@ -74,6 +74,9 @@ void video_frame_install(video_payload_t payload, uint8_t *const *bufs, int coun
  */
 bool video_frame_quiesce(uint32_t timeout_ms);
 
+/** Withdraw the published picture without disturbing readers holding a slot. */
+void video_frame_invalidate(void);
+
 /**
  * Claim a slot to encode into. Blocks while every slot is held by a reader.
  * @return ESP_ERR_TIMEOUT when none came free, ESP_ERR_INVALID_STATE with no

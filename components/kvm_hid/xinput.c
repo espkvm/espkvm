@@ -22,6 +22,9 @@
 #include <string.h>
 
 #include "device/usbd_pvt.h"
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+#include "usb_video_driver.h"
+#endif
 #include "esp_log.h"
 #include "tusb.h"
 
@@ -232,8 +235,18 @@ void xinput_enable(bool on, bool xid)
 /* TinyUSB asks for extra class drivers once, at stack init. */
 usbd_class_driver_t const *usbd_app_driver_get_cb(uint8_t *count)
 {
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    static usbd_class_driver_t drivers[2];
+    *count = 0;
+    if (s_enabled) {
+        drivers[(*count)++] = k_driver;
+    }
+    drivers[(*count)++] = usb_video_driver;
+    return drivers;
+#else
     *count = s_enabled ? 1 : 0;
     return s_enabled ? &k_driver : NULL;
+#endif
 }
 
 bool xinput_ready(void)

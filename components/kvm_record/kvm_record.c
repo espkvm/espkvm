@@ -1964,6 +1964,9 @@ void record_set_finished_cb(void (*cb)(const record_finished_t *done))
 
 const char *kvm_record_screenshot_blocked(void)
 {
+    if (capture_source_is_usb()) {
+        return CAPTURE_USB_JPEG_UNAVAILABLE;
+    }
     if (!kvm_storage_writable()) {
         return kvm_storage_write_unavailable_reason();
     }
@@ -1986,7 +1989,11 @@ esp_err_t kvm_record_screenshot(char *file, size_t file_cap, char *why, size_t w
     size_t len = 0;
     esp_err_t err = capture_snapshot_jpeg(&jpeg, &len, 3000);
     if (err != ESP_OK) {
-        snprintf(why, why_cap, "could not take the picture (%s)", esp_err_to_name(err));
+        if (err == ESP_ERR_NOT_SUPPORTED) {
+            snprintf(why, why_cap, "%s", CAPTURE_USB_JPEG_UNAVAILABLE);
+        } else {
+            snprintf(why, why_cap, "could not take the picture (%s)", esp_err_to_name(err));
+        }
         return err;
     }
     char base[40], rel[64];

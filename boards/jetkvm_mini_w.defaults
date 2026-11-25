@@ -48,6 +48,9 @@ CONFIG_KVM_BTN_GPIO_DEFAULT=17
 
 CONFIG_KVM_BOARD_JETKVM_MINI_W=y
 
+# Only the wired Mini profile includes USB screen sharing by default.
+CONFIG_KVM_ENABLE_USB_VIDEO=n
+
 # --- speaker -----------------------------------------------------------------
 # No ES8311 codec on this board.
 CONFIG_KVM_ENABLE_SPEAKER=n

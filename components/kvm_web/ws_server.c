@@ -69,6 +69,7 @@
 #include "kvm_ts.h"
 #include "kvm_wg.h"
 #include "kvm_auth.h"
+#include "usb_video.h"
 #include "fw_install.h"
 #include "kvm_notify.h"
 #include "kvm_sched.h"
@@ -466,7 +467,8 @@ static void ws_send_status_to(int fd)
        without it the console would say "USB is not active" for a target port
        with no power and for a host that stopped listening alike, and only one
        of those is worth pressing re-plug over. */
-    const uint8_t flags = (uint8_t)((usb_hid_ready() ? 1u : 0u) | (usb_hid_bus_alive() ? 2u : 0u));
+    const uint8_t flags = (usb_hid_ready() ? 1u : 0u) | (usb_hid_bus_alive() ? 2u : 0u) |
+                          (capture_source_is_usb() ? 4u : 0u);
     const uint8_t msg[] = {WS_D2C_STATUS, flags, usb_hid_leds()};
     ws_send_binary(fd, msg, sizeof(msg));
 }
@@ -715,6 +717,23 @@ esp_err_t ws_input_handler(httpd_req_t *req)
         }
         return ESP_OK;
     }
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    if (op == WS_C2D_USB_VIDEO && pkt.type == HTTPD_WS_TYPE_BINARY &&
+        (pkt.len == 5 || (pkt.len == 7 && buf[5] <= 1))) {
+        const uint32_t revision = (uint32_t)buf[1] | ((uint32_t)buf[2] << 8) |
+                                  ((uint32_t)buf[3] << 16) | ((uint32_t)buf[4] << 24);
+        if (pkt.len == 7) {
+            usb_video_console_set(buf[5], buf[6], revision);
+        }
+        size_t len;
+        uint8_t *status = usb_video_console_state(WS_D2C_USB_VIDEO, pkt.len == 7 ? 0 : revision, &len);
+        if (status) {
+            ws_send_binary(my_fd, status, len);
+            free(status);
+        }
+        return ESP_OK;
+    }
+#endif
     const bool is_input = (op >= WS_C2D_MOUSE_ABS && op <= WS_C2D_RELEASE_ALL) || op == WS_C2D_PAD;
 
     /*

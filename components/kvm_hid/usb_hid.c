@@ -4,6 +4,7 @@
  */
 #include "usb_hid.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,10 +23,15 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #include "soc/usb_dwc_struct.h"
 #include "tinyusb.h"
+#include "usb_video.h"
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+#include "usb_video_driver.h"
+#endif
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_default_config.h"
 
@@ -100,6 +106,12 @@ enum {
 #define EPNUM_CDC_OUT 0x06
 #define EPNUM_CDC_IN 0x86
 #define STR_CDC 8 /* its interface name in s_string_descriptor */
+
+/* Serial and the gamepad are mutually exclusive, leaving the gamepad's OUT
+ * endpoint free for video. The P4 high-speed controller provides a seventh
+ * non-control IN endpoint at 0x87, even with a full-speed connection. */
+#define EPNUM_VIDEO_WITH_CDC_OUT EPNUM_PAD_OUT_ADDED
+#define EPNUM_VIDEO_WITH_CDC_IN 0x87
 
 /* The USB speaker (aud_usb): one isochronous OUT endpoint, no IN, so it fits
  * beside everything else. Its sound goes to kvm_audio (usb_source.c). */
@@ -410,6 +422,10 @@ static const uint8_t k_msc_iface_hs[] = {
 
 static uint8_t s_fs_config_descriptor[CFG_DESC_MAX];
 static uint8_t s_hs_config_descriptor[CFG_DESC_MAX];
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+static uint8_t s_fs_config_without_video[CFG_DESC_MAX];
+static uint8_t s_hs_config_without_video[CFG_DESC_MAX];
+#endif
 
 /* usb_pad setting: which pad, and whether it is alone on the device. */
 typedef enum { PAD_OFF = 0, PAD_ADDED = 1, PAD_ALONE = 2 } pad_mode_t;
@@ -426,7 +442,7 @@ static pad_kind_t s_pad_kind;
  */
 static size_t build_config_descriptor(uint8_t *buf, bool full_speed, bool kbd_only, pad_mode_t pad,
                                       bool with_msc, const uint8_t *msc_iface, size_t msc_len,
-                                      bool with_cdc, bool with_audio)
+                                      bool with_cdc, bool with_audio, bool with_video)
 {
     size_t n = 0;
     uint8_t ifaces = 0;
@@ -494,6 +510,22 @@ static size_t build_config_descriptor(uint8_t *buf, bool full_speed, bool kbd_on
     }
 #else
     (void)with_audio;
+#endif
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    if (with_video && !kbd_only && pad != PAD_ALONE) {
+        const uint8_t video_out = with_cdc ? EPNUM_VIDEO_WITH_CDC_OUT : EPNUM_CDC_OUT;
+        const uint8_t video_in = with_cdc ? EPNUM_VIDEO_WITH_CDC_IN : EPNUM_CDC_IN;
+        const uint8_t video[] = {
+            9, TUSB_DESC_INTERFACE, ifaces, 0, 2, TUSB_CLASS_VENDOR_SPECIFIC, USB_VIDEO_SUBCLASS, USB_VIDEO_PROTOCOL, 0,
+            7, TUSB_DESC_ENDPOINT, video_out, TUSB_XFER_BULK, full_speed ? 64 : 0, full_speed ? 0 : 2, 0,
+            7, TUSB_DESC_ENDPOINT, video_in, TUSB_XFER_BULK, full_speed ? 64 : 0, full_speed ? 0 : 2, 0,
+        };
+        memcpy(buf + n, video, sizeof(video));
+        n += sizeof(video);
+        ifaces++;
+    }
+#else
+    (void)with_video;
 #endif
     buf[2] = (uint8_t)(n & 0xff); /* wTotalLength, little-endian */
     buf[3] = (uint8_t)(n >> 8);
@@ -776,7 +808,7 @@ size_t usb_hid_probe_trace(char *out, size_t len)
  * bus" - right where somebody is reading the log to find out whether the host
  * did anything. So the suspend line is only written when the quiet is not ours.
  */
-static volatile bool s_replugging;
+static atomic_bool s_replugging;
 
 static void msc_forget_request(void); /* MSC callbacks, below */
 
@@ -805,7 +837,7 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
      * write both down.
      */
     case TINYUSB_EVENT_SUSPENDED:
-        if (!s_replugging) {
+        if (!atomic_load(&s_replugging)) {
             ESP_LOGW(TAG, "host suspended the bus (remote wakeup %s)",
                      event->suspended.remote_wakeup ? "enabled" : "disabled");
         }
@@ -825,28 +857,83 @@ static void tinyusb_on_event(tinyusb_event_t *event, void *arg)
 /*
  * Holding D+ low long enough to read as a detach and then attaching again is
  * electrically all a replug ever did: the host drops what it knew about us and
- * enumerates from scratch. Three callers want it - the end of usb_hid_init(),
- * the watchdog below, and the operator - and none of them may block (one is a
- * web request, two are timer callbacks), so the reconnect half is deferred.
+ * enumerates from scratch. For requests after boot, defer the reconnect so
+ * callers never have to wait for the host to notice the detach.
  */
 static esp_timer_handle_t s_reconnect_timer;
+static StaticSemaphore_t s_reconnect_mutex_storage;
+static _Atomic(SemaphoreHandle_t) s_reconnect_mutex;
+static int64_t s_reconnect_at_us;
+static atomic_bool s_preparing_restart;
+static bool s_usb_driver_installed; /* guarded by s_reconnect_mutex */
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+static atomic_bool s_video_requested;
+static atomic_bool s_video_visible;
+
+const uint8_t *kvm_usb_config_descriptor(const uint8_t *descriptor)
+{
+    if (atomic_load(&s_video_visible)) {
+        return descriptor;
+    }
+    if (descriptor == s_fs_config_descriptor) {
+        return s_fs_config_without_video;
+    }
+    return descriptor == s_hs_config_descriptor ? s_hs_config_without_video : descriptor;
+}
+#endif
 
 static void reconnect_cb(void *arg)
 {
     (void)arg;
-    tud_connect();
-    s_replugging = false;
+    xSemaphoreTake(s_reconnect_mutex, portMAX_DELAY);
+    /* A previous expiry may already be dispatched when a new detach starts. */
+    if (!atomic_load(&s_preparing_restart) && atomic_load(&s_replugging)
+        && esp_timer_get_time() >= s_reconnect_at_us) {
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+        atomic_store(&s_video_visible, atomic_load(&s_video_requested));
+#endif
+        tud_connect();
+        atomic_store(&s_replugging, false);
+    }
+    xSemaphoreGive(s_reconnect_mutex);
+}
+
+static void reattach_locked(uint32_t off_ms)
+{
+    if (atomic_load(&s_preparing_restart)) {
+        return;
+    }
+    atomic_store(&s_replugging, true);
+    tud_disconnect();
+    const int64_t off_us = (int64_t)off_ms * 1000;
+    s_reconnect_at_us = esp_timer_get_time() + off_us;
+    (void)esp_timer_stop(s_reconnect_timer);
+    (void)esp_timer_start_once(s_reconnect_timer, off_us);
 }
 
 static void reattach(uint32_t off_ms)
 {
-    if (!s_reconnect_timer) {
+    SemaphoreHandle_t mutex = atomic_load(&s_reconnect_mutex);
+    if (!mutex) {
         return;
     }
-    s_replugging = true;
-    tud_disconnect();
-    (void)esp_timer_stop(s_reconnect_timer);
-    (void)esp_timer_start_once(s_reconnect_timer, (int64_t)off_ms * 1000);
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    if (s_reconnect_timer) {
+        reattach_locked(off_ms);
+    }
+    xSemaphoreGive(mutex);
+}
+
+static bool finish_initial_reattach(void)
+{
+    xSemaphoreTake(s_reconnect_mutex, portMAX_DELAY);
+    /* A restart or a timed replug can take over during the boot delay. */
+    bool connected = false;
+    if (!atomic_load(&s_preparing_restart) && !atomic_load(&s_replugging)) {
+        connected = tud_connect();
+    }
+    xSemaphoreGive(s_reconnect_mutex);
+    return connected;
 }
 
 /*
@@ -946,17 +1033,41 @@ void usb_hid_reattach(void)
  */
 void usb_hid_prepare_restart(void)
 {
-    if (!s_reconnect_timer) {
-        return; /* USB never came up */
+    /* Publish restart before USB initialization can publish its mutex. */
+    atomic_store(&s_preparing_restart, true);
+    SemaphoreHandle_t mutex = atomic_load(&s_reconnect_mutex);
+    if (!mutex) {
+        return;
     }
-    s_replugging = true;
-    (void)esp_timer_stop(s_reconnect_timer);
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    if (!s_usb_driver_installed) {
+        xSemaphoreGive(mutex);
+        return;
+    }
+    atomic_store(&s_replugging, true);
+    if (s_reconnect_timer) {
+        (void)esp_timer_stop(s_reconnect_timer);
+    }
     if (s_watchdog_timer) {
         (void)esp_timer_stop(s_watchdog_timer);
     }
     tud_disconnect();
+    xSemaphoreGive(mutex);
     vTaskDelay(pdMS_TO_TICKS(USB_REATTACH_LONG_MS));
 }
+
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+static void usb_video_visibility(bool visible)
+{
+    xSemaphoreTake(s_reconnect_mutex, portMAX_DELAY);
+    atomic_store(&s_video_requested, visible);
+    /* A scheduled reconnect can present the latest descriptor by itself. */
+    if (!atomic_load(&s_replugging) && atomic_load(&s_video_visible) != visible) {
+        reattach_locked(USB_REATTACH_LONG_MS);
+    }
+    xSemaphoreGive(s_reconnect_mutex);
+}
+#endif
 
 /* ---- serial port (CDC ACM) ---------------------------------------------- */
 /*
@@ -2282,10 +2393,21 @@ esp_err_t usb_hid_init(void)
     /* The speaker: not on the old-BIOS keyboard or a pad alone, which must
      * look like the real thing. */
     const bool with_audio = CFG_TUD_AUDIO && !s_kbd_only && s_pad != PAD_ALONE && kvm_setting_bool("aud_usb");
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    if (s_kbd_only || s_pad == PAD_ALONE) {
+        kvm_cap_report(KVM_CAP_USB_VIDEO, false, "USB video needs the composite USB mode");
+    }
+#endif
     build_config_descriptor(s_fs_config_descriptor, true, s_kbd_only, s_pad, with_msc, k_msc_iface_fs,
-                            sizeof(k_msc_iface_fs), with_cdc, with_audio);
+                            sizeof(k_msc_iface_fs), with_cdc, with_audio, true);
     build_config_descriptor(s_hs_config_descriptor, false, s_kbd_only, s_pad, with_msc, k_msc_iface_hs,
-                            sizeof(k_msc_iface_hs), with_cdc, with_audio);
+                            sizeof(k_msc_iface_hs), with_cdc, with_audio, true);
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    build_config_descriptor(s_fs_config_without_video, true, s_kbd_only, s_pad, with_msc, k_msc_iface_fs,
+                            sizeof(k_msc_iface_fs), with_cdc, with_audio, false);
+    build_config_descriptor(s_hs_config_without_video, false, s_kbd_only, s_pad, with_msc, k_msc_iface_hs,
+                            sizeof(k_msc_iface_hs), with_cdc, with_audio, false);
+#endif
     if (s_kbd_only) {
         ESP_LOGI(TAG, "USB functions: old BIOS mode - keyboard only, full speed");
     } else if (s_pad == PAD_ALONE) {
@@ -2348,9 +2470,22 @@ esp_err_t usb_hid_init(void)
     tusb_cfg.descriptor.high_speed_config = s_hs_config_descriptor;
 #endif
 
-    esp_err_t usb_err = tinyusb_driver_install(&tusb_cfg);
+    /* TinyUSB can attach before the reconnect timers exist. Serialize driver
+     * installation with restart so a live port can always be detached. */
+    SemaphoreHandle_t reconnect_mutex = xSemaphoreCreateMutexStatic(&s_reconnect_mutex_storage);
+    atomic_store(&s_reconnect_mutex, reconnect_mutex);
+    xSemaphoreTake(reconnect_mutex, portMAX_DELAY);
+    esp_err_t usb_err = atomic_load(&s_preparing_restart)
+        ? ESP_ERR_INVALID_STATE : tinyusb_driver_install(&tusb_cfg);
+    s_usb_driver_installed = usb_err == ESP_OK;
+    xSemaphoreGive(reconnect_mutex);
     kvm_cap_report(KVM_CAP_HID, usb_err == ESP_OK, "USB device stack failed to start (%s)",
                    esp_err_to_name(usb_err));
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    if (usb_err != ESP_OK) {
+        kvm_cap_report(KVM_CAP_USB_VIDEO, false, "USB device stack failed to start (%s)", esp_err_to_name(usb_err));
+    }
+#endif
     ESP_RETURN_ON_ERROR(usb_err, TAG, "tinyusb_driver_install");
     if (with_cdc) {
         const tinyusb_config_cdcacm_t acm = {
@@ -2377,11 +2512,25 @@ esp_err_t usb_hid_init(void)
      * again puts the host through a fresh enumeration, which is all a replug
      * ever did. Same trick as usb_hid_msc_set_type, for the same reason.
      */
+    xSemaphoreTake(reconnect_mutex, portMAX_DELAY);
+    if (atomic_load(&s_preparing_restart)) {
+        xSemaphoreGive(reconnect_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
     const esp_timer_create_args_t reconn_args = {.callback = reconnect_cb, .name = "usb_reconn"};
     (void)esp_timer_create(&reconn_args, &s_reconnect_timer);
     const esp_timer_create_args_t watch_args = {.callback = watchdog_cb, .name = "usb_watch"};
     (void)esp_timer_create(&watch_args, &s_watchdog_timer);
-
+    xSemaphoreGive(reconnect_mutex);
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    if (!s_kbd_only && s_pad != PAD_ALONE) {
+        if (s_reconnect_timer) {
+            usb_video_init(s_fs_config_without_video[4], usb_video_visibility);
+        } else {
+            kvm_cap_report(KVM_CAP_USB_VIDEO, false, "USB reattach timer unavailable");
+        }
+    }
+#endif
     tud_disconnect();
 #if (TUD_OPT_HIGH_SPEED)
     if (s_kbd_only || s_pad == PAD_ALONE) {
@@ -2393,8 +2542,9 @@ esp_err_t usb_hid_init(void)
     }
 #endif
     vTaskDelay(pdMS_TO_TICKS(USB_REATTACH_MS));
-    tud_connect();
-    ESP_LOGI(TAG, "re-attached to the target so it enumerates this boot");
+    if (finish_initial_reattach()) {
+        ESP_LOGI(TAG, "re-attached to the target so it enumerates this boot");
+    }
 
     /* And keep an eye on whether that took. */
     watchdog_arm();

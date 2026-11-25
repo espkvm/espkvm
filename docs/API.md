@@ -95,17 +95,17 @@ be given a URL.
 | `GET /api/v1/video/status` | resolution, frame rate, bitrate, encoder load, viewers, whether this mode can be read as text, `frames` / `frameAgeMs` (frames captured since boot and how long ago the last one came), `lagMs` (how long a frame waits and how long sending takes), `profile` (the active device profile's id), `hdd` (the target's HDD LED is lit or blinking; null when it is not wired), `kvmSwitch` (the KVM switch: `machine`, null while a network switch has not answered, `machines`, `busy`, and `error` when a network switch did not answer; null when there is none), and `csi` (the CSI link as last sampled: `clkHs`, `stop` for the data lanes, `stopClk`, `phyErr`, `ageMs`; see [TROUBLESHOOTING](TROUBLESHOOTING.md#the-hdmi-signal-is-there-but-no-picture)) |
 | `GET /api/v1/viewers` | the open consoles, one per control socket: `ip`, `control` (holds control), `viewOnly` (signed in as the viewer), `you` (the asker's own sign-in). A VNC client also has `kind: "vnc"`, `encrypted` and `seconds` (connected for) |
 | `POST /api/v1/video/reconnect` | offer the HDMI source a fresh start: a hotplug cycle, or a reset of the capture chip where there is no hotplug line. The target sees a monitor replugged |
-| `GET /api/v1/video/frame.jpg` | one frame as a JPEG, on either codec |
+| `GET /api/v1/video/frame.jpg` | one HDMI frame as a JPEG, on either codec. Returns 503 during USB screen sharing |
 | `GET /api/v1/video/timing?do=start\|read\|stop` | a log for measuring input-to-picture delay without the network in it, on the device's clock: `inputs` (`[us, fn, id, firstByte]` when a HID report left on USB) and `frames` (`[seq, landedUs, encodedUs, sentUs]`, where `seq` is the one in the `/video` header). It holds memory only between start and stop |
 | `GET /api/v1/screen/text` | the screen as characters when the target is in a text mode; 204 when it is showing a picture |
-| `GET /stream` | MJPEG as `multipart/x-mixed-replace`; answers 409 while H.264 is selected |
+| `GET /stream` | MJPEG as `multipart/x-mixed-replace`; answers 409 while H.264 is selected or USB screen sharing supplies the picture |
 | `POST /api/v1/video/webrtc` | WebRTC signaling: `{"sdp": offer}` in, `{"id", "sdp": answer}` out, no trickle. The offer must have one video m-line with H.264 packetization-mode 1 and a SHA-256 fingerprint. 409 while MJPEG runs or WebRTC is off, 503 when it is not ready. The session ends with the sign-in |
 | `DELETE /api/v1/video/webrtc?id=N` | close WebRTC session N; 204 |
 | `POST /api/v1/video/webrtc/sound?id=N&on=1` | the target's sound in WebRTC session N on (`on=0`: off). The offer has to carry an Opus audio m-line too; nothing is sent until this is on |
 
 ### VNC
 
-A VNC server for clients such as TigerVNC and Remmina, off by default: Settings, Video, VNC server. It needs a password of 1 to 8 printable ASCII characters first, a limit of VNC's own sign-in. The picture goes out as H.264 to a client that knows Open H.264 (encoding 50, TigerVNC 1.13 and later with H.264 built in), when the device streams H.264. Any other client must support Tight encoding and gets JPEG. RealVNC Viewer and the macOS screen sharing app support neither.
+A VNC server for clients such as TigerVNC and Remmina, off by default: Settings, Video, VNC server. It needs a password of 1 to 8 printable ASCII characters first, a limit of VNC's own sign-in. The picture goes out as H.264 to a client that knows Open H.264 (encoding 50, TigerVNC 1.13 and later with H.264 built in), when the device streams H.264. HDMI video also supports Tight/JPEG. USB screen sharing only supplies H.264, so a VNC client needs encoding 50 to see that picture. RealVNC Viewer and the macOS screen sharing app support neither.
 
 The server offers VeNCrypt (TLS with the device's certificate, then the VNC password) and plain VNC authentication. Plain VNC sends the picture and the keys unencrypted, so use it on your own network or over Tailscale. It does not take clients that come over the device's hotspot unless `vnc_hotspot` is on.
 

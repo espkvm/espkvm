@@ -1164,15 +1164,18 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
                     }
                     alive = fresh ? rfb_send_h264(&conn, generation, &width, &height, state.desktop_size, &h264)
                                   : send_empty_update(&conn, generation);
-                } else if (state.tight) {
+                } else if (state.tight && !capture_source_is_usb()) {
                     h264.started = false;
                     alive = fresh ? rfb_send_update(&conn, generation, &width, &height, state.desktop_size,
                                                     pending_incremental, &has_frame, &last_seq, &stream_open)
                                   : send_empty_update(&conn, generation);
                 } else {
-                    /* H.264 only, and the device makes JPEG: nothing to send.
-                     * Paced, or the client asks again at once, round after round. */
-                    if (!h264_only_warned) {
+                    if (stream_open) {
+                        capture_vnc_snapshot_end();
+                        stream_open = false;
+                    }
+                    /* The client and source have no encoding in common. */
+                    if (!state.tight && !h264_only_warned && !capture_source_is_usb()) {
                         ESP_LOGW(TAG, "client takes only H.264 and the video is MJPEG; switch the codec to H.264");
                         h264_only_warned = true;
                     }
@@ -1281,7 +1284,7 @@ static bool client_loop(int fd, uint32_t generation, const char *first_ip)
                 pending_waits = h264.started;
                 pending_seen = h264.last_seq;
                 pending_until = now + (int64_t)(h264.need_key ? VNC_KEYFRAME_WAIT_MS : VNC_READ_TIMEOUT_MS) * 1000;
-            } else if (state.tight) {
+            } else if (state.tight && !capture_source_is_usb()) {
                 pending_waits = incremental && has_frame;
                 pending_seen = last_seq;
                 pending_until = now + (int64_t)VNC_READ_TIMEOUT_MS * 1000;

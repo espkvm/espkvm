@@ -283,8 +283,31 @@ bool capture_vnc_snapshot_wanted(void)
     return wanted;
 }
 
+void capture_snapshot_usb_started(void)
+{
+    /* No raw frame will follow the source switch to satisfy these waits. */
+    portENTER_CRITICAL(&s_mu);
+    const bool snapshot = s_wanted;
+    const bool stream = s_stream_active && s_stream_wanted;
+    if (snapshot) {
+        s_wanted = false;
+        s_err = ESP_ERR_NOT_SUPPORTED;
+    }
+    if (stream) {
+        s_stream_wanted = false;
+        s_stream_ready = -1;
+        s_stream_err = ESP_ERR_NOT_SUPPORTED;
+    }
+    portEXIT_CRITICAL(&s_mu);
+    if (snapshot) xSemaphoreGive(s_done);
+    if (stream) xSemaphoreGive(s_stream_done);
+}
+
 esp_err_t capture_vnc_snapshot_begin(void)
 {
+    if (capture_source_is_usb()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     stream_sync_init();
     if (!s_stream_mu || !s_stream_done) {
         return ESP_ERR_NO_MEM;
@@ -326,6 +349,10 @@ esp_err_t capture_vnc_snapshot_next(const uint8_t **jpeg, size_t *jpeg_len, uint
     const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
     for (;;) {
         portENTER_CRITICAL(&s_mu);
+        if (capture_source_is_usb()) {
+            portEXIT_CRITICAL(&s_mu);
+            return ESP_ERR_NOT_SUPPORTED;
+        }
         if (!s_stream_active) {
             portEXIT_CRITICAL(&s_mu);
             return ESP_ERR_INVALID_STATE;
@@ -466,6 +493,9 @@ esp_err_t capture_snapshot_jpeg(uint8_t **out, size_t *out_len, uint32_t timeout
     }
     *out = NULL;
     *out_len = 0;
+    if (capture_source_is_usb()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     kvm_video_status_t vs;
     capture_status_get(&vs);
     if (!vs.signal) {
@@ -488,6 +518,11 @@ esp_err_t capture_snapshot_jpeg(uint8_t **out, size_t *out_len, uint32_t timeout
     }
     (void)xSemaphoreTake(s_done, 0); /* a late answer to an abandoned request */
     portENTER_CRITICAL(&s_mu);
+    if (capture_source_is_usb()) {
+        portEXIT_CRITICAL(&s_mu);
+        xSemaphoreGive(s_one);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     s_wanted = true;
     portEXIT_CRITICAL(&s_mu);
     /* The capture loop only reaches a frame while somebody is watching. */

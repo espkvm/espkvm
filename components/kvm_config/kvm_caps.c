@@ -109,6 +109,14 @@ static const cap_desc_t s_desc[KVM_CAP_COUNT] = {
                          false,
 #endif
                          "spk_knock"},
+    [KVM_CAP_USB_VIDEO] = {"usb_video",
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+                           true,
+#else
+                           false,
+#endif
+                           NULL},
+    [KVM_CAP_LOCAL_FRAMES] = {"local_frames", true, NULL},
 };
 
 typedef struct {

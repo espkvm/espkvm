@@ -32,6 +32,7 @@
 #include "esp_heap_caps.h"
 #include "kvm_bridge.h"
 #include "video_frame.h"
+#include "usb_video.h"
 
 /*
  * Encoding a frame while it is still coming in (rev 3.x, H.264).
@@ -345,6 +346,22 @@ void capture_loop_run(capture_ctx_t *c)
 
     while (1) {
         esp_task_wdt_reset();
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+        const bool wants_usb = capture_usb_wanted();
+        const bool has_usb = codec == capture_codec_usb();
+        if (wants_usb != has_usb && esp_timer_get_time() >= switch_retry_us) {
+            codec = codec_switch(codec, wants_usb ? capture_codec_usb() : codec_wanted());
+            force_publish = true;
+            if ((codec == capture_codec_usb()) != wants_usb) {
+                switch_retry_us = esp_timer_get_time() + 2000000;
+            }
+        }
+        if (codec == capture_codec_usb()) {
+            codec->encode(c, NULL, false);
+            usb_video_wait();
+            continue;
+        }
+#endif
         /*
          * No codec is open: every path out of here closed one and could not
          * open another, which on this device means memory. Keep the loop alive

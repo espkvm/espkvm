@@ -11,6 +11,7 @@
 #include "esp_cam_ctlr_csi.h"
 #include "kvm_bridge.h"
 #include "video_frame.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -174,6 +175,7 @@ void capture_thumb_idle(capture_ctx_t *c);
 /* A screenshot asked for while H.264 runs is encoded from this frame. Capture
  * task only; costs nothing unless one is waiting. See capture_snapshot.c. */
 void capture_snapshot_tick(capture_ctx_t *c, const void *frame);
+void capture_snapshot_usb_started(void);
 bool capture_vnc_snapshot_wanted(void);
 
 /** Is a still picture waiting to be taken from the next frame? */
@@ -316,6 +318,13 @@ typedef struct {
 } capture_codec_t;
 
 const capture_codec_t *capture_codec_mjpeg(void);
+
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+const capture_codec_t *capture_codec_usb(void);
+bool capture_usb_wanted(void);
+bool capture_usb_running(void);
+void capture_usb_update_status(kvm_video_status_t *status);
+#endif
 
 /** Report the MJPEG capability at start-up (opens and frees the JPEG engine). */
 void capture_mjpeg_probe(void);

@@ -12,4 +12,5 @@ idf_component_register(
         esp_tinyusb
         esp_timer
         kvm_timing
+        kvm_usb_video
 )
