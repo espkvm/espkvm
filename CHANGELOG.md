@@ -4,6 +4,10 @@ All notable changes to ESP-KVM are recorded here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+- USB screen sharing with a paired OS Services sender. The wired JetKVM Mini builds it in by default, and other boards can opt in under ESP-KVM > Features. Sharing starts disabled, and enabling it allocates the receiver task and video buffers. Changing the setting briefly reconnects the target's USB devices to add or remove the video interface. The target may ask to allow the new configuration. Video settings show the pairing fingerprint and available displays. The console uses the USB picture while sharing and returns to HDMI when sharing stops. Sharing works alongside ESP-KVM Tools over USB serial. Senders that support capture bounds can keep the desktop at its current resolution. The receiver checks H.264 stream parameters against its supported formats and granted dimensions. Screen text, screen-area readings, MJPEG, and device-side JPEG screenshots are unavailable during USB sharing. VNC clients need H.264 support to view the USB picture.
+
 ## [0.91.5] - 2026-11-24
 
 ### Changed

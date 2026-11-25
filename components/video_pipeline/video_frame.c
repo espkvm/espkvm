@@ -82,6 +82,15 @@ bool video_frame_store_ready(void)
     return s.mutex && s.ready && s.payload != VIDEO_PAYLOAD_NONE;
 }
 
+void video_frame_invalidate(void)
+{
+    if (s.mutex && xSemaphoreTake(s.mutex, portMAX_DELAY) == pdTRUE) {
+        s.front = -1;
+        s.seq++;
+        xSemaphoreGive(s.mutex);
+    }
+}
+
 void video_frame_install(video_payload_t payload, uint8_t *const *bufs, int count, size_t cap)
 {
     if (!s.mutex || count <= 0 || count > VIDEO_SLOT_COUNT) {

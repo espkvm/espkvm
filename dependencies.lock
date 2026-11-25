@@ -67,6 +67,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 2.0.4
+  espressif/libsodium:
+    component_hash: d4066b373fc6d4c5196db42aeea7faef4ac7f3080af96c2b74e2476c08b78dc1
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.22~1
   espressif/mdns:
     component_hash: 3ba256ac95e07c274be53cbd73f06cb846c403b61e8fbdf1be57bdb79db7a63e
     dependencies:
@@ -120,11 +130,12 @@ direct_dependencies:
 - espressif/esp_codec_dev
 - espressif/esp_h264
 - espressif/esp_lcd_gc9a01
+- espressif/libsodium
 - espressif/mdns
 - espressif/mqtt
 - espressif/qrcode
 - espressif/tinyusb
 - idf
-manifest_hash: def21d59a31b12419b84892d474eca6ff7eda97b9a89b8972621849a74449cdc
+manifest_hash: 3823921d03c3b52961bef666ed9abb5bc92bfa2890e82c2bf60e0b176d152df8
 target: esp32p4
 version: 3.0.0

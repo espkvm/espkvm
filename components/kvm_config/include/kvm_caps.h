@@ -58,6 +58,8 @@ typedef enum {
                              (ATX, a UART, a clock module, audio); a closed box such as
                              the JetKVM Mini has none (Kconfig KVM_BOARD_NO_FREE_GPIO) */
     KVM_CAP_SPEAKER,    /**< the board's own speaker: its ES8311 codec answered on the bus */
+    KVM_CAP_USB_VIDEO,  /**< the target can send USB screen video */
+    KVM_CAP_LOCAL_FRAMES, /**< the active source can provide raw frames to local consumers */
     KVM_CAP_COUNT,
 } kvm_cap_t;
 

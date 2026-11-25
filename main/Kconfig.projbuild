@@ -5,6 +5,14 @@ menu "ESP-KVM"
     menu "Features"
         comment "Disabled features cost no flash and no RAM."
 
+        config KVM_ENABLE_USB_VIDEO
+            bool "USB screen sharing (IP-KVM OS Services)"
+            default n
+            help
+                Receive target-encoded H.264 over the USB device port. Sharing
+                starts off after boot and can be enabled in Video settings.
+                Screen sharing can run alongside ESP-KVM Tools over USB serial.
+
         config KVM_ENABLE_H264
             bool "H.264 video encoding (hardware)"
             default y

@@ -252,6 +252,10 @@ jobs:
       - name: Report whether the committed console was stale
         run: git diff --stat -- components/kvm_web/assets || true
 
+      - name: Test the console
+        if: matrix.board.id == 'jetkvm-mini'
+        run: make test-console
+
       # A tag is the version. Without this the firmware would report the commit
       # it was built from, which tells an operator nothing about what to expect.
       - name: Take the version from the tag
@@ -280,6 +284,10 @@ jobs:
             riscv32-esp-elf-objcopy --strip-debug
             ${{ matrix.board.build_dir }}/espkvm.elf
             ${{ matrix.board.build_dir }}/espkvm-stripped.elf
+
+      - name: Test USB video on the host
+        if: matrix.board.id == 'jetkvm-mini'
+        run: make test-usb-video test-usb-video-transport
 
       - name: Collect what a person or a device might want
         run: |

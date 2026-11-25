@@ -51,6 +51,8 @@ enum {
     /* On /video: "frame <seq> arrived". A client that sends these gets at most
      * VIDEO_ACK_WINDOW frames ahead of its acks instead of a full TCP buffer. */
     WS_C2D_VIDEO_ACK = 0x09,
+    /* On /ws: known revision:u32, optionally enabled:u8 and display:u8. */
+    WS_C2D_USB_VIDEO = 0x0a,
 
     WS_D2C_STATUS = 0x81,
     WS_D2C_PONG = 0x82,
@@ -60,6 +62,7 @@ enum {
      * Older firmware reads any later message as a keyframe request, so a
      * client acks only after it has seen this. */
     WS_D2C_VIDEO_ACKS = 0x85,
+    WS_D2C_USB_VIDEO = 0x86,
 };
 
 /* WS_D2C_CONTROL states. */

@@ -88,6 +88,13 @@ Run `idf.py menuconfig` and open **ESP-KVM**:
 - TC358743 RESETN GPIO (`-1` if it is not wired to a GPIO)
 - TC358743 reference clock - the crystal on the capture board (27 MHz on the C790)
 
+**Features**
+- USB screen sharing (`CONFIG_KVM_ENABLE_USB_VIDEO`) uses the USB device port to
+  receive H.264 from a paired IP-KVM OS Services sender. The wired JetKVM Mini
+  profile includes it by default. For another board, enable it in the board
+  overlay and use the normal keyboard and mouse USB profile with USB serial
+  disabled. After boot, turn on **Allow USB video** in **Settings > Video**.
+
 **Network** (only when Ethernet is enabled)
 - SMI MDC / MDIO, PHY address, PHY reset GPIO
 - RMII REFCLK, TX_EN, TXD0/1, CRS_DV, RXD0/1

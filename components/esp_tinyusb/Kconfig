@@ -313,6 +313,7 @@ menu "TinyUSB Stack"
 
     menu "Vendor Specific Interface"
         config TINYUSB_VENDOR_COUNT
+            depends on !KVM_ENABLE_USB_VIDEO
             int "TinyUSB Vendor specific interfaces count"
             default 0
             range 0 2

@@ -33,6 +33,12 @@ __attribute__((weak)) void kvm_usb_host_probe(int kind, uint16_t index)
     (void)index;
 }
 
+/* ESP-KVM may select a smaller, immutable configuration before reconnecting. */
+__attribute__((weak)) const uint8_t *kvm_usb_config_descriptor(const uint8_t *descriptor)
+{
+    return descriptor;
+}
+
 // =============================================================================
 // STRUCTS
 // =============================================================================
@@ -84,9 +90,7 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
     kvm_usb_host_probe(1, index);
     (void)index; // Unused, this driver supports only 1 configuration
     // Return configuration descriptor based on Host speed
-    return (TUSB_SPEED_HIGH == tud_speed_get())
-           ? s_desc_cfg.hs_cfg
-           : s_desc_cfg.fs_cfg;
+    return kvm_usb_config_descriptor(TUSB_SPEED_HIGH == tud_speed_get() ? s_desc_cfg.hs_cfg : s_desc_cfg.fs_cfg);
 }
 
 #if (TUD_OPT_HIGH_SPEED)
@@ -114,9 +118,7 @@ uint8_t const *tud_descriptor_other_speed_configuration_cb(uint8_t index)
         return NULL;
     }
 
-    const uint8_t *other_speed = (TUSB_SPEED_HIGH == tud_speed_get())
-                                 ? s_desc_cfg.fs_cfg
-                                 : s_desc_cfg.hs_cfg;
+    const uint8_t *other_speed = kvm_usb_config_descriptor(TUSB_SPEED_HIGH == tud_speed_get() ? s_desc_cfg.fs_cfg : s_desc_cfg.hs_cfg);
 
     memcpy(s_desc_cfg.other_speed,
            other_speed,

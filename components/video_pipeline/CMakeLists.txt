@@ -6,6 +6,7 @@ idf_component_register(
         "capture_yuv_swap.c"
         "capture_hw.c"
         "capture_loop.c"
+        "capture_usb.c"
         "capture_mjpeg.c"
         "capture_h264.c"
         "capture_screentext.c"
@@ -25,6 +26,7 @@ idf_component_register(
         kvm_config
     PRIV_REQUIRES
         kvm_timing
+        kvm_usb_video
         # The capture path never names a bridge driver - it asks kvm_bridge which
         # one answered - but a driver still has to be in the image to register
         # itself, so the ones this firmware ships are required here.

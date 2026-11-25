@@ -105,6 +105,7 @@ void capture_reserve_early(void);
 void capture_start(void);
 
 void capture_status_get(kvm_video_status_t *out);
+bool capture_source_is_usb(void);
 
 /** Raw form of the two counters above: frames since boot, esp_timer time of the last. */
 void capture_frame_counter(uint32_t *frames, int64_t *last_us);
@@ -136,10 +137,13 @@ bool capture_csi_link_last(capture_csi_link_t *out, uint32_t *age_ms);
  */
 esp_err_t capture_reconnect_source(void);
 
+#define CAPTURE_USB_JPEG_UNAVAILABLE "Screenshots are unavailable during USB screen sharing."
+#define CAPTURE_USB_LOCAL_FRAMES_UNAVAILABLE "Screen analysis and MJPEG are unavailable during USB screen sharing."
+
 /**
- * The screen as a JPEG, on either codec. On success @p out is a PSRAM buffer the
- * caller frees. ESP_ERR_NOT_FOUND when there is no signal, ESP_ERR_TIMEOUT when
- * no frame came in @p timeout_ms (a device too hot to encode sends none).
+ * The HDMI screen as a JPEG, on either codec. On success @p out is a PSRAM
+ * buffer the caller frees. ESP_ERR_NOT_SUPPORTED during USB screen sharing,
+ * ESP_ERR_NOT_FOUND with no signal, ESP_ERR_TIMEOUT when no frame came in time.
  */
 esp_err_t capture_snapshot_jpeg(uint8_t **out, size_t *out_len, uint32_t timeout_ms);
 

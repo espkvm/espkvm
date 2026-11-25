@@ -179,6 +179,9 @@ esp_err_t api_video_frame_get(httpd_req_t *req)
     uint8_t *jpeg = NULL;
     size_t len = 0;
     const esp_err_t err = capture_snapshot_jpeg(&jpeg, &len, 3000);
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        return send_json_error(req, "503 Service Unavailable", CAPTURE_USB_JPEG_UNAVAILABLE);
+    }
     if (err == ESP_ERR_NOT_FOUND) {
         return send_json_error(req, "503 Service Unavailable", "no video signal");
     }

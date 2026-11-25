@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 
 #include "capture_priv.h"
+#include "kvm_caps.h"
 #include "screentext_store.h"
 #include "esp_task_wdt.h"
 
@@ -69,9 +70,16 @@ void capture_status_set_signal(bool present, uint8_t sys_status)
         s_status.input_hz = 0;
         s_status.too_fast = false;
         s_status.audio_hz = 0;
-        s_status.fps_x100 = 0;
-        s_status.kbps = 0;
-        s_status.skipped_fps_x100 = 0;
+        /* The HDMI poll still runs during USB video so fallback knows whether
+         * there is a signal. Its loss does not clear the USB publish window. */
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+        if (!capture_usb_running())
+#endif
+        {
+            s_status.fps_x100 = 0;
+            s_status.kbps = 0;
+            s_status.skipped_fps_x100 = 0;
+        }
     }
     taskEXIT_CRITICAL(&s_mu);
 }
@@ -251,6 +259,15 @@ bool capture_release_memory(bool failed)
     return true;
 }
 
+bool capture_source_is_usb(void)
+{
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    return capture_usb_running();
+#else
+    return false;
+#endif
+}
+
 void capture_status_get(kvm_video_status_t *out)
 {
     if (!out) {
@@ -269,6 +286,9 @@ void capture_status_get(kvm_video_status_t *out)
     const int64_t age = last_us ? (esp_timer_get_time() - last_us) / 1000 : -1;
     out->h264_cpu = CAPTURE_YUV_SWAP;
     out->frame_age_ms = age < 0 ? UINT32_MAX : age > UINT32_MAX - 1 ? UINT32_MAX - 1 : (uint32_t)age;
+#if CONFIG_KVM_ENABLE_USB_VIDEO
+    capture_usb_update_status(out);
+#endif
 }
 
 static bool s_probed;
@@ -343,6 +363,7 @@ void capture_start(void)
     screentext_store_init();
     capture_screentext_init();
     capture_mjpeg_bind_settings();
+    kvm_cap_report(KVM_CAP_LOCAL_FRAMES, true, NULL);
     /* Peak 1.4 KB measured; the rest was internal RAM for nothing. */
     const uint32_t cam_stack = 6144;
     xTaskCreatePinnedToCore(camera_task, "cam", cam_stack, NULL, 5, NULL, 0);

@@ -1179,6 +1179,9 @@ esp_err_t stream_get(httpd_req_t *req)
     if (video_frame_payload() != VIDEO_PAYLOAD_JPEG) {
         /* Said plainly rather than by holding a connection open that will never
          * carry a frame: this endpoint is images only. */
+        if (capture_source_is_usb()) {
+            return httpd_resp_send_custom_err(req, "409 Conflict", CAPTURE_USB_LOCAL_FRAMES_UNAVAILABLE);
+        }
         return httpd_resp_send_custom_err(req, "409 Conflict",
                                           "the device is encoding H.264; use the /video "
                                           "WebSocket or select the MJPEG codec");

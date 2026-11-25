@@ -54,6 +54,7 @@ idf_component_register(
         video_pipeline
         kvm_screentext
         kvm_hid
+        kvm_usb_video
         kvm_config
         kvm_regions
         kvm_storage
