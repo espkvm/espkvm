@@ -47,6 +47,8 @@ const httpd_uri_t *locale_api_routes(size_t *count);
 const httpd_uri_t *regions_api_routes(size_t *count);
 /** The target's serial console: the /serial WebSocket and its REST. See serial_api.c. */
 const httpd_uri_t *serial_api_routes(size_t *count);
+/* redfish_api.c: power and the virtual drive for Redfish tools. */
+const httpd_uri_t *redfish_api_routes(size_t *count);
 /* tools_api.c: ESP-KVM Tools on the target. */
 const httpd_uri_t *tools_api_routes(size_t *count);
 /**

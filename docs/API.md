@@ -185,6 +185,32 @@ These need the agent API, and answer 409 when no target is attached.
 
 What a webhook receives is in [NOTIFICATIONS.md](NOTIFICATIONS.md).
 
+## Redfish
+
+A small part of [Redfish](https://www.dmtf.org/standards/redfish), the server-management API of iDRAC, iLO and other BMCs, so tools that speak it can drive the target. Checked with redfishtool and with sushy, the client of OpenStack Ironic and Metal3. Off by default: Settings, Security, Redfish. It needs its own password (`redfish_pass`, written but never read back). Tools sign in with HTTP basic auth, any user name and that password. Failed attempts count toward the console's lockout. The Redfish password opens power and virtual media only.
+
+| | |
+|---|---|
+| `GET /redfish/v1` | the service root, open without a password |
+| `GET /redfish/v1/Systems/1` | the target. `PowerState` comes from the power LED when one is wired, otherwise `On` while HDMI has a picture and `null` without one |
+| `POST /redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | `{"ResetType": ...}`. With ATX wiring: `On`, `ForceOff` (holds the button), `GracefulShutdown` and `PushPowerButton` (press it), `ForceRestart` (the reset button). Without it only `On`, which sends Wake-on-LAN and the USB wake signal |
+| `GET /redfish/v1/Managers/1` | the device itself, with its firmware version |
+| `GET /redfish/v1/Managers/1/VirtualMedia/Cd` | the virtual drive. For an image at a URL, `Image` shows it without its query and password |
+| `POST .../VirtualMedia/Cd/Actions/VirtualMedia.InsertMedia` | `{"Image": "https://..."}`: the console's image at a URL, booted straight from the web server. Virtual media must be on (Settings, Storage) |
+| `POST .../VirtualMedia/Cd/Actions/VirtualMedia.EjectMedia` | empties the drive |
+| `PATCH /redfish/v1/Managers/1/VirtualMedia/Cd` | `{"Image": url}` inserts, `{"Image": null}` or `{"Inserted": false}` ejects, for clients that patch rather than call the actions |
+
+POST and PATCH need `Content-Type: application/json`. A web server that wants a password takes it in the URL, `https://user:pass@host/image.iso`. Answers to actions are `204 No Content`, errors are Redfish error objects.
+
+```
+curl -k -u admin:REDFISH_PASSWORD -H 'Content-Type: application/json' \
+  -d '{"Image":"https://example.com/debian.iso"}' \
+  https://espkvm.local/redfish/v1/Managers/1/VirtualMedia/Cd/Actions/VirtualMedia.InsertMedia
+curl -k -u admin:REDFISH_PASSWORD -H 'Content-Type: application/json' \
+  -d '{"ResetType":"ForceRestart"}' \
+  https://espkvm.local/redfish/v1/Systems/1/Actions/ComputerSystem.Reset
+```
+
 ## WebSockets
 
 Four sockets, all behind the session cookie. All numbers are little-endian.

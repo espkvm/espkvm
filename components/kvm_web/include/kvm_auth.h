@@ -29,6 +29,8 @@ esp_err_t kvm_auth_init(void);
 void kvm_auth_attempt_wait(void);
 void kvm_auth_attempt_failed(void);
 void kvm_auth_attempt_succeeded(void);
+/** True while the lockout runs: for logins on the web server's own task, which may not wait. */
+bool kvm_auth_attempt_locked(void);
 
 /**
  * How the start-up reset window is going, for whatever the board can show it

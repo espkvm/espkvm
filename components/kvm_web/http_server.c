@@ -615,7 +615,7 @@ httpd_handle_t http_server_start(void)
      * The check below now logs a failed registration rather than swallowing it, so
      * the next person gets a line instead of a mystery - but keep headroom anyway.
      */
-    cfg.max_uri_handlers = 144;
+    cfg.max_uri_handlers = 148;
 
     if (kvm_auth_init() != ESP_OK) {
         /* Without a working password store the only safe answer is not to
@@ -876,6 +876,11 @@ httpd_handle_t http_server_start(void)
     const httpd_uri_t *tools_uris = tools_api_routes(&n_tools);
     for (size_t i = 0; i < n_tools; i++) {
         register_route(h, &tools_uris[i]);
+    }
+    size_t n_redfish = 0;
+    const httpd_uri_t *redfish_uris = redfish_api_routes(&n_redfish);
+    for (size_t i = 0; i < n_redfish; i++) {
+        register_route(h, &redfish_uris[i]);
     }
     if (audio_api_init() != ESP_OK) {
         ESP_LOGW(TAG, "audio socket: no memory for its pump");

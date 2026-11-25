@@ -27,6 +27,7 @@ idf_component_register(
         "regions_api.c"
         "serial_api.c"
         "tools_api.c"
+        "redfish_api.c"
         "netlog_api.c"
         "audio_api.c"
         "url_fetch.c"

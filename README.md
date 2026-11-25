@@ -82,6 +82,7 @@ Useful for what it does today, and honest about the rest.
 | A command palette (Ctrl+K), your own buttons on the bar | new; the palette also finds every setting by name |
 | Notifications to Telegram, ntfy, a webhook or the browser, with a screenshot | works |
 | Power, reset and Wake-on-LAN, the power and disk lights | works; power needs an optocoupler or a relay |
+| Redfish for server tools such as redfishtool and OpenStack Ironic: power and booting an image at a URL | new, off by default |
 | A KVM switch in front of several machines, picked from the console | new; one GPIO to the switch's button, or a TESmart switch over the network |
 | HDMI-CEC remote | works; on TC358743 boards |
 | A gamepad for a console | works on a Switch |

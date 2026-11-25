@@ -176,6 +176,14 @@ void kvm_auth_attempt_wait(void)
     }
 }
 
+bool kvm_auth_attempt_locked(void)
+{
+    lock();
+    const bool locked = s_locked_until_us > esp_timer_get_time();
+    unlock();
+    return locked;
+}
+
 static void note_failure(void);
 
 void kvm_auth_attempt_failed(void)

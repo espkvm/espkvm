@@ -70,7 +70,9 @@ static const char *const s_up_ev_labels[] = {
 static const char *const s_rec_subs_choices[] = {"off", "keys", "everything"};
 static const char *const s_edid_choices[] = {"full", "1080p30", "720p", "1024x768", "480p", "1080p50"};
 static const char *const s_mouse_choices[] = {"absolute", "relative"};
-static const char *const s_engage_choices[] = {"click", "hover"};
+/* "anywhere" went on the end: the value is stored as an index. */
+static const char *const s_engage_choices[] = {"click", "hover", "anywhere"};
+static const char *const s_engage_labels[] = {"Click", "Hover", "Click anywhere"};
 static const char *const s_cursor_choices[] = {"arrow", "dot", "hidden"};
 /* Must match the layout ids in web/src/layouts.ts. New ones go on the end:
    the value is stored as an index, so reordering would move everyone's setting. */
@@ -517,12 +519,14 @@ static const kvm_setting_t s_settings[] = {
     {
         .key = "ptr_engage", .section = "input", .group = "Pointer", .type = KVM_VT_ENUM,
         .title = "Start controlling on",
-        .help = "\"Click\" waits for a click on the video before input reaches the "
-                "target, and stops again on Esc or a click outside; the engaging click "
-                "is still delivered. \"Hover\" tracks the pointer as soon as it is over "
-                "the video, the way a remote desktop behaves. Keyboard input always "
-                "requires a click first.",
-        .min = 0, .max = ENUM_MAX(s_engage_choices), .def = 0, .choices = s_engage_choices, .requires_cap = KVM_CAP_HID,
+        .help = "\"Click\" waits for a click on the button over the picture before input "
+                "reaches the target. \"Click anywhere\" takes any click on the picture. "
+                "Either way the first click only moves the pointer there, and Esc or a "
+                "click outside the picture stops. \"Hover\" follows the pointer as soon "
+                "as it is over the picture, the way a remote desktop does, and the "
+                "keyboard still needs one click.",
+        .min = 0, .max = ENUM_MAX(s_engage_choices), .def = 0, .choices = s_engage_choices,
+        .labels = s_engage_labels, .requires_cap = KVM_CAP_HID,
         .flags = KVM_SF_PROFILE,
     },
     {
@@ -1795,6 +1799,23 @@ static const kvm_setting_t s_settings[] = {
                 "control the console already has, over a simpler interface, so turn "
                 "it on only when you mean to hand that control to a program.",
         .def = 0, .requires_cap = -1,
+    },
+    {
+        .key = "redfish_enable", .section = "security", .group = "Redfish", .type = KVM_VT_BOOL,
+        .title = "Redfish",
+        .help = "The server-management API of iDRAC and iLO, at /redfish/v1, for tools such as "
+                "redfishtool and OpenStack Ironic. It can power the target on and off through the ATX "
+                "wiring (without it, only wake it) and boot it from an image at a URL. Tools "
+                "sign in with any user name and the Redfish password below.",
+        .def = 0, .requires_cap = -1,
+    },
+    {
+        .key = "redfish_pass", .section = "security", .group = "Redfish", .type = KVM_VT_STR,
+        .title = "Redfish password",
+        .help = "Its own password, not the console's: it opens power and virtual media only. "
+                "Use a long random one. It is never shown again.",
+        .def_str = "", .max_len = 64, .requires_cap = -1, .flags = KVM_SF_SECRET | KVM_SF_ASCII,
+        .visible_key = "redfish_enable", .visible_val = 1,
     },
 
     /* ---- system --------------------------------------------------------- */
